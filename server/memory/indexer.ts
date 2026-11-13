@@ -52,6 +52,11 @@ export interface MemoryIndexer {
   start(): void
   /** A transcript was written: run the next pass sooner. */
   hint(): void
+  /**
+   * The embedding configuration was changed: use it from now on. A run still
+   * embedding for the endpoint it replaced is cancelled, and a pass follows.
+   */
+  reloadEmbeddings(): Promise<void>
   stop(): Promise<void>
   /** The open store; null before the first pass opens it, after `stop`, or when the store cannot work here. */
   store(): MemoryStore | null
@@ -116,6 +121,8 @@ export function createMemoryIndexer(options: MemoryIndexerOptions): MemoryIndexe
   let outage: { failures: number; retryAt: number; error: string } | null = null
   let configError: string | null = null
   let embedMoreSoon = false
+  /** Cancels the embedding run under way, which belongs to the embedder it started with. */
+  let embedRun: AbortController | null = null
 
   function scheduleAt(at: number): void {
     if (stopped || at >= timerAt) return
@@ -231,27 +238,39 @@ export function createMemoryIndexer(options: MemoryIndexerOptions): MemoryIndexe
     await embed(memory)
   }
 
+  /** Read the embedding configuration again; a change replaces the embedder and cancels a run made for the old one. */
+  async function refreshEmbedder(): Promise<void> {
+    const config = await options.readEmbeddingConfig()
+    if (config.stamp === configStamp) return
+    configStamp = config.stamp
+    outage = null
+    configError = null
+    try {
+      embedder = options.createEmbedder(config.text)
+    } catch (error) {
+      embedder = null
+      configError = error instanceof Error ? error.message : String(error)
+      warn(`[memory] the embedding configuration is not usable: ${configError}`)
+    }
+    embedRun?.abort()
+  }
+
   async function embed(memory: MemoryStore): Promise<void> {
     embedMoreSoon = false
-    const config = await options.readEmbeddingConfig()
-    if (config.stamp !== configStamp) {
-      configStamp = config.stamp
-      outage = null
-      configError = null
-      try {
-        embedder = options.createEmbedder(config.text)
-      } catch (error) {
-        embedder = null
-        configError = error instanceof Error ? error.message : String(error)
-        warn(`[memory] the embedding configuration is not usable: ${configError}`)
-      }
-    }
+    await refreshEmbedder()
     if (!embedder) {
       pendingEmbeddings = 0
       return
     }
     if (outage && Date.now() < outage.retryAt) return
-    const result = await embedder.embedPending(memory, controller.signal)
+    const run = embedRun = new AbortController()
+    const result = await embedder.embedPending(memory, AbortSignal.any([controller.signal, run.signal]))
+    embedRun = null
+    if (run.signal.aborted) {
+      // Cancelled for a new configuration, not a failure of the old endpoint: the next pass embeds with the new one.
+      embedMoreSoon = !stopped
+      return
+    }
     pendingEmbeddings = result.remaining
     if (result.error) {
       if (!outage) warn(`[memory] the embedding endpoint is unavailable (${result.error}); retrying with back-off`)
@@ -278,6 +297,12 @@ export function createMemoryIndexer(options: MemoryIndexerOptions): MemoryIndexe
       }
       // Before the first pass the start timer is already due.
       if (lastPassEnd) scheduleAt(Math.max(Date.now(), lastPassEnd + hintDelay()))
+    },
+    async reloadEmbeddings() {
+      if (stopped || unavailable) return
+      await refreshEmbedder()
+      if (running) rerun = true
+      else scheduleAt(Date.now())
     },
     async stop() {
       if (stopped) return

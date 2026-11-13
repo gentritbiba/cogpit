@@ -4,16 +4,16 @@
  */
 import { mkdir, readFile } from "node:fs/promises"
 import { join } from "node:path"
-import { sameEmbeddingOrigin, type EmbeddingSettingsInput, type EmbeddingSettingsReport, type EmbeddingTestResult } from "../../shared/contracts/memoryEmbeddings"
+import type { EmbeddingSettingsInput, EmbeddingSettingsReport, EmbeddingTestResult } from "../../shared/contracts/memoryEmbeddings"
 import {
   createEmbeddingClient,
   DEFAULT_DIMENSIONS,
   DEFAULT_MIN_SCORE,
+  embeddingEnvOverrides,
   embeddingFingerprint,
   MEMORY_CONFIG_FILE,
   parseEmbeddingConfig,
   updateEmbeddingConfigText,
-  validateEmbeddingConfig,
   type EmbeddingConfig,
   type FetchLike,
 } from "../../shared/memory/embeddings"
@@ -36,54 +36,55 @@ async function readConfigText(dir: string): Promise<string | null> {
   }
 }
 
-/**
- * The section the form describes. A key that was not typed again is the saved
- * one only while the endpoint stays on its origin, so the saved key is never
- * sent to an address it was not entered for.
- */
-function sectionFor(input: EmbeddingSettingsInput, saved: EmbeddingConfig | null): Partial<EmbeddingConfig> {
-  const keptKey = saved && sameEmbeddingOrigin(saved.url, input.url) ? saved.apiKey : undefined
+function unreadable(error: unknown): string {
+  return `config.json could not be read: ${error instanceof Error ? error.message : String(error)}`
+}
+
+/** The form as a change to the file's section; a key that was not typed is left to the file. */
+function changesFor(input: EmbeddingSettingsInput): Partial<EmbeddingConfig> {
   return {
     url: input.url,
     model: input.model,
-    apiKey: input.apiKey ?? keptKey ?? "",
     queryPrefix: input.queryPrefix ?? "",
+    ...(input.apiKey === undefined ? {} : { apiKey: input.apiKey }),
     ...(input.dimensions === undefined ? {} : { dimensions: input.dimensions }),
     ...(input.minScore === undefined ? {} : { minScore: input.minScore }),
   }
 }
 
-/** The file's own section, without environment overrides: what a save changes. */
-function savedSection(text: string | null): EmbeddingConfig | null {
-  return parseEmbeddingConfig(text, {}).config
-}
-
+/**
+ * The settings the file holds, which are what the form edits, with progress
+ * and failures for the configuration in effect, environment overrides included.
+ */
 export async function embeddingSettingsReport(
   dir: string,
   indexer: Pick<MemoryIndexer, "store" | "embeddingError"> | null,
   env: Env = process.env,
 ): Promise<EmbeddingSettingsReport> {
-  let parsed: ReturnType<typeof parseEmbeddingConfig>
+  let saved: ReturnType<typeof parseEmbeddingConfig>
+  let effective: ReturnType<typeof parseEmbeddingConfig>
   try {
-    parsed = parseEmbeddingConfig(await readConfigText(dir), env)
+    const text = await readConfigText(dir)
+    saved = parseEmbeddingConfig(text, {})
+    effective = parseEmbeddingConfig(text, env)
   } catch (error) {
-    parsed = { config: null, error: `config.json could not be read: ${error instanceof Error ? error.message : String(error)}` }
+    saved = effective = { config: null, error: unreadable(error) }
   }
-  const { config } = parsed
   const store = indexer?.store() ?? null
-  const counts = config && store ? embeddingCounts(store, embeddingFingerprint(config)) : null
+  const counts = effective.config && store ? embeddingCounts(store, embeddingFingerprint(effective.config)) : null
   return {
-    settings: config && {
-      url: config.url,
-      model: config.model,
-      dimensions: config.dimensions,
-      queryPrefix: config.queryPrefix ?? "",
-      minScore: config.minScore ?? DEFAULT_MIN_SCORE,
-      hasApiKey: !!config.apiKey,
+    settings: saved.config && {
+      url: saved.config.url,
+      model: saved.config.model,
+      dimensions: saved.config.dimensions,
+      queryPrefix: saved.config.queryPrefix ?? "",
+      minScore: saved.config.minScore ?? DEFAULT_MIN_SCORE,
+      hasApiKey: !!saved.config.apiKey,
     },
     progress: counts && { passages: counts.embedded + counts.pending, embedded: counts.embedded },
-    error: parsed.error ?? (config ? indexer?.embeddingError() ?? null : null),
+    error: saved.error ?? effective.error ?? (effective.config ? indexer?.embeddingError() ?? null : null),
     defaults: { dimensions: DEFAULT_DIMENSIONS, minScore: DEFAULT_MIN_SCORE },
+    overrides: embeddingEnvOverrides(env),
   }
 }
 
@@ -93,23 +94,27 @@ export async function saveEmbeddingSettings(dir: string, input: EmbeddingSetting
   try {
     text = await readConfigText(dir)
   } catch (error) {
-    return { error: `config.json could not be read: ${error instanceof Error ? error.message : String(error)}` }
+    return { error: unreadable(error) }
   }
-  const updated = updateEmbeddingConfigText(text, input && sectionFor(input, savedSection(text)))
+  const updated = updateEmbeddingConfigText(text, input && changesFor(input))
   if ("error" in updated) return updated
   await mkdir(dir, { recursive: true, mode: 0o700 })
   await writeOwnerOnlyText(join(dir, MEMORY_CONFIG_FILE), updated.text)
   return {}
 }
 
-/** Embed one question with the endpoint the form describes, saved or not. */
+/** Embed one question with what saving the form would write, without saving it. */
 export async function testEmbeddingSettings(dir: string, input: EmbeddingSettingsInput, fetch: FetchLike): Promise<EmbeddingTestResult> {
-  const saved = savedSection(await readConfigText(dir).catch(() => null))
-  const { config, error } = validateEmbeddingConfig({ ...sectionFor(input, saved), timeoutMs: TEST_TIMEOUT_MS })
-  if (!config) return { ok: false, error: error ?? "invalid embedding configuration" }
+  let updated: ReturnType<typeof updateEmbeddingConfigText>
+  try {
+    updated = updateEmbeddingConfigText(await readConfigText(dir), changesFor(input))
+  } catch (error) {
+    return { ok: false, error: unreadable(error) }
+  }
+  if ("error" in updated || !updated.config) return { ok: false, error: "error" in updated ? updated.error : "invalid embedding configuration" }
   const started = Date.now()
   try {
-    await createEmbeddingClient(config, fetch).embedQuery(TEST_QUERY)
+    await createEmbeddingClient({ ...updated.config, timeoutMs: TEST_TIMEOUT_MS }, fetch).embedQuery(TEST_QUERY)
     return { ok: true, ms: Date.now() - started }
   } catch (failure) {
     return { ok: false, error: failure instanceof Error ? failure.message : String(failure) }

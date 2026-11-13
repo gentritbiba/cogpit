@@ -172,7 +172,7 @@ cogpit-memory index config --off
 | Setting | Default | Meaning |
 |---------|---------|---------|
 | `url`, `model` | — | Endpoint and model name |
-| `apiKey` | none | Sent as a bearer token |
+| `apiKey` | none | Sent as a bearer token. Moving `url` to another server drops the saved key unless a new one is given |
 | `dimensions` | `256` | Leading dimensions kept per vector (Matryoshka models) |
 | `queryPrefix` | none | Prepended to queries only, for instruction-tuned models |
 | `minScore` | `0.55` | Similarity a hit by meaning must reach; depends on the model (see below) |

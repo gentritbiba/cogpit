@@ -9,21 +9,17 @@ import { Progress } from "@/components/ui/progress"
 import { Textarea } from "@/components/ui/textarea"
 import { useMemoryEmbeddings } from "@/hooks/useMemoryEmbeddings"
 import {
-  sameEmbeddingOrigin,
   suggestedQueryPrefix,
   type EmbeddingSettingsInput,
   type EmbeddingSettingsReport,
   type EmbeddingSettingsView,
   type EmbeddingTestResult,
 } from "../../../shared/contracts/memoryEmbeddings"
+import { sameOrigin } from "../../../shared/memory/embeddings"
 import { SectionTrigger } from "./SectionTrigger"
 
-/** How often the progress line is read again while session text is still being indexed. */
+/** How often progress and failures are read again while the section is open on a configured endpoint. */
 const PROGRESS_POLL_MS = 5_000
-
-function isBehind(report: EmbeddingSettingsReport | null): boolean {
-  return !!report?.settings && !!report.progress && report.progress.embedded < report.progress.passages
-}
 
 function summarize(report: EmbeddingSettingsReport | null): string {
   if (!report) return "Unavailable"
@@ -79,6 +75,7 @@ function EndpointForm({ saved, defaults, disabled, busy, onSave, onTest, onTurnO
   const [url, setUrl] = useState(saved?.url ?? "")
   const [model, setModel] = useState(saved?.model ?? "")
   const [apiKey, setApiKey] = useState("")
+  const [removesKey, setRemovesKey] = useState(false)
   const [dimensions, setDimensions] = useState(String(saved?.dimensions ?? defaults.dimensions))
   const [queryPrefix, setQueryPrefix] = useState(saved?.queryPrefix ?? "")
   // Until someone writes an instruction, the model's suggested one follows the model name.
@@ -87,7 +84,9 @@ function EndpointForm({ saved, defaults, disabled, busy, onSave, onTest, onTurnO
   const [advanced, setAdvanced] = useState(false)
   const [testResult, setTestResult] = useState<EmbeddingTestResult | null>(null)
 
-  const keepsKey = !!saved?.hasApiKey && sameEmbeddingOrigin(saved.url, url.trim())
+  // A saved key goes only to the origin it was saved for, so it is on offer only while the address stays there.
+  const savedKeyApplies = !!saved?.hasApiKey && sameOrigin(saved.url, url.trim())
+  const removingKey = savedKeyApplies && removesKey && apiKey === ""
   const dimensionCount = Number(dimensions)
   const score = Number(minScore)
   const valid =
@@ -100,6 +99,7 @@ function EndpointForm({ saved, defaults, disabled, busy, onSave, onTest, onTurnO
     || url.trim() !== saved.url
     || model.trim() !== saved.model
     || apiKey !== ""
+    || removingKey
     || dimensionCount !== saved.dimensions
     || queryPrefix !== saved.queryPrefix
     || score !== saved.minScore
@@ -107,7 +107,7 @@ function EndpointForm({ saved, defaults, disabled, busy, onSave, onTest, onTurnO
   const settings = (): EmbeddingSettingsInput => ({
     url: url.trim(),
     model: model.trim(),
-    ...(apiKey ? { apiKey } : {}),
+    ...(apiKey || removingKey ? { apiKey } : {}),
     dimensions: dimensionCount,
     queryPrefix,
     minScore: score,
@@ -121,6 +121,8 @@ function EndpointForm({ saved, defaults, disabled, busy, onSave, onTest, onTurnO
   return (
     <form
       className="flex flex-col gap-3"
+      // A result describes the fields as they were when Test was pressed.
+      onChange={() => setTestResult(null)}
       onSubmit={(event) => {
         event.preventDefault()
         if (valid && changed && !disabled) onSave(settings())
@@ -141,12 +143,26 @@ function EndpointForm({ saved, defaults, disabled, busy, onSave, onTest, onTurnO
           type="password"
           value={apiKey}
           onChange={(event) => setApiKey(event.target.value)}
-          placeholder={keepsKey ? "Saved. Leave blank to keep it." : "Leave blank if the endpoint needs none"}
+          placeholder={removingKey ? "The saved key will be removed" : savedKeyApplies ? "Saved. Leave blank to keep it." : "Leave blank if the endpoint needs none"}
           disabled={disabled}
           autoComplete="off"
         />
-        {saved?.hasApiKey && !keepsKey && (
+        {saved?.hasApiKey && !savedKeyApplies && (
           <FieldDescription>The saved key belongs to the old address, so it will not be sent to this one.</FieldDescription>
+        )}
+        {savedKeyApplies && !disabled && apiKey === "" && (
+          <Button
+            type="button"
+            variant="link"
+            size="sm"
+            className="h-auto self-start px-0"
+            onClick={() => {
+              setRemovesKey(!removesKey)
+              setTestResult(null)
+            }}
+          >
+            {removesKey ? "Keep the saved key" : "Remove the saved key"}
+          </Button>
         )}
       </Field>
 
@@ -229,7 +245,8 @@ export function SearchSection({ disabled }: SearchSectionProps) {
   const [formVersion, setFormVersion] = useState(0)
 
   const report = state.status === "ok" ? state.report : null
-  const polling = open && isBehind(report)
+  // Not during a change: a read begun then could land instead of the change's own answer.
+  const polling = open && busy === null && !!report?.settings
   useEffect(() => {
     if (!polling) return
     const timer = setInterval(() => void refresh(), PROGRESS_POLL_MS)
@@ -260,6 +277,11 @@ export function SearchSection({ disabled }: SearchSectionProps) {
             <>
               {report.settings && report.progress && <ProgressLine progress={report.progress} />}
               {report.error && <p className="text-xs text-destructive" role="alert">{sentence(report.error)}</p>}
+              {report.overrides.length > 0 && (
+                <p className="text-xs text-muted-foreground">
+                  This server was started with {report.overrides.join(", ")} set, which replaces what is saved here until it restarts without them.
+                </p>
+              )}
               <EndpointForm
                 key={formVersion}
                 saved={report.settings}

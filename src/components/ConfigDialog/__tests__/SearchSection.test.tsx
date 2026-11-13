@@ -3,7 +3,10 @@ import userEvent from "@testing-library/user-event"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 
 const mocks = vi.hoisted(() => ({ authFetch: vi.fn() }))
-vi.mock("@/lib/auth", () => ({ authFetch: mocks.authFetch }))
+vi.mock("@/lib/auth", () => ({
+  authFetch: mocks.authFetch,
+  jsonFetch: (url: string, body: unknown) => mocks.authFetch(url, { method: "POST", body: JSON.stringify(body) }),
+}))
 
 import { SearchSection } from "@/components/ConfigDialog/SearchSection"
 import type { EmbeddingSettingsReport, EmbeddingSettingsView } from "../../../../shared/contracts/memoryEmbeddings"
@@ -22,6 +25,7 @@ const report = (overrides: Partial<EmbeddingSettingsReport> = {}): EmbeddingSett
   progress: null,
   error: null,
   defaults: { dimensions: 256, minScore: 0.55 },
+  overrides: [],
   ...overrides,
 })
 
@@ -97,6 +101,22 @@ describe("SearchSection", () => {
     expect(posts()[0].settings).toEqual({ url: SAVED.url, model: "other-model", dimensions: 256, queryPrefix: "", minScore: 0.55 })
   })
 
+  it("removes the saved key when asked, and offers that only while no new key is typed", async () => {
+    serve([report({ settings: SAVED })])
+    render(<SearchSection disabled={false} />)
+    await openSection()
+
+    await userEvent.click(screen.getByRole("button", { name: "Remove the saved key" }))
+    expect(screen.getByLabelText("API key")).toHaveAttribute("placeholder", "The saved key will be removed")
+    await userEvent.click(screen.getByRole("button", { name: "Save endpoint" }))
+
+    await waitFor(() => expect(posts()).toHaveLength(1))
+    expect(posts()[0].settings.apiKey).toBe("")
+
+    await userEvent.type(screen.getByLabelText("API key"), "new")
+    expect(screen.queryByRole("button", { name: /saved key/i })).not.toBeInTheDocument()
+  })
+
   it("says the saved key stays behind when the address moves to another server", async () => {
     serve([report({ settings: SAVED })])
     render(<SearchSection disabled={false} />)
@@ -121,21 +141,41 @@ describe("SearchSection", () => {
 
     await userEvent.click(screen.getByRole("button", { name: "Test" }))
     expect(await screen.findByText("The embedding endpoint answered 401: Unauthorized")).toBeInTheDocument()
+
+    await userEvent.type(screen.getByLabelText("Model"), "-v2")
+    expect(screen.queryByText("The embedding endpoint answered 401: Unauthorized")).not.toBeInTheDocument()
   })
 
-  it("reads the progress again while session text is still being indexed", async () => {
+  it("keeps progress current while the section is open on a configured endpoint", async () => {
     vi.useFakeTimers({ toFake: ["setInterval", "clearInterval"] })
     try {
-      serve([report({ settings: SAVED, progress: { passages: 4, embedded: 1 } }), report({ settings: SAVED, progress: { passages: 4, embedded: 4 } })])
+      serve([report({ settings: SAVED }), report({ settings: SAVED, progress: { passages: 4, embedded: 1 } }), report({ settings: SAVED, progress: { passages: 4, embedded: 4 } })])
       render(<SearchSection disabled={false} />)
       await openSection()
-      expect(screen.getByText("1 of 4 passages indexed")).toBeInTheDocument()
+      expect(screen.queryByText(/passages indexed/)).not.toBeInTheDocument()
 
+      await act(() => vi.advanceTimersByTimeAsync(5_000))
+      expect(screen.getByText("1 of 4 passages indexed")).toBeInTheDocument()
       await act(() => vi.advanceTimersByTimeAsync(5_000))
       expect(screen.getByText("4 of 4 passages indexed")).toBeInTheDocument()
 
+      await openSection()
       await act(() => vi.advanceTimersByTimeAsync(20_000))
-      expect(mocks.authFetch).toHaveBeenCalledTimes(2)
+      expect(mocks.authFetch).toHaveBeenCalledTimes(3)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it("does not poll while no endpoint is configured", async () => {
+    vi.useFakeTimers({ toFake: ["setInterval", "clearInterval"] })
+    try {
+      serve([report()])
+      render(<SearchSection disabled={false} />)
+      await openSection()
+
+      await act(() => vi.advanceTimersByTimeAsync(20_000))
+      expect(mocks.authFetch).toHaveBeenCalledTimes(1)
     } finally {
       vi.useRealTimers()
     }
@@ -166,6 +206,14 @@ describe("SearchSection", () => {
 
     expect(await screen.findByText("Embeddings: model is required")).toBeInTheDocument()
     expect(screen.getByLabelText("Model")).toHaveValue("some-model-v2")
+  })
+
+  it("names the environment variables that replace the saved settings", async () => {
+    serve([report({ settings: SAVED, overrides: ["COGPIT_EMBED_URL", "COGPIT_EMBED_MODEL"] })])
+    render(<SearchSection disabled={false} />)
+    await openSection()
+
+    expect(screen.getByText(/started with COGPIT_EMBED_URL, COGPIT_EMBED_MODEL set/)).toBeInTheDocument()
   })
 
   it("is read-only without config access, and absent for someone who is not a host administrator", async () => {

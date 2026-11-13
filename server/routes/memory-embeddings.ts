@@ -30,8 +30,7 @@ export function registerMemoryEmbeddingRoutes(use: UseFn) {
     const save = async (input: EmbeddingSettingsInput | null) => {
       const { error } = await saveEmbeddingSettings(dir, input)
       if (error) return sendJson(res, 400, { error })
-      // The indexer reads the file at its next pass; this makes that pass come now.
-      memoryIndexer()?.hint()
+      await memoryIndexer()?.reloadEmbeddings()
       sendJson(res, 200, await report())
     }
     withJsonBody<Record<string, unknown>>(req, res, async (body) => {

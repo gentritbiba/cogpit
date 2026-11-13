@@ -7,10 +7,10 @@ const mocks = vi.hoisted(() => ({
   report: vi.fn(),
   save: vi.fn(),
   test: vi.fn(),
-  hint: vi.fn(),
+  reload: vi.fn(),
 }))
 vi.mock("../../edition", () => ({ markDecided: vi.fn(), mayActHostWide: () => mocks.hostWide }))
-vi.mock("../../memory", () => ({ memoryIndexer: () => ({ hint: mocks.hint }) }))
+vi.mock("../../memory", () => ({ memoryIndexer: () => ({ reloadEmbeddings: mocks.reload }) }))
 vi.mock("../../memory/paths", () => ({ memoryDir: () => "/memory" }))
 vi.mock("../../memory/embeddingSettings", () => ({ embeddingSettingsReport: mocks.report, saveEmbeddingSettings: mocks.save, testEmbeddingSettings: mocks.test }))
 
@@ -18,7 +18,7 @@ import type { Middleware, UseFn } from "../../http"
 import { registerMemoryEmbeddingRoutes } from "../../routes/memory-embeddings"
 import { asIncomingMessage, asServerResponse } from "../http-fixtures"
 
-const REPORT = { settings: null, progress: null, error: null, defaults: { dimensions: 256, minScore: 0.55 } }
+const REPORT = { settings: null, progress: null, error: null, defaults: { dimensions: 256, minScore: 0.55 }, overrides: [] }
 const SETTINGS = { url: "https://embed.test/v1/embeddings", model: "fake" }
 
 function handler(): Middleware {
@@ -64,13 +64,14 @@ describe("/api/memory-embeddings", () => {
     expect(mocks.test).not.toHaveBeenCalled()
   })
 
-  it("saves, wakes the indexer and answers with the new report", async () => {
+  it("saves, has the indexer use the new endpoint and answers with the new report", async () => {
     const answer = await call("POST", { action: "save", settings: { ...SETTINGS, apiKey: "secret" } })
 
     expect(answer.status).toBe(200)
     expect(answer.json()).toEqual(REPORT)
     expect(mocks.save).toHaveBeenCalledWith("/memory", { ...SETTINGS, apiKey: "secret" })
-    expect(mocks.hint).toHaveBeenCalledTimes(1)
+    expect(mocks.reload).toHaveBeenCalledTimes(1)
+    expect(mocks.reload.mock.invocationCallOrder[0]).toBeLessThan(mocks.report.mock.invocationCallOrder[0])
   })
 
   it("turns embeddings off", async () => {
@@ -78,14 +79,14 @@ describe("/api/memory-embeddings", () => {
     expect(mocks.save).toHaveBeenCalledWith("/memory", null)
   })
 
-  it("answers 400 with the reason a save was refused, and does not wake the indexer", async () => {
+  it("answers 400 with the reason a save was refused, and leaves the indexer alone", async () => {
     mocks.save.mockResolvedValue({ error: "embeddings: url must be an http(s) URL" })
 
     const answer = await call("POST", { action: "save", settings: SETTINGS })
 
     expect(answer.status).toBe(400)
     expect(answer.json()).toEqual({ error: "embeddings: url must be an http(s) URL" })
-    expect(mocks.hint).not.toHaveBeenCalled()
+    expect(mocks.reload).not.toHaveBeenCalled()
   })
 
   it("tests an endpoint without saving it", async () => {

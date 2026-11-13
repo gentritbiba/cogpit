@@ -116,7 +116,7 @@ describe("testEmbeddingSettings", () => {
 
 describe("embeddingSettingsReport", () => {
   it("reports nothing configured for a missing file", async () => {
-    expect(await embeddingSettingsReport(dir, null, {})).toEqual({ settings: null, progress: null, error: null, defaults: DEFAULTS })
+    expect(await embeddingSettingsReport(dir, null, {})).toEqual({ settings: null, progress: null, error: null, defaults: DEFAULTS, overrides: [] })
   })
 
   it("shows the saved endpoint without its key, and how much text has a vector", async () => {
@@ -133,8 +133,24 @@ describe("embeddingSettingsReport", () => {
       progress: { passages: 2, embedded: 1 },
       error: null,
       defaults: DEFAULTS,
+      overrides: [],
     })
     expect(JSON.stringify(report)).not.toContain("secret")
+  })
+
+  it("shows what the file holds and names the environment variables that replace it", async () => {
+    await saveEmbeddingSettings(dir, INPUT)
+    const store = openMemoryStore()
+    store.syncSession(sourceFile({ path: "/t/a.jsonl", sessionId: "a" }), makeSession([{ user: "ship the release" }]))
+    const { hash } = store.db.prepare("SELECT text_hash AS hash FROM chunks LIMIT 1").get() as { hash: string }
+    store.db.prepare("INSERT INTO vectors (text_hash, fingerprint, vector, norm) VALUES (?, ?, ?, ?)").run(hash, `other@${FAKE_DIMENSIONS}`, new Uint8Array(FAKE_DIMENSIONS), 1)
+
+    const report = await embeddingSettingsReport(dir, { store: () => store, embeddingError: () => null }, { COGPIT_EMBED_MODEL: "other", COGPIT_EMBED_API_KEY: "from-env" })
+
+    expect(report.settings).toMatchObject({ model: "fake", hasApiKey: false })
+    expect(report.overrides).toEqual(["COGPIT_EMBED_MODEL", "COGPIT_EMBED_API_KEY"])
+    // Progress is for the model in effect, which is the overriding one.
+    expect(report.progress).toEqual({ passages: 1, embedded: 1 })
   })
 
   it("passes on why embedding is stopped", async () => {

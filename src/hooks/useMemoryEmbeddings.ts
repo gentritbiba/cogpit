@@ -1,6 +1,6 @@
 import { useCallback, useState } from "react"
 
-import { authFetch } from "@/lib/auth"
+import { jsonFetch } from "@/lib/auth"
 import { readError } from "@/lib/httpJson"
 import type {
   EmbeddingSettingsInput,
@@ -11,10 +11,6 @@ import type {
 import { messageOf, useReport } from "./useReport"
 
 const ROUTE = "/api/memory-embeddings"
-
-function post(body: EmbeddingSettingsRequest): Promise<Response> {
-  return authFetch(ROUTE, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) })
-}
 
 /** The host's embedding endpoint for session search: read it, test one, save one, or turn it off. */
 export function useMemoryEmbeddings() {
@@ -28,7 +24,7 @@ export function useMemoryEmbeddings() {
     setError(null)
     const token = supersede()
     try {
-      const res = await post(body)
+      const res = await jsonFetch(ROUTE, body)
       if (!res.ok) {
         setError(await readError(res, `Request failed (${res.status})`))
         return false
@@ -49,7 +45,7 @@ export function useMemoryEmbeddings() {
   const test = useCallback(async (settings: EmbeddingSettingsInput): Promise<EmbeddingTestResult> => {
     setBusy("test")
     try {
-      const res = await post({ action: "test", settings })
+      const res = await jsonFetch(ROUTE, { action: "test", settings } satisfies EmbeddingSettingsRequest)
       return res.ok ? await res.json() : { ok: false, error: await readError(res, `Request failed (${res.status})`) }
     } catch (err) {
       return { ok: false, error: messageOf(err) }
