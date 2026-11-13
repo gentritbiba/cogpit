@@ -157,18 +157,21 @@ function EndpointForm({ saved, defaults, disabled, busy, onSave, onTest, onTurnO
           <FieldDescription>The saved key belongs to the old address, so it will not be sent to this one.</FieldDescription>
         )}
         {savedKeyApplies && !disabled && apiKey === "" && (
-          <Button
-            type="button"
-            variant="link"
-            size="sm"
-            className="h-auto self-start px-0"
-            onClick={() => {
-              setRemovesKey(!removesKey)
-              edited()
-            }}
-          >
-            {removesKey ? "Keep the saved key" : "Remove the saved key"}
-          </Button>
+          // A field stretches its children; the wrapper keeps the link its own width.
+          <div>
+            <Button
+              type="button"
+              variant="link"
+              size="sm"
+              className="h-auto px-0"
+              onClick={() => {
+                setRemovesKey(!removesKey)
+                edited()
+              }}
+            >
+              {removesKey ? "Keep the saved key" : "Remove the saved key"}
+            </Button>
+          </div>
         )}
       </Field>
 
