@@ -89,6 +89,7 @@ export class OrchestrationStore {
   private readonly listeners = new Set<(event: ConversationEvent) => void>()
   private readonly triggerListeners = new Set<TriggerListener>()
   private pendingEvents: ConversationEvent[] | null = null
+  private filesProtected = false
   private pendingTriggerEvents: Parameters<TriggerListener>[0][] = []
   private dataVersion: ReturnType<SqliteDatabase["prepare"]> | undefined
   private knownInstances: { version: number; instances: ProviderInstance[] } | null = null
@@ -152,9 +153,12 @@ export class OrchestrationStore {
     } catch (error) { this.db.close(); throw error }
   }
 
+  /** SQLite creates the -wal and -shm files with the database's own mode, so each file needs this once. */
   private protectFiles(): void {
-    if (this.path === ":memory:" || process.platform === "win32") return
-    for (const file of [this.path, `${this.path}-wal`, `${this.path}-shm`]) if (existsSync(file)) chmodSync(file, 0o600)
+    if (this.filesProtected || this.path === ":memory:" || process.platform === "win32") return
+    let protectedCount = 0
+    for (const file of [this.path, `${this.path}-wal`, `${this.path}-shm`]) if (existsSync(file)) { chmodSync(file, 0o600); protectedCount++ }
+    this.filesProtected = protectedCount === 3
   }
 
   private transaction<T>(operation: () => T): T {
@@ -396,6 +400,10 @@ export class OrchestrationStore {
   }
 
   acquire(owner: string, ttl = 15000): DispatcherLease | null {
+    // Nobody can take over a lease before it expires, so one with two thirds of its time left needs no write:
+    // the dispatcher ticks twice a second and would otherwise commit a renewal on every tick, forever.
+    const held = this.db.prepare("SELECT epoch,expires_at FROM dispatcher WHERE id=1 AND owner=?").get(owner) as Row | undefined
+    if (held && Number(held.expires_at) - this.now() > (ttl * 2) / 3) return { owner, epoch: Number(held.epoch) }
     return this.transaction(() => {
       const old = this.db.prepare("SELECT * FROM dispatcher WHERE id=1").get() as Row | undefined
       if (old && old.owner !== owner && Number(old.expires_at) > this.now()) return null

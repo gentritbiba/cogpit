@@ -206,6 +206,25 @@ describe("durable orchestration", () => {
     } finally { dispatcher.close() }
   })
 
+  it("renews a held dispatcher lease only once a third of it has run out", () => {
+    let time = 1_000
+    const fresh = open(":memory:", () => time)
+    const lease = fresh.acquire("host", 15_000)!
+    time = 5_000
+    expect(fresh.acquire("host", 15_000)).toEqual(lease)
+    // That tick wrote nothing, so the lease still lapses at 16_000.
+    time = 16_001
+    expect(fresh.acquire("other-host", 15_000)?.epoch).toBe(lease.epoch + 1)
+
+    time = 1_000
+    const aging = open(":memory:", () => time)
+    const held = aging.acquire("host", 15_000)!
+    time = 7_000
+    expect(aging.acquire("host", 15_000)).toEqual(held)
+    time = 16_001
+    expect(aging.acquire("other-host", 15_000)).toBeNull()
+  })
+
   it("keeps answer ownership scoped when callers reuse a command ID", () => {
     let time = 1000
     const store = open(":memory:", () => time); const lease = store.acquire("host")!
