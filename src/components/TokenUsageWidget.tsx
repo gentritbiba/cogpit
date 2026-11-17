@@ -89,13 +89,20 @@ function TooltipBody({ usage }: { usage: UsageData }) {
 
   return (
     <div className="flex min-w-[200px] flex-col gap-2">
-      <div className="flex items-center justify-between">
-        <span className="text-xs font-medium uppercase tracking-wide">{usage.agentKind ? agentShortName(usage.agentKind) : "Agent"} usage</span>
-        {usage.subscriptionType && (
-          <Badge variant="secondary">
-            {usage.subscriptionType}
-          </Badge>
-        )}
+      <div className="flex items-center justify-between gap-2">
+        <span className="shrink-0 text-xs font-medium uppercase tracking-wide">{usage.agentKind ? agentShortName(usage.agentKind) : "Agent"} usage</span>
+        <span className="flex min-w-0 items-center gap-1.5">
+          {usage.workspaceName && (
+            <span className="truncate text-xs text-muted-foreground" title={usage.workspaceName}>
+              {usage.workspaceName}
+            </span>
+          )}
+          {usage.subscriptionType && (
+            <Badge variant="secondary">
+              {usage.subscriptionType}
+            </Badge>
+          )}
+        </span>
       </div>
       {rows.map((r) => {
         const resetMs = r.resetsAt && usage.fetchedAt != null
