@@ -107,7 +107,9 @@ export function registerSessionManageRoutes(use: UseFn) {
         if (permissionChange && holder) {
           reportSessionEvent(req, "session.permission", { sessionId: authorized.sessionId, agent: holder.kind }, permissionChange)
         }
-        const { permissionMode, model, effort, fastMode, ultracode } = updates
+        const { model, effort, fastMode, ultracode } = updates
+        // A switch the running CLI refused leaves the session in its old mode.
+        const permissionMode = updates.permissionMode === undefined ? undefined : result.permissionMode ?? updates.permissionMode
         await storeAppliedSettings(req, authorized.sessionId, holder?.kind ?? null, {
           permissions: permissionMode === undefined ? undefined : { mode: permissionMode },
           model,

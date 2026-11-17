@@ -22,7 +22,7 @@ import { ErrorBanner } from "./ErrorBanner"
 import { capabilitiesFor, DEFAULT_AGENT_KIND, descriptorFor, type AgentKind } from "@/lib/agents"
 import { isAgentInstalled, useAgentAvailability } from "@/lib/agents/availability"
 import { signInTargetFor, startAgentSignIn } from "@/lib/agents/signIn"
-import { AgentInstallHelp, AgentSignInCard } from "@/components/AgentSetupHelp"
+import { AgentInstallHelp, AgentSignInCard, AgentSignInEndingNotice } from "@/components/AgentSetupHelp"
 import { findFileMention, replaceFileMention } from "@/lib/fileMentions"
 import { useProjectFileSuggestions } from "@/hooks/useProjectFileSuggestions"
 import { submitUserQuestionAnswers } from "@/lib/askUserApi"
@@ -165,6 +165,7 @@ const ScopedChatInput = forwardRef<ChatInputHandle, ChatInputProps & { scope: st
     slashSuggestionsLoading,
     turnError,
     promptSuggestion,
+    signInEndsAt,
   } = useSessionControls()
   const { chat: { status, error, isConnected, sendMessage: onSend, interrupt: onInterrupt } } = useSessionChatContext()
   const canInterrupt = isConnected || isLive
@@ -191,6 +192,7 @@ const ScopedChatInput = forwardRef<ChatInputHandle, ChatInputProps & { scope: st
   contextRef.current = context
   const [contextError, setContextError] = useState<string | null>(null)
   const [signInHelp, setSignInHelp] = useState(false)
+  const [dismissedSignInEnd, setDismissedSignInEnd] = useState<string | null>(null)
   // A pending session has no source yet; its dirName names the account instance too.
   const signInDirName = sessionSource?.dirName ?? composerIdentity
   const signInTarget = useMemo(() => signInTargetFor(agentKind ?? DEFAULT_AGENT_KIND, signInDirName), [agentKind, signInDirName])
@@ -321,17 +323,17 @@ const ScopedChatInput = forwardRef<ChatInputHandle, ChatInputProps & { scope: st
     const question = interaction.questions[0]
     if (!question || !answer.trim()) return
 
-    const result = await submitUserQuestionAnswers(
-      sessionId,
-      interaction.toolUseId,
-      { [question.question]: answer },
-    )
+    // A message typed here instead of on the card sets the questions aside;
+    // an agent that records that is told the user replied in chat.
+    const result = capabilitiesFor(agentKind ?? DEFAULT_AGENT_KIND).skipQuestions
+      ? await submitUserQuestionAnswers(sessionId, interaction.toolUseId, answer, "replied_in_chat")
+      : await submitUserQuestionAnswers(sessionId, interaction.toolUseId, { [question.question]: answer })
 
     // The question may no longer be answerable server-side (tool already
     // errored, session restarted, …). Never swallow the user's text — deliver
     // it as a regular message instead so the input can't appear frozen.
     return result.ok || await onSend(answer)
-  }, [pendingInteraction, sessionId, onSend])
+  }, [pendingInteraction, sessionId, onSend, agentKind])
 
   const submitPlanResponse = useCallback(async (
     approved: boolean,
@@ -610,6 +612,9 @@ const ScopedChatInput = forwardRef<ChatInputHandle, ChatInputProps & { scope: st
         </div>)}
         {!agentInstalled && <AgentInstallHelp kind={agentKind ?? DEFAULT_AGENT_KIND} className="mb-2" />}
         {signInHelp && <AgentSignInCard target={signInTarget} className="mb-2" onDismiss={() => setSignInHelp(false)} />}
+        {signInEndsAt && signInEndsAt !== dismissedSignInEnd && !signInHelp && (
+          <AgentSignInEndingNotice target={signInTarget} endsAt={signInEndsAt} className="mb-2" onDismiss={() => setDismissedSignInEnd(signInEndsAt)} />
+        )}
         <ContextChips items={context} attachments={images} onRemove={removeContext} onOpenQuoteSource={openQuoteSource} className="mb-2" />
         {contextError && (
           <div role="alert" className="motion-enter mb-2 flex items-center gap-2 text-xs text-warning">

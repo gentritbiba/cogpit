@@ -237,7 +237,7 @@ describe("PendingHumanInputProvider", () => {
 
     await waitFor(() => expect(screen.getByTestId("questions").textContent).toBe(""))
     expect(mocks.submitUserQuestionAnswers).toHaveBeenCalledWith(
-      "sess-q", "toolu_1", { "Which language?": "TypeScript" },
+      "sess-q", "toolu_1", { "Which language?": "TypeScript" }, undefined,
     )
   })
 

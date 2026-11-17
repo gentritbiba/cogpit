@@ -164,12 +164,15 @@ cogpit-session board get "$CHILD"
 cogpit-session approve "$ID" --request "$REQUEST"
 cogpit-session deny "$ID" --request "$REQUEST" --feedback "Use the smaller change"
 cogpit-session answer "$ID" "Blue" --request "$REQUEST"
+cogpit-session answer "$ID" --skip --request "$REQUEST"   # Claude: continue without an answer
 cogpit-session interrupt "$ID"   # stop the turn, retain the session
 cogpit-session stop "$ID"        # stop the session and cancel its queued messages
 cogpit-session discard "$ID"     # fetch remote work once more, then remove its worktree
 ```
 
-Omit `--request` when exactly one matching request is pending. After answering,
-wait again. Stop only children you own. `stop` keeps a transferred worktree;
+Omit `--request` when exactly one matching request is pending. `--skip` tells
+a Claude session its questions were skipped, so it carries on with its own
+judgment instead of ending the turn; `next` lists it for questions that take
+it. After answering, wait again. Stop only children you own. `stop` keeps a transferred worktree;
 `discard` removes it after preserving its work. For full transcript drill-down,
 use `cogpit-memory` ([memory.md](memory.md)).

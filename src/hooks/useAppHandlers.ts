@@ -15,7 +15,7 @@ import { rememberCreatedSession } from "@/lib/sessionAccess"
 import { trackDeletion } from "@/lib/sessionAccessEvents"
 import { parseSubAgentPath } from "@/lib/format"
 import { agentKindForDirName, capabilitiesFor, ownSessionIdOf } from "@/lib/agents"
-import type { PermissionsConfig } from "@/lib/permissions"
+import type { PermissionMode, PermissionsConfig } from "@/lib/permissions"
 import type { SessionSettingField } from "../../shared/contracts/sessionSettings"
 
 interface AppHandlersDeps {
@@ -29,6 +29,8 @@ interface AppHandlersDeps {
   isMobile: boolean
   handleJumpToTurn: (index: number, toolCallId?: string) => void
   markPermissionsApplied: () => void
+  /** Puts the picker back on the mode a running session kept when it refused a switch. */
+  setPermissionMode: (mode: PermissionMode) => void
   hasPermsPendingChanges: boolean
   /** The permissions the user picked for this session, if any; applying leaves the session's own mode alone otherwise. */
   permissionsConfig: PermissionsConfig | undefined
@@ -104,7 +106,7 @@ interface AppHandlersResult {
 export function useAppHandlers(deps: AppHandlersDeps): AppHandlersResult {
   const {
     state, sessionStore, dispatch, isMobile, handleJumpToTurn,
-    markPermissionsApplied, hasPermsPendingChanges, permissionsConfig,
+    markPermissionsApplied, setPermissionMode, hasPermsPendingChanges, permissionsConfig,
     settingsChange, onSettingsChangeSent,
     selectedModel,
     selectedEffort,
@@ -270,6 +272,8 @@ export function useAppHandlers(deps: AppHandlersDeps): AppHandlersResult {
         }),
       })
       if (res.ok && settingsChange.length > 0) settingsChangeSent()
+      const kept = res.ok ? (await res.json().catch(() => ({})) as { permissionMode?: PermissionMode }).permissionMode : undefined
+      if (nextPermissions && kept && kept !== nextPermissions.mode) setPermissionMode(kept)
     }
     setAppliedSettings(prev => ({
       ...prev,
@@ -282,7 +286,7 @@ export function useAppHandlers(deps: AppHandlersDeps): AppHandlersResult {
       },
     }))
     markPermissionsApplied()
-  }, [currentSessionId, canInteract, state.sessionSource, markPermissionsApplied])
+  }, [currentSessionId, canInteract, state.sessionSource, markPermissionsApplied, setPermissionMode])
 
   // ── Stop session ───────────────────────────────────────────────────────────
   const handleStopSession = useCallback(async () => {

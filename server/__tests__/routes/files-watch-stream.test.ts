@@ -63,7 +63,7 @@ vi.mock("../../agents/runtimes", () => ({
 import { __resetEditionForTest, installEdition, PERSONAL_EDITION, type EditionSessionAccess } from "../../edition"
 import { registerFileWatchRoutes } from "../../routes/files-watch"
 import { resolveSessionFilePath } from "../../sessionPaths"
-import { publish, clear, publishRateLimit, _resetForTests } from "../../lib/streamBus"
+import { publish, clear, publishRateLimit, publishSessionConfig, publishSignInEnd, _resetForTests } from "../../lib/streamBus"
 import { setDataRoot } from "../../config"
 import { decodeRef } from "../../agents/resultRefs"
 import { readElided } from "../../../shared/session/resultProjection"
@@ -218,6 +218,21 @@ describe("/api/watch stream-bus forwarding", () => {
     const events = parseFrames(frames)
     expect(events).toContainEqual({ type: "rate_limit", block })
     expect(events).toContainEqual({ type: "rate_limit", block: null })
+    closeConnection()
+  })
+
+  it("asks viewers to read the config again with the named session-config frame", async () => {
+    const { frames, closeConnection } = await connect(`/proj-a/${SESSION}.jsonl`)
+    publishSessionConfig(SESSION)
+    expect(frames).toContainEqual(`event: session-config\ndata: ${JSON.stringify({ sessionId: SESSION })}\n\n`)
+    expect(parseFrames(frames).some((e) => e.type === "session_config")).toBe(false)
+    closeConnection()
+  })
+
+  it("forwards when the sign-in ends", async () => {
+    const { frames, closeConnection } = await connect(`/proj-a/${SESSION}.jsonl`)
+    publishSignInEnd(SESSION, "2026-12-11T00:25:04.187Z")
+    expect(parseFrames(frames)).toContainEqual({ type: "sign_in_end", endsAt: "2026-12-11T00:25:04.187Z" })
     closeConnection()
   })
 

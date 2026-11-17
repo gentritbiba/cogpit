@@ -79,6 +79,27 @@ describe("QuestionPrompt", () => {
     ).toBeInTheDocument()
   })
 
+  it("offers Skip for a skippable question, even one answered in its session", async () => {
+    const user = userEvent.setup()
+    const onSkip = vi.fn()
+    const request = { ...makeRequest([{ label: "Commit" }, { label: "Open the diff" }]), skippable: true }
+    const { rerender } = render(
+      <QuestionPrompt request={request} responding={false} gone={false} onAnswer={vi.fn()} onSkip={onSkip} onOpenSession={vi.fn()} />,
+    )
+    await user.click(screen.getByRole("button", { name: "Skip" }))
+    expect(onSkip).toHaveBeenCalledWith("tool-1")
+
+    const freeText = { ...request, questions: [{ ...request.questions[0], options: [] }] }
+    rerender(<QuestionPrompt request={freeText} responding={false} gone={false} onAnswer={vi.fn()} onSkip={onSkip} onOpenSession={vi.fn()} />)
+    expect(screen.getByRole("button", { name: /Open full question/ })).toBeInTheDocument()
+    expect(screen.getByRole("button", { name: "Skip" })).toBeEnabled()
+  })
+
+  it("offers no Skip for a question its agent cannot skip", () => {
+    renderPrompt(makeRequest([{ label: "Commit" }, { label: "Open the diff" }]))
+    expect(screen.queryByRole("button", { name: "Skip" })).not.toBeInTheDocument()
+  })
+
   it("shows a reader the question and its options without letting them answer", () => {
     render(
       <QuestionPrompt

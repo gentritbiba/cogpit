@@ -29,6 +29,8 @@ interface QuestionPromptProps {
   gone: boolean
   /** Omitted for a reader who cannot answer: the question and its options show, disabled. */
   onAnswer?: (toolUseId: string, answers: UserQuestionAnswerMap) => void
+  /** Tells the agent the questions were skipped; offered when the request is `skippable`. */
+  onSkip?: (toolUseId: string) => void
   onOpenSession: () => void
 }
 
@@ -47,6 +49,7 @@ export function QuestionPrompt({
   responding,
   gone,
   onAnswer,
+  onSkip,
   onOpenSession,
 }: QuestionPromptProps) {
   const questions = request.questions
@@ -56,19 +59,29 @@ export function QuestionPrompt({
 
   if (questions.length === 0) return null
 
+  const skip = request.skippable && onSkip
+    ? (
+      <Button variant="ghost" size="sm" disabled={responding} onClick={() => onSkip(request.toolUseId)}>
+        Skip
+      </Button>
+    )
+    : null
+
   if (needsFullView(questions)) {
     return (
       <Shell>
         <p className="text-sm leading-relaxed text-foreground">{questions[0].question}</p>
-        <Button
-          variant="outline"
-          size="sm"
-          onClick={onOpenSession}
-          className="mt-3"
-        >
-          Open full question
-          <ChevronRight data-icon="inline-end" />
-        </Button>
+        <div className="mt-3 flex items-center gap-2">
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={onOpenSession}
+          >
+            Open full question
+            <ChevronRight data-icon="inline-end" />
+          </Button>
+          {skip}
+        </div>
       </Shell>
     )
   }
@@ -138,6 +151,7 @@ export function QuestionPrompt({
             {index + 1 < questions.length ? "Next" : "Send"}
           </Button>
         )}
+        {skip}
         <Button
           variant="ghost"
           size="sm"

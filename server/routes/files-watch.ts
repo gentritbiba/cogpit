@@ -23,6 +23,7 @@ import { sendJson, type UseFn } from "../http"
 import * as streamBus from "../lib/streamBus"
 import { beginActivity, recordActivity } from "../lib/activityMonitor"
 import { RESULT_PROJECTION } from "../../shared/contracts/toolResults"
+import { SESSION_CONFIG_EVENT, type SessionConfigFrame } from "../../shared/contracts/sessionAccess"
 import {
   WATCH_GAP_RESET_BYTES,
   WATCH_STREAM_VERSION,
@@ -424,12 +425,15 @@ export function registerFileWatchRoutes(use: UseFn) {
       res.write(`data: ${JSON.stringify({ type: "stream_snapshot", messages: snapshot })}\n\n`)
     }
     let unsubscribeStream: (() => void) | null = streamBus.subscribe(sessionId, (ev) => {
-      if (ev.type === "stream_complete") return
-      if (!closed) {
-        const payload = JSON.stringify(ev)
-        recordActivity("Token stream batches", { bytes: Buffer.byteLength(payload) })
-        res.write(`data: ${payload}\n\n`)
+      if (ev.type === "stream_complete" || closed) return
+      // The named frame every session stream uses to have its viewers read the config again.
+      if (ev.type === "session_config") {
+        res.write(`event: ${SESSION_CONFIG_EVENT}\ndata: ${JSON.stringify({ sessionId } satisfies SessionConfigFrame)}\n\n`)
+        return
       }
+      const payload = JSON.stringify(ev)
+      recordActivity("Token stream batches", { bytes: Buffer.byteLength(payload) })
+      res.write(`data: ${payload}\n\n`)
     })
 
     function cleanup() {

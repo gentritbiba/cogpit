@@ -7,7 +7,7 @@
  * naming the CLI itself.
  */
 import { query, type Options, type Query, type SDKUserMessage } from "@anthropic-ai/claude-agent-sdk"
-import { claudeCliPath } from "./claudeExecutable"
+import { claudeLaunchOptions } from "./claudeExecutable"
 
 // The SDK warns on every query that bypass mode and allow rules shadow
 // canUseTool. Cogpit registers it anyway, because AskUserQuestion answers
@@ -32,7 +32,7 @@ export async function withControlQuery<T>(
   const q = query({
     // eslint-disable-next-line require-yield
     prompt: (async function* (): AsyncGenerator<SDKUserMessage> { await new Promise(() => {}) })(),
-    options: { ...options, abortController: abort, pathToClaudeCodeExecutable: claudeCliPath() },
+    options: { ...options, abortController: abort, ...claudeLaunchOptions() },
   })
   try {
     return await use(q)

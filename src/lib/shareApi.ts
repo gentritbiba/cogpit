@@ -13,6 +13,7 @@
  */
 
 import type { PermissionDecision, PermissionRequest } from "@/hooks/usePermissionRequests"
+import type { QuestionUnanswered, UserQuestionAnswers } from "../../shared/contracts/pendingInput"
 
 export interface SharedSessionInfo {
   sessionId: string
@@ -112,10 +113,11 @@ export async function respondSharePermission(
 /** Resolves rather than throwing, so a caller can fall back to a plain message. */
 export async function answerShareQuestion(
   toolUseId: string,
-  answers: Record<string, string>,
+  answers: UserQuestionAnswers,
+  unanswered?: QuestionUnanswered,
 ): Promise<{ ok: boolean; gone: boolean }> {
   try {
-    const res = await post("/api/share/answer", { toolUseId, answers })
+    const res = await post("/api/share/answer", { toolUseId, answers, ...(unanswered && { unanswered }) })
     return { ok: res.ok, gone: res.status === 404 }
   } catch {
     return { ok: false, gone: false }

@@ -16,9 +16,10 @@ interface Picks {
   permissionsConfig?: PermissionsConfig
   settingsChange?: readonly SessionSettingField[]
   onSettingsChangeSent?: () => void
+  setPermissionMode?: (mode: PermissionsConfig["mode"]) => void
 }
 
-function renderHandlers({ permissionsConfig, settingsChange = [], onSettingsChangeSent = vi.fn() }: Picks) {
+function renderHandlers({ permissionsConfig, settingsChange = [], onSettingsChangeSent = vi.fn(), setPermissionMode = vi.fn() }: Picks) {
   return renderHook(() => useAppHandlers({
     state: {
       sessionId: "s1",
@@ -29,6 +30,7 @@ function renderHandlers({ permissionsConfig, settingsChange = [], onSettingsChan
     isMobile: false,
     handleJumpToTurn: vi.fn(),
     markPermissionsApplied: vi.fn(),
+    setPermissionMode,
     hasPermsPendingChanges: false,
     permissionsConfig,
     settingsChange,
@@ -74,6 +76,18 @@ describe("useAppHandlers applying settings to a live session", () => {
   it("names the settings the user picked in settingsChange, and none when nothing was picked", async () => {
     expect(await appliedBody({})).not.toHaveProperty("settingsChange")
     expect(await appliedBody({ settingsChange: ["effort"] })).toMatchObject({ effort: "high", settingsChange: ["effort"] })
+  })
+
+  it("puts the picker back on the mode a running session kept when it refused the switch", async () => {
+    const setPermissionMode = vi.fn()
+    mocks.authFetch.mockResolvedValueOnce(new Response(JSON.stringify({ success: true, permissionMode: "default" })))
+    const { result } = renderHandlers({ permissionsConfig: { ...PICKED, mode: "bypassPermissions" }, setPermissionMode })
+    await act(() => result.current.handleApplySettings())
+    expect(setPermissionMode).toHaveBeenCalledWith("default")
+
+    mocks.authFetch.mockResolvedValueOnce(new Response(JSON.stringify({ success: true, permissionMode: "bypassPermissions" })))
+    await act(() => result.current.handleApplySettings())
+    expect(setPermissionMode).toHaveBeenCalledOnce()
   })
 
   it("reports a settings change applied only once the session took it", async () => {

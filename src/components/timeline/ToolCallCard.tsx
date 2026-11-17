@@ -35,6 +35,7 @@ import { toolCallFailed, toolVerb } from "@/lib/toolActivity"
 import { computeDiff } from "@/lib/rendering/diff"
 import { crewCallSentence, describeCrewCall, type CrewCall } from "@/lib/crewCommands"
 import { revealSessionById } from "@/lib/revealSession"
+import { agentKindForDirName, capabilitiesFor } from "@/lib/agents"
 import { useSessionNamer } from "@/hooks/useSessionNamer"
 
 /** Absolute path of the image a read opened, or null when it read something else. */
@@ -227,6 +228,7 @@ function ToolCallCardBody({
         isAwaitingAnswer={facts?.openQuestionId === toolCall.id}
         sessionId={facts?.sessionId ?? undefined}
         canAnswer={facts?.canAnswer ?? false}
+        canSkip={capabilitiesFor(facts?.sessionSource?.agentKind ?? agentKindForDirName(facts?.sessionSource?.dirName ?? null)).skipQuestions}
       />
     )
   }

@@ -23,9 +23,9 @@ import type { UsageCostRecord } from "./usageScanners"
  * naming one.
  */
 
-import type { ApprovalDecision, UserQuestionAnswers, PendingPlan, PlanResponse } from "../../shared/contracts/pendingInput"
+import type { ApprovalDecision, UserQuestionAnswers, PendingPlan, PlanResponse, QuestionUnanswered } from "../../shared/contracts/pendingInput"
 
-export type { ApprovalDecision, UserQuestionAnswers }
+export type { ApprovalDecision, QuestionUnanswered, UserQuestionAnswers }
 export type { PendingPlan, PlanResponse }
 
 export interface ImageAttachment {
@@ -159,6 +159,10 @@ export function isUserQuestionAnswers(value: unknown): value is UserQuestionAnsw
   return values !== null && values.every((answer) => typeof answer === "string")
 }
 
+export function isQuestionUnanswered(value: unknown): value is QuestionUnanswered {
+  return value === "skipped" || value === "replied_in_chat"
+}
+
 /**
  * An answer a runtime accepted. `message` is null when the turn that asked took
  * it. An agent that reads its next message as the answer returns that message
@@ -259,11 +263,15 @@ export interface AgentRuntime {
   listPendingQuestions(sessionId?: string): PendingQuestion[]
   listPendingPlans?(sessionId?: string): PendingPlan[]
   respondToPlan?(sessionId: string, requestId: string, response: PlanResponse): Promise<boolean>
-  /** Null when the question is not pending. */
+  /**
+   * Null when the question is not pending. `unanswered` reaches only a runtime
+   * whose descriptor sets `capabilities.skipQuestions`.
+   */
   answerQuestion(
     sessionId: string,
     questionId: string,
     answers: UserQuestionAnswers,
+    unanswered?: QuestionUnanswered,
   ): Promise<AcceptedAnswer | null>
   /** Account, usage and capability snapshot, in this agent's own wire shape. */
   describeRuntime(force?: boolean): Promise<unknown>

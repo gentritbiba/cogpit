@@ -1,14 +1,27 @@
-import type { ToolCall, ToolFileDiff } from "./types"
+import type { QuestionUnansweredKind, ToolCall, ToolFileDiff } from "./types"
 
 function record(value: unknown): Record<string, unknown> {
   return value && typeof value === "object" ? value as Record<string, unknown> : {}
 }
 
-export function toolResultMetadata(name: string, value: unknown): Pick<ToolCall, "awaitingReview" | "fileDiffs" | "additionalFileDiffs"> {
+const UNANSWERED_KINDS: ReadonlySet<string> = new Set<QuestionUnansweredKind>(["skipped", "replied_in_chat", "dismissed"])
+
+/** The questions an AskUserQuestion answer left unanswered, from the annotations its result echoes. */
+function unansweredQuestions(result: Record<string, unknown>): Pick<ToolCall, "unansweredQuestions"> {
+  const unanswered: Record<string, QuestionUnansweredKind> = {}
+  for (const [question, annotation] of Object.entries(record(result.annotations))) {
+    const kind = record(annotation).unanswered
+    if (typeof kind === "string" && UNANSWERED_KINDS.has(kind)) unanswered[question] = kind as QuestionUnansweredKind
+  }
+  return Object.keys(unanswered).length > 0 ? { unansweredQuestions: unanswered } : {}
+}
+
+export function toolResultMetadata(name: string, value: unknown): Pick<ToolCall, "awaitingReview" | "fileDiffs" | "additionalFileDiffs" | "unansweredQuestions"> {
   const result = record(value)
   if (name === "Edit" || name === "Write") {
     return result.staged === true ? { awaitingReview: true } : {}
   }
+  if (name === "AskUserQuestion") return unansweredQuestions(result)
   if (name !== "Bash") return {}
   const diff = record(result.bashEditDiff)
   if (!Array.isArray(diff.files)) return {}

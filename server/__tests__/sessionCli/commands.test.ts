@@ -614,6 +614,13 @@ describe("answering", () => {
     expect(mocks.local.respond).toHaveBeenLastCalledWith("s1", "q-1", { answers: { "Color?": "Blue" } }, { commandId: "invocation-1", req: undefined })
     expect(await run(["answer", "s1", "--json", "[1]"])).toMatchObject({ exitCode: EXIT.error })
   })
+
+  it("skips a question with --skip, and refuses --skip beside an answer", async () => {
+    pending(mocks.local, [{ kind: "question", requestId: "q-1", questions: [], skippable: true }])
+    await run(["answer", "s1", "--skip"])
+    expect(mocks.local.respond).toHaveBeenLastCalledWith("s1", "q-1", { answers: [], unanswered: "skipped" }, { commandId: "invocation-1", req: undefined })
+    expect(await run(["answer", "s1", "Blue", "--skip"])).toMatchObject({ exitCode: EXIT.error })
+  })
 })
 
 describe("children and stop", () => {

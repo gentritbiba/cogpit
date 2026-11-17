@@ -27,11 +27,8 @@ import { authFetch } from "@/lib/auth"
 import { listUrl, useSessionListFilter } from "@/lib/sessionListFilter"
 import { useAppGate } from "@/hooks/useCurrentUser"
 import { respondToPermission, type PermissionDecision } from "@/lib/permissionApi"
-import {
-  submitUserQuestionAnswers,
-  type AnswerResult,
-  type UserQuestionAnswerMap,
-} from "@/lib/askUserApi"
+import { submitUserQuestionAnswers, type AnswerResult } from "@/lib/askUserApi"
+import type { QuestionUnanswered, UserQuestionAnswers } from "../../shared/contracts/pendingInput"
 import {
   submitElicitationAnswer,
   submitUserDialogChoice,
@@ -76,7 +73,8 @@ export interface PendingHumanInput {
   answerQuestion: (
     sessionId: string,
     toolUseId: string,
-    answers: UserQuestionAnswerMap,
+    answers: UserQuestionAnswers,
+    unanswered?: QuestionUnanswered,
   ) => Promise<AnswerResult>
   answerElicitation: (
     sessionId: string,
@@ -242,9 +240,10 @@ export function PendingHumanInputProvider({ children }: { children: ReactNode })
   const answerQuestion = useCallback((
     sessionId: string,
     toolUseId: string,
-    answers: UserQuestionAnswerMap,
+    answers: UserQuestionAnswers,
+    unanswered?: QuestionUnanswered,
   ): Promise<AnswerResult> => withResponding(toolUseId, async () => {
-    const result = await submitUserQuestionAnswers(sessionId, toolUseId, answers)
+    const result = await submitUserQuestionAnswers(sessionId, toolUseId, answers, unanswered)
     if (result.ok) {
       setQuestionsBySession((prev) => drop(prev, sessionId, (q) => q.toolUseId === toolUseId))
       lastQuestionsRef.current = ""

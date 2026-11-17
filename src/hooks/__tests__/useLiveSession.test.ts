@@ -261,6 +261,22 @@ describe("useLiveSession", () => {
     expect(result.current.turnError).toBeNull()
   })
 
+  it("holds when the sign-in ends until the server says it no longer does", () => {
+    const source: SessionSource = { dirName: "dir", fileName: "file.jsonl", watchOffset: 2, loadId: 1 }
+    const { result } = renderHook(() => useLiveSession(source, onUpdate, workerParse, workerAppend, undefined, () => mockParsedSession))
+    expect(result.current.signInEndsAt).toBeNull()
+
+    act(() => {
+      getLastEventSource().simulateMessage({ type: "sign_in_end", endsAt: "2026-12-11T00:25:04.187Z" })
+    })
+    expect(result.current.signInEndsAt).toBe("2026-12-11T00:25:04.187Z")
+
+    act(() => {
+      getLastEventSource().simulateMessage({ type: "sign_in_end", endsAt: null })
+    })
+    expect(result.current.signInEndsAt).toBeNull()
+  })
+
   it("collects subagent progress summaries by tool_use id and drops them when the turn clears", () => {
     const source: SessionSource = { dirName: "dir", fileName: "file.jsonl", watchOffset: 2, loadId: 1 }
     const { result } = renderHook(() => useLiveSession(source, onUpdate, workerParse, workerAppend, undefined, () => mockParsedSession))

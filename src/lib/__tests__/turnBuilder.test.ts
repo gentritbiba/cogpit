@@ -1713,4 +1713,28 @@ describe("structured tool results", () => {
     ]))
     expect(session.turns[0].toolCalls[0]).toMatchObject({ result: "Command output", additionalFileDiffs: 2, fileDiffs: [{ filePath: "/a.ts", hunks: [{ lines: ["-before", "+after"] }] }] })
   })
+
+  it("records which AskUserQuestion questions were skipped or answered in chat", () => {
+    // The records Claude Code 2.1.326 wrote for a skip and a chat reply.
+    const questions = [
+      { question: "Pick a color?", header: "Color", options: [{ label: "Red", description: "Choose red" }, { label: "Blue", description: "Choose blue" }], multiSelect: false },
+      { question: "Pick a size?", header: "Size", options: [{ label: "Small", description: "Choose small" }, { label: "Large", description: "Choose large" }], multiSelect: false },
+    ]
+    const toolUseResult = {
+      questions,
+      answers: { "Pick a color?": "The user skipped this question.", "Pick a size?": "The user replied in chat instead: make it teal" },
+      annotations: { "Pick a color?": { unanswered: "skipped" }, "Pick a size?": { unanswered: "replied_in_chat" } },
+    }
+    const session = parseSession(toJsonl([
+      userMsg("Ask me"),
+      toolUseAssistant("AskUserQuestion", { questions }, "toolu_01U532MLkA5r4qPpQhq3sHqj"),
+      toolResultMsg(
+        "toolu_01U532MLkA5r4qPpQhq3sHqj",
+        "The user answered: \"Pick a color?\"=\"The user skipped this question.\", \"Pick a size?\"=\"The user replied in chat instead: make it teal\". Read the answers carefully — they may request clarification, changes, or that you not proceed — and follow what they actually say.",
+        false,
+        { toolUseResult },
+      ),
+    ]))
+    expect(session.turns[0].toolCalls[0].unansweredQuestions).toEqual({ "Pick a color?": "skipped", "Pick a size?": "replied_in_chat" })
+  })
 })
