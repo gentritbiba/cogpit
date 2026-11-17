@@ -5,6 +5,7 @@ import {
   join,
 } from "../helpers"
 import { readJsonBody, sendJson, type UseFn } from "../http"
+import { readOnlyGitEnv } from "../lib/gitProject"
 import { RouteError, sendError, ErrorCodes } from "../lib/routeError"
 
 export function registerFileRoutes(use: UseFn) {
@@ -37,7 +38,7 @@ export function registerFileRoutes(use: UseFn) {
             }
           }
           return new Promise((resolve) => {
-            const proc = spawn("git", ["rev-parse", "--show-toplevel"], { cwd })
+            const proc = spawn("git", ["rev-parse", "--show-toplevel"], { cwd, env: readOnlyGitEnv() })
             let out = ""
             proc.stdout!.on("data", (d: Buffer) => (out += d.toString()))
             proc.on("close", (code) => {
@@ -54,7 +55,7 @@ export function registerFileRoutes(use: UseFn) {
 
         function spawnLines(args: string[], cwd: string): Promise<number> {
           return new Promise((resolve) => {
-            const proc = spawn("git", args, { cwd })
+            const proc = spawn("git", args, { cwd, env: readOnlyGitEnv() })
             let out = ""
             proc.stdout!.on("data", (d: Buffer) => (out += d.toString()))
             proc.on("close", (code) => {
@@ -67,7 +68,7 @@ export function registerFileRoutes(use: UseFn) {
 
         function spawnOutput(args: string[], cwd: string): Promise<string> {
           return new Promise((resolve) => {
-            const proc = spawn("git", args, { cwd })
+            const proc = spawn("git", args, { cwd, env: readOnlyGitEnv() })
             let out = ""
             proc.stdout!.on("data", (d: Buffer) => (out += d.toString()))
             proc.on("close", () => resolve(out.trim()))

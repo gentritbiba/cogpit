@@ -15,10 +15,16 @@ export type GitProject =
   }
   | { ok: false; status: number; error: string }
 
+/** Read-only git must not refresh `.git/index` under `index.lock`, which fails an agent's concurrent `git add`. */
+export function readOnlyGitEnv(): NodeJS.ProcessEnv {
+  return { ...process.env, GIT_OPTIONAL_LOCKS: "0" }
+}
+
 export function runGit(cwd: string, args: string[], signal?: AbortSignal) {
   return execFile("git", args, {
     signal,
     cwd,
+    env: readOnlyGitEnv(),
     encoding: "utf-8",
     maxBuffer: 8 * 1024 * 1024,
     timeout: 10_000,
