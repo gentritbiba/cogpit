@@ -7,6 +7,7 @@ import { CLICKUP_CONFIG_FILE } from "../server/lib/clickupConfig"
 import { createServerComposition } from "../server/app-server"
 import { getConfig } from "../server/config"
 import { detachFromParentCogpit } from "../server/lib/parentCogpit"
+import { listenOn, listenOnStablePort } from "./desktopPort"
 import { removePortFile, setServerPort, writePortFile } from "../server/lib/portFile"
 import { setDesktopAttention } from "../server/lib/desktopAttention"
 import { startSessionActivityMonitor } from "../server/lib/sessionActivityMonitor"
@@ -42,15 +43,10 @@ async function start({ staticDir, userDataDir, isDev, coreBin }: WorkerConfig): 
     const config = getConfig()
     const networkEnabled = config?.networkAccess && config?.networkPassword
     const listenHost = networkEnabled ? "0.0.0.0" : "127.0.0.1"
-    const listenPort = (isDev || networkEnabled) ? 19384 : 0
-
     startSessionCatalogAfterFirstResponse(httpServer)
-    await new Promise<void>((resolve) => {
-      httpServer.listen(listenPort, listenHost, () => resolve())
-    })
-
-    const address = httpServer.address()
-    const port = typeof address === "object" && address ? address.port : 0
+    const port = (isDev || networkEnabled)
+      ? await listenOn(httpServer, 19384, listenHost)
+      : await listenOnStablePort(httpServer, listenHost, userDataDir)
 
     if (!port) {
       process.parentPort.postMessage({ type: "error", error: "Failed to bind port" })

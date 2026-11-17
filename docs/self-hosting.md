@@ -278,8 +278,10 @@ the hub proxy.
 
 ## Ports and discovery
 
-The packaged app binds an ephemeral port unless Network Access pins one. It writes the bound
-port to `~/.cogpit/port` on start and removes it on exit.
+Unless Network Access pins 19384, the packaged app reuses the port its last launch bound
+(19383 at first), taking any free port when that one is busy. The window's origin, and with
+it the browser storage holding session names, depends on that port. It writes the bound port
+to `~/.cogpit/port` on start and removes it on exit.
 
 Anything integrating with a running Cogpit should resolve the port in this order:
 
