@@ -44,6 +44,12 @@ export interface SyncOptions {
   backOff?: boolean
   /** Sync this session's transcripts and its subagents' first, whatever the budget and back-off. */
   sessionId?: string
+  /**
+   * Leave the tool index to transcripts written since then: a search reads
+   * tool rows only from its own time window, and backfilling older ones spent
+   * every search's whole budget. Unset indexes everything.
+   */
+  toolIndexSinceMs?: number
   /** Called after each parsed file. */
   onProgress?: (summary: SyncSummary) => void
   /** The clock, for tests. */
@@ -112,8 +118,9 @@ export function syncTranscripts(options: SyncOptions): SyncSummary {
   const indexed = options.index?.indexedFiles()
   const synced = options.memory?.syncedFiles()
   const stale = new Set(options.memory?.planSync(files.map((file) => file.source), synced).map((file) => file.path))
-  const needsIndex = (file: ListedFile) => !!indexed && !((indexed.get(file.path) ?? -Infinity) >= file.mtimeMs)
-  const known = (file: ListedFile) => (!synced || synced.has(file.path)) && (!indexed || indexed.has(file.path))
+  const indexSince = options.toolIndexSinceMs ?? -Infinity
+  const needsIndex = (file: ListedFile) => !!indexed && file.mtimeMs >= indexSince && !((indexed.get(file.path) ?? -Infinity) >= file.mtimeMs)
+  const known = (file: ListedFile) => (!synced || synced.has(file.path)) && (!indexed || indexed.has(file.path) || file.mtimeMs < indexSince)
   const own = (file: ListedFile) => !!options.sessionId && (file.sessionId === options.sessionId || file.parentSessionId === options.sessionId)
   const expectedMs = (file: ListedFile) => synced?.get(file.path)?.syncMs ?? file.size / UNSYNCED_BYTES_PER_MS
   const indexedAt = !synced && options.backOff ? options.index?.indexedAt() : undefined

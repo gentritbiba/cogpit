@@ -141,7 +141,7 @@ export async function searchSessions(
   const opened = openStores(searchIndex, memory, warnings)
   try {
     const { index, memoryStore } = opened
-    const sync = refresh(opened, opts.sessionId)
+    const sync = refresh(opened, opts.sessionId, Date.now() - toolMaxAgeMs)
     if (sync?.unindexed) warnings.push(`${sync.unindexed} transcripts are not indexed yet; run \`cogpit-memory index sync\` to include them.`)
     const behind = sync ? sync.pending - sync.unindexed : 0
 
@@ -232,12 +232,12 @@ function openStores(searchIndex: SearchIndex | null | undefined, memory: MemoryS
   }
 }
 
-function refresh(stores: OpenedStores, sessionId: string | undefined): SyncSummary | null {
+function refresh(stores: OpenedStores, sessionId: string | undefined, toolIndexSinceMs: number): SyncSummary | null {
   const index = stores.ownIndex ? stores.index : null
   const memory = stores.ownMemory ? stores.memoryStore : null
   try {
     if (!index && !memory) return null
-    return syncTranscripts({ index, memory, budgetMs: SEARCH_SYNC_BUDGET_MS, backOff: true, sessionId })
+    return syncTranscripts({ index, memory, budgetMs: SEARCH_SYNC_BUDGET_MS, backOff: true, sessionId, toolIndexSinceMs })
   } catch {
     // A stale store still answers; the next search tries again.
     return null
@@ -386,11 +386,29 @@ function withStatus(response: SearchResponse, prose: ProseSearchResult | null, n
 /**
  * Read the cwd from the first few lines of a session JSONL file.
  * The cwd is stored in the session metadata near the top of the file.
- * Uses a partial read (4 KB) to avoid loading multi-MB session files.
+ * Uses a partial read to avoid loading multi-MB session files: 64 KB, because
+ * a SessionStart hook's output can push the first `cwd` past 6 KB.
  * Caches results to avoid re-reading the same file.
  */
-const CWD_READ_BYTES = 4096
+const CWD_READ_BYTES = 65536
 const cwdCache = new Map<string, string>()
+const RAW_CWD_RE = /"cwd":("(?:[^"\\]|\\.)*")/
+
+/**
+ * The cwd from a record the head read cut off. Sessions Cogpit starts open with
+ * a title or two and a prompt far larger than the head; records write `cwd`
+ * before their message, so it survives the cut.
+ */
+function rawCwd(head: string): string {
+  const match = RAW_CWD_RE.exec(head)
+  if (!match) return ""
+  try {
+    const cwd: unknown = JSON.parse(match[1])
+    return typeof cwd === "string" ? cwd : ""
+  } catch {
+    return ""
+  }
+}
 async function cwdFromFilePath(filePath: string): Promise<string> {
   const cached = cwdCache.get(filePath)
   if (cached !== undefined) return cached
@@ -402,7 +420,7 @@ async function cwdFromFilePath(filePath: string): Promise<string> {
       const { bytesRead } = await fh.read(buf, 0, CWD_READ_BYTES, 0)
       const head = buf.subarray(0, bytesRead).toString("utf-8")
       const lines = head.split("\n", 10).filter(Boolean)
-      const cwd = formatForText(lines.join("\n")).metadataFromLines(lines).cwd
+      const cwd = formatForText(lines.join("\n")).metadataFromLines(lines).cwd || rawCwd(head)
       if (cwd) {
         cwdCache.set(filePath, cwd)
         return cwd

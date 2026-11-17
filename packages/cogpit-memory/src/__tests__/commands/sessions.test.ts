@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach } from "bun:test"
-import { mkdtempSync, writeFileSync, mkdirSync, rmSync } from "node:fs"
+import { mkdtempSync, writeFileSync, mkdirSync, rmSync, utimesSync } from "node:fs"
 import { join } from "node:path"
 import { tmpdir } from "node:os"
 import { installDirsMock, mockDirs, writeCopilotSession, writeSession } from "../fixtures"
@@ -250,6 +250,20 @@ describe("sessions command", () => {
       const result = await currentSession("/Users/me/.config")
       expect(result).not.toBeNull()
       expect(result!.sessionId).toBe("dotpath")
+    })
+
+    it("picks whichever agent's session in the cwd was written last", async () => {
+      const projDir = join(mockDirs.PROJECTS_DIR, "-shared-project")
+      mkdirSync(projDir, { recursive: true })
+      const claudeFile = writeSession(projDir, "claude-one.jsonl", { cwd: "/shared/project" })
+      const copilotFile = writeCopilotSession(mockDirs.COPILOT_SESSIONS_DIR, "33333333-3333-4333-8333-333333333333", { cwd: "/shared/project", full: true })
+      const at = (path: string, seconds: number) => utimesSync(path, seconds, seconds)
+
+      at(claudeFile, 2_000_000_000); at(copilotFile, 1_900_000_000)
+      expect((await currentSession("/shared/project"))?.sessionId).toBe("claude-one")
+
+      at(copilotFile, 2_100_000_000)
+      expect((await currentSession("/shared/project"))?.sessionId).toBe("33333333-3333-4333-8333-333333333333")
     })
 
     it("finds the current Copilot session by cwd", async () => {

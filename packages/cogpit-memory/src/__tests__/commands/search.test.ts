@@ -560,6 +560,30 @@ describe("search command", () => {
       index.close()
     })
 
+    it("reads the cwd of a session whose first prompt is larger than the head read", async () => {
+      const dbPath = join(tmpDir, "test-search.db")
+      const index = new SearchIndex(dbPath)
+      const projDir = join(mockDirs.PROJECTS_DIR, "-work-large-opening")
+      mkdirSync(projDir, { recursive: true })
+      const sessionFile = join(projDir, "large-opening.jsonl")
+      const at = new Date().toISOString()
+      writeFileSync(sessionFile, [
+        { type: "custom-title", customTitle: "Large opening", sessionId: "large-opening" },
+        { type: "user", uuid: "u1", timestamp: at, cwd: "/work/large-opening", sessionId: "large-opening", message: { role: "user", content: `brief ${"x".repeat(8_000)}` } },
+        { type: "assistant", uuid: "a1", timestamp: at, sessionId: "large-opening", message: { role: "assistant", model: "m", id: "m1", content: [
+          { type: "tool_use", id: "t1", name: "Bash", input: { command: "echo opening-cwd-needle" } },
+        ] } },
+        { type: "user", uuid: "u2", timestamp: at, sessionId: "large-opening", message: { role: "user", content: [{ type: "tool_result", tool_use_id: "t1", content: "ok" }] } },
+      ].map((record) => JSON.stringify(record)).join("\n"))
+      index.indexFile(sessionFile, "large-opening")
+
+      const result = await searchSessions("opening-cwd-needle", {}, index, null)
+      const response = result as { results: Array<{ sessionId: string; cwd: string }> }
+      expect(response.results).toEqual([expect.objectContaining({ sessionId: "large-opening", cwd: "/work/large-opening" })])
+
+      index.close()
+    })
+
     it("falls back to raw scan when SearchIndex is null", async () => {
       const projDir = join(mockDirs.PROJECTS_DIR, "-test-project")
       mkdirSync(projDir, { recursive: true })
