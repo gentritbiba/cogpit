@@ -361,6 +361,8 @@ export interface ProgressMessage extends BaseMessage {
 export interface SystemMessage extends BaseMessage {
   type: "system"
   subtype?: string
+  /** Emphasis the CLI gives the record: `info`, `notice`, `suggestion`, `warning` or `error`. */
+  level?: string
   durationMs?: number
   isMeta?: boolean
   content?: string
@@ -607,6 +609,15 @@ export type TurnContentBlock =
       contextUsage?: LocalCommandContextUsage
       usageReport?: LocalCommandUsageReport
     }
+  /**
+   * A line the CLI showed the user mid-session, recorded as an `informational`
+   * system record: a safety stop it continued past, a goal it cleared, earlier
+   * thinking it could not reuse. The first line of `content` is the headline.
+   */
+  | { kind: "notice"; content: string; level: NoticeLevel; timestamp?: string }
+
+/** The CLI's emphasis for a notice. Its `info` level is transcript-only there and never becomes a block. */
+export type NoticeLevel = "notice" | "suggestion" | "warning"
 
 /** One `/context` category row. Classify on `kind`, never on the display name. */
 export interface ContextUsageCategory {

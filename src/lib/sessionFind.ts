@@ -101,6 +101,7 @@ function segmentsOf(turn: Turn): FindSegment[] {
         break
       case "queued_prompt":
       case "recap":
+      case "notice":
         push(part, block.content)
         break
       case "task_notification":

@@ -19,6 +19,7 @@ import type {
   UserMessage,
   MessageAttribution,
   CompactionMeta,
+  NoticeLevel,
   UserContent,
 } from "./types"
 import {
@@ -90,6 +91,16 @@ function isTaskNotificationRecord(msg: UserMessage): boolean {
   const text = extractTextFromContent(msg.message.content)
   if (!text.includes("<task-notification>")) return false
   return text.replace(TASK_NOTIFICATION_BLOCK_RE, "").replace(ANY_TAG_RE, "").trim() === ""
+}
+
+/**
+ * The block level of an `informational` record, or null for `info`, which the
+ * CLI shows only in its transcript view. A record without a level reads as a
+ * plain notice.
+ */
+function noticeLevel(level: string | undefined): NoticeLevel | null {
+  if (level === "info") return null
+  return level === "suggestion" || level === "warning" ? level : "notice"
 }
 
 /** "Task" is the pre-v2.1.63 name of the Agent tool, kept for old sessions. */
@@ -332,6 +343,7 @@ function groupPlanModeBlocks(blocks: TurnContentBlock[]): TurnContentBlock[] {
               || next.kind === "text"
               || next.kind === "queued_prompt"
               || next.kind === "agent_message"
+              || next.kind === "notice"
             ) {
               // Passthrough presentation blocks don't break the scan.
               // Collect them for re-emission in chronological position after the plan block.
@@ -764,6 +776,16 @@ export function buildTurnsWithStarts(messages: RawMessage[]): BuiltTurns {
         }
       }
       flushPendingQueuedPrompts()
+    }
+
+    // A line the CLI showed the user. Like a local command's answer it joins
+    // the turn in flight and never opens one.
+    if (isSystemMessage(msg) && msg.subtype === "informational") {
+      const level = noticeLevel(msg.level)
+      if (current && level && msg.content?.trim()) {
+        current.contentBlocks.push({ kind: "notice", content: msg.content, level, timestamp: msg.timestamp })
+      }
+      continue
     }
 
     // User messages start a new turn (skip meta / tool-result-only messages)

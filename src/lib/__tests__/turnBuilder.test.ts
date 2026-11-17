@@ -961,6 +961,84 @@ describe("local command output", () => {
   })
 })
 
+describe("CLI notices", () => {
+  // Shapes as Claude Code 2.1.296–2.1.318 wrote them, ids shortened.
+  const informational = (content: string, level: string, timestamp: string): SystemMessage => ({
+    parentUuid: "9ed3a709",
+    isSidechain: false,
+    type: "system",
+    subtype: "informational",
+    content,
+    isMeta: false,
+    timestamp,
+    uuid: `informational-${level}-${timestamp}`,
+    level,
+    sessionId: "test-session-1",
+    version: "2.1.318",
+  })
+  const safeguards = informational(
+    "Opus 5.5's safeguards stopped the response above · continuing once with that noted",
+    "notice",
+    "2026-11-04T23:59:25.736Z",
+  )
+  const otherOrganization = informational(
+    "Claude can't use thinking from another organization\nClaude's earlier thinking was written while you were signed in to another organization, so Claude can't use it now.",
+    "warning",
+    "2026-10-13T10:33:34.908Z",
+  )
+
+  it("files the line under the turn in flight, where the CLI showed it", () => {
+    const session = parseSession(toJsonl([
+      userMsg("Edit the PTY server"),
+      toolUseAssistant("Edit", { file_path: "server/pty.ts" }, "toolu_1"),
+      toolResultMsg("toolu_1", "ok"),
+      safeguards,
+      // The CLI tells the model about the stop in a meta prompt, which is not the reader's.
+      userMsg("Your response above was stopped by a safety classifier.", { isMeta: true }),
+      textAssistant("Continuing with the PTY server edit:"),
+    ]))
+
+    expect(session.turns).toHaveLength(1)
+    expect(session.turns[0].contentBlocks.map((block) => block.kind)).toEqual(["tool_calls", "notice", "text"])
+    expect(session.turns[0].contentBlocks[1]).toEqual({
+      kind: "notice",
+      level: "notice",
+      content: safeguards.content,
+      timestamp: "2026-11-04T23:59:25.736Z",
+    })
+  })
+
+  it("keeps the CLI's level and the whole text", () => {
+    const session = parseSession(toJsonl([userMsg("contninue on a ll"), otherOrganization, textAssistant("On it.")]))
+
+    expect(session.turns[0].contentBlocks[0]).toEqual({
+      kind: "notice",
+      level: "warning",
+      content: otherOrganization.content,
+      timestamp: "2026-10-13T10:33:34.908Z",
+    })
+  })
+
+  it("leaves out info lines, which the CLI shows only in its transcript view", () => {
+    const session = parseSession(toJsonl([
+      userMsg("Go"),
+      informational("Loaded 3 skills", "info", "2026-11-04T23:59:25.736Z"),
+      textAssistant("Done."),
+    ]))
+
+    expect(session.turns[0].contentBlocks.map((block) => block.kind)).toEqual(["text"])
+  })
+
+  it("never opens a turn", () => {
+    const records = [safeguards, userMsg("Next prompt"), textAssistant("Sure!"), otherOrganization, userMsg("Again"), textAssistant("Yes.")]
+    const session = parseSession(toJsonl(records))
+
+    expect(session.turns).toHaveLength(2)
+    expect(session.turns[0].contentBlocks.map((block) => block.kind)).toEqual(["text", "notice"])
+    expect(session.turns[1].contentBlocks.map((block) => block.kind)).toEqual(["text"])
+  })
+})
+
 describe("recap / away_summary parsing", () => {
   it("produces a recap content block from a system message with subtype 'away_summary'", () => {
     const jsonl = toJsonl([
