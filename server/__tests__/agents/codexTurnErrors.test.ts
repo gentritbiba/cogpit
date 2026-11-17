@@ -30,6 +30,16 @@ describe("publishTurnError", () => {
     })).toContainEqual({ type: "turn_error", message: "Codex isn't signed in." })
   })
 
+  it.each([
+    ["0.165+", { message: "The 'gpt-does-not-exist-9' model is not supported when using Codex with a ChatGPT account.", codexErrorInfo: "modelNotFound", additionalDetails: null, misalignment: null }],
+    ["0.164 and earlier", { message: "{\"type\":\"error\",\"status\":400,\"error\":{\"type\":\"invalid_request_error\",\"message\":\"The 'gpt-does-not-exist-9' model is not supported when using Codex with a ChatGPT account.\",\"code\":\"model_not_found\"}}", codexErrorInfo: "other", additionalDetails: null, misalignment: null }],
+  ])("asks for another model when Codex %s cannot use the one picked", (_version, error) => {
+    expect(errorsFor(error)).toContainEqual({
+      type: "turn_error",
+      message: "Codex can't use that model. Pick another model.\nThe 'gpt-does-not-exist-9' model is not supported when using Codex with a ChatGPT account.",
+    })
+  })
+
   it("ignores notifications that are not errors", () => {
     const events: StreamBusEvent[] = []
     subscribe(THREAD_ID, (event) => events.push(event))

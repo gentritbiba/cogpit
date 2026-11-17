@@ -20,11 +20,14 @@ describe("model options store", () => {
     expect(getModelOptions("copilot")).toBe(fallbackModelsFor("copilot"))
   })
 
-  it("lists the Codex 0.163 catalog in the codex fallback list", () => {
+  it("lists the Codex 0.167 catalog in the codex fallback list", () => {
     expect(fallbackModelsFor("codex").map((o) => o.value)).toEqual([
       "",
+      "gpt-6.2-sol",
+      "gpt-6.2-astra",
       "gpt-6.1-sol",
       "gpt-6-astra",
+      "gpt-6.1-terra",
       "gpt-6-sol",
       "gpt-6-luna",
       "gpt-5.6-sol",
@@ -45,7 +48,12 @@ describe("model options store", () => {
     expect(astra?.serviceTiers?.[0].description).toBe("2× speed with increased usage")
     expect(models.find((model) => model.value === "gpt-6-sol")?.serviceTiers?.[0].description).toBe("1.5× speed")
     expect(models.find((model) => model.value === "gpt-5.6-sol")?.serviceTiers?.[0].description).toBe("1.5× speed with increased usage")
-    expect(models.find((model) => model.value === "gpt-6.1-sol")?.isDefault).not.toBe(true)
+    expect(models.find((model) => model.value === "gpt-6.2-sol")?.isDefault).not.toBe(true)
+    expect(models.find((model) => model.value === "gpt-6.2-astra")?.serviceTiers?.[0].description).toBe("2× speed with increased usage")
+    const terra = models.find((model) => model.value === "gpt-6.1-terra")
+    expect(terra?.defaultReasoningEffort).toBe("low")
+    expect(terra?.supportedReasoningEfforts?.map((effort) => effort.value)).toContain("ultra")
+    expect(terra?.serviceTiers?.[0].description).toBe("1.5× speed")
     expect(models.find((model) => model.value === "gpt-6-luna")?.supportedReasoningEfforts?.map((effort) => effort.value))
       .not.toContain("ultra")
   })

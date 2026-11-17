@@ -66,6 +66,10 @@ export function agentSignedOutTitle(kind: AgentKind): string {
   return `${descriptorFor(kind).displayName} isn't signed in.`
 }
 
+export function agentModelUnavailableTitle(kind: AgentKind): string {
+  return `${descriptorFor(kind).displayName} can't use that model. Pick another model.`
+}
+
 /**
  * The whole not-installed message for a machine running `platform`: what is
  * wrong on the first line, how to fix it on the second.
@@ -138,6 +142,7 @@ export function agentFailureTitle(kind: AgentKind, failure: AgentFailure): strin
     case "not_installed": return agentNotInstalledTitle(kind)
     case "not_signed_in": return agentSignedOutTitle(kind)
     case "config_invalid": return agentConfigInvalidTitle(kind)
+    case "model_unavailable": return agentModelUnavailableTitle(kind)
     default: return `${descriptorFor(kind).displayName} stopped with an error.`
   }
 }

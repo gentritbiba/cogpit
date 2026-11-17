@@ -90,6 +90,23 @@ describe("TokenUsageIndicator", () => {
     expect(tooltip).toHaveTextContent(`${usd(2000)} monthly limit`)
   })
 
+  it("shows the Codex plan with the ChatGPT workspace it belongs to", async () => {
+    vi.mocked(authFetch).mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: async () => ({
+        available: true,
+        account: { account: { type: "chatgpt", email: "a@example.com", planType: "sci_plus", workspaceName: "Acme Research" }, requiresOpenaiAuth: true },
+        rateLimits: { rateLimits: { planType: "sci_plus", primary: { usedPercent: 12, windowDurationMins: 300 } } },
+      }),
+    } as Response)
+
+    render(<TokenUsageIndicator agentKind="codex" />)
+    const tooltip = await openTooltip(await screen.findByRole("button", { name: /usage/i }))
+    expect(tooltip).toHaveTextContent("Acme Research")
+    expect(tooltip).toHaveTextContent("Academic Researchers Plus")
+  })
+
   it("renders nothing for an account with neither plan windows nor credits", async () => {
     claudeRuntime({ extra_usage: { is_enabled: false, used_credits: null, monthly_limit: null } })
 

@@ -33,10 +33,10 @@ import {
   codexSendError,
   getCodexThreadIdentity,
   isCodexAppServerUnavailable,
-  isCodexModelRejection,
   continueCodexExecution,
   startCodexExecution,
   type CodexExecutionOptions,
+  type CodexTurnModel,
 } from "./codexExecution"
 import {
   activeProcesses,
@@ -151,25 +151,80 @@ function namedModelOptions(options: CodexExecutionOptions): ModelOptions {
   }
 }
 
+// Codex accepts any model name, fails the turn when the provider will not serve
+// it, and keeps that model for the thread's later turns. So each thread's last
+// model Codex ran is kept here, to go back to once a turn's model is refused.
+const acceptedModelOptions = new Map<string, CodexTurnModel>()
+const refusedModelThreads = new Set<string>()
+
+// Turns that started on a waiting model settle with the turn that answers in
+// their place when Codex refuses it.
+const fallbackCompletions = new Map<string, Promise<TurnResult>>()
+const MAX_FALLBACK_COMPLETIONS = 64
+
+function turnKey(sessionId: string, turnId: string): string {
+  return JSON.stringify([sessionId, turnId])
+}
+
+function waitForTurn(sessionId: string, turnId: string): Promise<TurnResult> {
+  return fallbackCompletions.get(turnKey(sessionId, turnId)) ?? codexAppServer.waitForCompletion(sessionId, turnId)
+}
+
+/** What a thread goes back to once its model was refused: the last one it ran, else Codex's recommended one. */
+async function modelToRestore(sessionId: string): Promise<CodexTurnModel | undefined> {
+  const accepted = acceptedModelOptions.get(sessionId)
+  if (accepted?.model) return accepted
+  const recommended = (await fetchCodexModels())?.find((option) => option.value === "")?.resolvedModel
+  return recommended ? { model: recommended } : undefined
+}
+
+/** The send's own settings, without the waiting pick its turn ran on, to start that turn again with. */
+function withoutWaitingPick(requested: CodexExecutionOptions, waiting: ModelOptions): CodexExecutionOptions {
+  const { message: _message, images: _images, commandId: _command, model: _model, effort, fastMode, ...settings } = requested
+  return {
+    ...settings,
+    deliveryIntent: "queue",
+    reloadContextWindow: false,
+    ...(effort && effort !== waiting.effort ? { effort } : {}),
+    ...(fastMode !== undefined && fastMode !== waiting.fastMode ? { fastMode } : {}),
+  }
+}
+
+/**
+ * Follow a started turn to its end. A turn Codex refused its model marks the
+ * thread; given `fallback`, a new turn then answers the refused one's message,
+ * which Codex has already recorded, on the model the thread ran before.
+ */
+function watchTurn(sessionId: string, turnId: string, ran: CodexTurnModel, fallback?: CodexExecutionOptions): void {
+  const completion = codexAppServer.waitForCompletion(sessionId, turnId).then(async (result): Promise<TurnResult> => {
+    if (result.failure?.reason !== "model_unavailable") {
+      acceptedModelOptions.set(sessionId, ran)
+      return result
+    }
+    refusedModelThreads.add(sessionId)
+    if (!fallback) return result
+    const answered = await continueThread(sessionId, fallback).catch(() => null)
+    return answered?.turnId ? waitForTurn(sessionId, answered.turnId) : result
+  })
+  completion.catch(() => {})
+  if (!fallback) return
+  fallbackCompletions.set(turnKey(sessionId, turnId), completion)
+  while (fallbackCompletions.size > MAX_FALLBACK_COMPLETIONS) fallbackCompletions.delete(fallbackCompletions.keys().next().value!)
+}
+
 /** Continue a thread, starting its next turn with what was picked while the last one ran. */
 async function continueThread(sessionId: string, requested: CodexExecutionOptions): Promise<SendOutcome> {
   const waiting = steeredModelOptions.get(sessionId)
   const named = namedModelOptions(requested)
-  let options = waiting ? { ...requested, ...waiting, ...named } : requested
-  let result
-  try {
-    result = await continueCodexExecution(codexAppServer, sessionId, options)
-  } catch (error) {
-    // Codex first checks a waiting model when a turn starts with it.
-    if (!waiting || !isCodexModelRejection(error)) throw error
-    steeredModelOptions.delete(sessionId)
-    if (!waiting.model || named.model) throw error
-    options = requested
-    result = await continueCodexExecution(codexAppServer, sessionId, options)
-  }
+  const restored = !named.model && !waiting?.model && refusedModelThreads.has(sessionId) ? await modelToRestore(sessionId) : undefined
+  const options = { ...requested, ...restored, ...waiting, ...named }
+  const result = await continueCodexExecution(codexAppServer, sessionId, options)
   if (result.action === "started") {
     rememberThreadSettings(sessionId, options)
     steeredModelOptions.delete(sessionId)
+    refusedModelThreads.delete(sessionId)
+    const fallback = waiting?.model !== undefined && options.model === waiting.model ? withoutWaitingPick(requested, waiting) : undefined
+    watchTurn(sessionId, result.turnId, result.turnModel, fallback)
   } else if (result.action === "steered" && Object.keys(named).length > 0) {
     steeredModelOptions.set(sessionId, { ...waiting, ...named })
   }
@@ -813,6 +868,7 @@ export const codexRuntime: AgentRuntime = {
       })
       const identity = await resolveStartedIdentity(started.thread)
       rememberThreadSettings(identity.sessionId, options)
+      watchTurn(identity.sessionId, started.turnId, started.turnModel)
       let initialContent: string | undefined
       try {
         initialContent = await readFile(identity.filePath, "utf-8")
@@ -876,7 +932,7 @@ export const codexRuntime: AgentRuntime = {
     return true
   },
 
-  waitForCompletion: (sessionId, turnId) => codexAppServer.waitForCompletion(sessionId, turnId),
+  waitForCompletion: waitForTurn,
 
   async stop(sessionId) {
     let stopped = false
@@ -909,6 +965,8 @@ export const codexRuntime: AgentRuntime = {
     await unlink(filePath)
     rememberedSettings.delete(sessionId)
     steeredModelOptions.delete(sessionId)
+    acceptedModelOptions.delete(sessionId)
+    refusedModelThreads.delete(sessionId)
     codexQuestions.clear(sessionId)
   },
 
@@ -1042,6 +1100,9 @@ export const codexRuntime: AgentRuntime = {
   shutdown() {
     rememberedSettings.clear()
     steeredModelOptions.clear()
+    acceptedModelOptions.clear()
+    refusedModelThreads.clear()
+    fallbackCompletions.clear()
     return codexAppServer.shutdown()
   },
 }

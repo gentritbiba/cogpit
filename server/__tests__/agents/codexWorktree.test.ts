@@ -31,7 +31,7 @@ vi.mock("../../agents/index", () => ({
   }),
 }))
 vi.mock("../../agents/codexAppServer", () => ({
-  codexAppServer: { startThread: mocks.startThread },
+  codexAppServer: { startThread: mocks.startThread, waitForCompletion: () => new Promise(() => {}) },
   CODEX_CLIENT_CAPABILITIES: { experimentalApi: false },
 }))
 vi.mock("../../agents/codexExecution", () => ({

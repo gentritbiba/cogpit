@@ -201,11 +201,35 @@ function httpStatusIn(info: unknown, depth = 0): number | undefined {
   return undefined
 }
 
+/**
+ * The provider's own sentence when Codex passes its error body through as the
+ * message, which CLIs before 0.165 do for a model they cannot find.
+ */
+function providerErrorMessage(message: string): string {
+  try {
+    const body: unknown = JSON.parse(message)
+    if (isObject(body) && isObject(body.error) && typeof body.error.message === "string" && body.error.message.trim()) return body.error.message.trim()
+  } catch {
+    // Not a JSON body: the message is already the sentence.
+  }
+  return message
+}
+
+/**
+ * A model Codex accepted but the provider would not serve. Codex 0.165+ says
+ * so in its error info; earlier CLIs report `other` with the provider's body.
+ */
+function isModelNotFound(info: unknown, message: string): boolean {
+  return info === "modelNotFound" || info === "model_not_found" || /"code"\s*:\s*"model_not_found"/.test(message)
+}
+
 /** Why a Codex turn failed, from a rollout `task_complete.error` or an app-server `TurnError`. */
 export function codexErrorFailure(error: unknown): AgentFailure | null {
   if (!isObject(error) || typeof error.message !== "string" || !error.message.trim()) return null
+  const info = error.codex_error_info ?? error.codexErrorInfo
+  if (isModelNotFound(info, error.message)) return { reason: "model_unavailable", message: providerErrorMessage(error.message.trim()) }
   const details = [error.additional_details, error.additionalDetails].find((value) => typeof value === "string" && value.trim())
-  const status = httpStatusIn(error.codex_error_info ?? error.codexErrorInfo)
+  const status = httpStatusIn(info)
   const failure = classifyAgentFailure(error.message.trim(), status)
   return failure.reason === "other" && typeof details === "string"
     ? { ...classifyAgentFailure(details, status), message: error.message.trim() }
@@ -665,6 +689,30 @@ export function isCodexSessionText(jsonlText: string): boolean {
     return isCodexRecord(safeParseLine(trimmed))
   }
   return false
+}
+
+const ITEM_COMPLETED = '"type":"event_msg","payload":{"type":"item_completed",'
+const ITEM_TYPE = '"item":{"type":"'
+/** How far into a line its payload's item type is looked for; Codex writes it near character 200. */
+const ITEM_TYPE_WINDOW = 512
+
+/**
+ * True for the `item_completed` events Codex writes beside the records that
+ * carry the same items, other than `SubAgentActivity`, which the parser reads. They are 40 to 70% of a rollout's bytes, and a generated image's
+ * base64 rides in one a second time.
+ *
+ * Quotes inside a JSON string are escaped, so the event and item keys only
+ * match as keys. A `{` before either, other than the line's own and the
+ * payload's, would mean a nested object, and the line is kept.
+ */
+export function isCodexNoiseLine(line: string): boolean {
+  const head = line.slice(0, ITEM_TYPE_WINDOW)
+  const at = head.indexOf(ITEM_COMPLETED)
+  if (at <= 0 || head.lastIndexOf("{", at) !== 0) return false
+  const payload = at + ITEM_COMPLETED.indexOf("{")
+  const item = head.indexOf(ITEM_TYPE, payload)
+  if (item < 0 || head.indexOf("{", payload + 1) !== item + ITEM_TYPE.indexOf("{")) return false
+  return !head.startsWith('SubAgentActivity"', item + ITEM_TYPE.length)
 }
 
 /** True when already-parsed raw records came from this CLI. */

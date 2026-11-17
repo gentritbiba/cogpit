@@ -1,11 +1,13 @@
 import type { AgentKind } from "../../shared/session/agent-descriptors"
-import { classifyAgentFailure } from "../../shared/session/agentFailures"
+import { classifyAgentFailure, type AgentFailureReason } from "../../shared/session/agentFailures"
 
 export interface FailedAgentWork {
   sessionId?: string | null
   kind: AgentKind
   message: string
   httpStatus?: number
+  /** Why, when the agent's error says so in more than its message. */
+  reason?: AgentFailureReason
 }
 
 /**
@@ -17,5 +19,5 @@ export function logAgentFailure(phase: "start" | "turn", work: FailedAgentWork):
   const failure = classifyAgentFailure(work.message, work.httpStatus)
   const status = failure.httpStatus === undefined ? "" : ` status=${failure.httpStatus}`
   const firstLine = work.message.split(/\r?\n/, 1)[0].slice(0, 300)
-  console.warn(`[agent] ${phase} failed session=${work.sessionId || "-"} agent=${work.kind} reason=${failure.reason}${status}: ${firstLine}`)
+  console.warn(`[agent] ${phase} failed session=${work.sessionId || "-"} agent=${work.kind} reason=${work.reason ?? failure.reason}${status}: ${firstLine}`)
 }

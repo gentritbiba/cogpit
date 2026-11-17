@@ -10,10 +10,12 @@ describe("logAgentFailure", () => {
     logAgentFailure("turn", { sessionId: "s1", kind: "claude", message: "Invalid API key · Fix external API key\nmore", httpStatus: 401 })
     logAgentFailure("start", { kind: "codex", message: "Codex isn't installed on this computer.\nInstall it from …" })
     logAgentFailure("turn", { sessionId: "s2", kind: "copilot", message: "unexpected status 503 Service Unavailable" })
+    logAgentFailure("turn", { sessionId: "s3", kind: "codex", message: "The 'gpt-x' model is not supported when using Codex with a ChatGPT account.", reason: "model_unavailable" })
     expect(warn.mock.calls.map(([line]) => line)).toEqual([
       "[agent] turn failed session=s1 agent=claude reason=not_signed_in status=401: Invalid API key · Fix external API key",
       "[agent] start failed session=- agent=codex reason=not_installed: Codex isn't installed on this computer.",
       "[agent] turn failed session=s2 agent=copilot reason=http_status status=503: unexpected status 503 Service Unavailable",
+      "[agent] turn failed session=s3 agent=codex reason=model_unavailable: The 'gpt-x' model is not supported when using Codex with a ChatGPT account.",
     ])
   })
 })

@@ -58,7 +58,17 @@ export interface CodexThreadIdentity {
   filePath: string
 }
 
-export type CodexContinuationResult = { action: "started" | "steered"; threadId: string; turnId: string } | { action: "busy"; threadId: string; turnId?: string }
+/** The model, effort and speed a turn started with: what the send named, else what the thread reported. */
+export interface CodexTurnModel {
+  model?: string
+  effort?: string
+  fastMode?: boolean
+}
+
+export type CodexContinuationResult =
+  | { action: "started"; threadId: string; turnId: string; turnModel: CodexTurnModel }
+  | { action: "steered"; threadId: string; turnId: string }
+  | { action: "busy"; threadId: string; turnId?: string }
 
 type ApprovalPolicy = "on-request" | "never"
 type SandboxMode = "workspace-write" | "read-only" | "danger-full-access"
@@ -159,6 +169,18 @@ async function threadSettings(client: CodexExecutionClient, options: CodexExecut
   return settings
 }
 
+function startedTurnModel(options: CodexExecutionOptions, thread: ThreadResponse): CodexTurnModel {
+  const model = nonEmpty(options.model) ?? nonEmpty(thread.model)
+  const effort = nonEmpty(options.effort) ?? nonEmpty(thread.reasoningEffort)
+  const tier = thread.serviceTier
+  const fastMode = options.fastMode ?? (typeof tier === "string" ? tier === serviceTier(true) : tier === null ? false : undefined)
+  return {
+    ...(model ? { model } : {}),
+    ...(effort ? { effort } : {}),
+    ...(fastMode !== undefined ? { fastMode } : {}),
+  }
+}
+
 function turnSettings(options: CodexExecutionOptions, isResume = false): JsonObject {
   const settings: JsonObject = { cwd: options.cwd }
   if (!isResume || options.permissions) {
@@ -217,7 +239,7 @@ export async function startCodexExecution(
   client: CodexExecutionClient,
   options: CodexExecutionOptions,
   onThreadStarted?: (threadId: string) => void,
-): Promise<{ thread: CodexThread; turnId: string }> {
+): Promise<{ thread: CodexThread; turnId: string; turnModel: CodexTurnModel }> {
   await ensureCodexAppServer(client)
   const input = buildCodexUserInput(options.message, options.images)
   const response = await client.startThread(await threadSettings(client, options))
@@ -229,7 +251,7 @@ export async function startCodexExecution(
     ...(options.commandId ? { clientUserMessageId: options.commandId } : {}),
     ...turnSettings(options),
   })
-  return { thread: response.thread, turnId: turn.turn.id }
+  return { thread: response.thread, turnId: turn.turn.id, turnModel: startedTurnModel(options, response) }
 }
 
 export async function continueCodexExecution(
@@ -279,6 +301,7 @@ export async function continueCodexExecution(
     action: "started",
     threadId: resumedThreadId,
     turnId: turn.turn.id,
+    turnModel: startedTurnModel(options, resumed),
   }
 }
 

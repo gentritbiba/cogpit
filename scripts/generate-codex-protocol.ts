@@ -4,7 +4,7 @@ import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { spawnSync } from "node:child_process"
 
-const version = "0.163.0"
+const version = "0.167.2"
 const output = new URL("../server/agents/generated/", import.meta.url)
 type Schema = { [key: string]: unknown; $ref?: string; type?: string | string[]; properties?: Record<string, Schema>; required?: string[]; enum?: unknown[]; const?: unknown; anyOf?: Schema[]; oneOf?: Schema[]; allOf?: Schema[]; items?: Schema; additionalProperties?: boolean | Schema; definitions?: Record<string, Schema> }
 interface Bundle { version: string; requests: Record<string, string>; definitions: Record<string, Schema> }

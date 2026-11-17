@@ -58,6 +58,7 @@ const {
     interruptTurn: vi.fn(),
     getActiveTurnId: vi.fn(),
     call: vi.fn(async () => ({ config: {} })),
+    waitForCompletion: vi.fn(() => new Promise(() => {})),
   }
   const mockCopilotRuntime = {
     createSession: vi.fn(),

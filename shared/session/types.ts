@@ -46,7 +46,7 @@ export interface SessionStatusInfo {
   backgroundAgents?: BackgroundAgent[]
 }
 
-export type AgentFailureReason = "not_installed" | "not_signed_in" | "config_invalid" | "http_status" | "other"
+export type AgentFailureReason = "not_installed" | "not_signed_in" | "config_invalid" | "model_unavailable" | "http_status" | "other"
 
 /** A failure sorted into what the user can do about it; see `agentFailures.ts`. */
 export interface AgentFailure {
