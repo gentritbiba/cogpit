@@ -1,8 +1,9 @@
 import { BROWSER_CONTEXT_APPEND } from "../browser/agentContext"
 import { agentBinInstalled, cogpitAgentEnv, browserShimInstalled } from "../browser/agentEnv"
 import { NO_COGPIT_SESSION } from "../browser/paths"
+import { MEDIA_CONTEXT_APPEND } from "./replyContext"
 
-interface BrowserConfigClient {
+interface SessionConfigClient {
   call<T>(method: string, params?: unknown): Promise<T>
 }
 
@@ -11,13 +12,20 @@ interface EffectiveConfig {
   shell_environment_policy?: { set?: { PATH?: string } }
 }
 
-export async function codexBrowserConfig(
-  client: BrowserConfigClient,
+/** Config overrides that give a Codex thread Cogpit's tools and guidance. */
+export async function codexSessionConfig(
+  client: SessionConfigClient,
   cwd: string,
   sessionId = NO_COGPIT_SESSION,
 ): Promise<Record<string, string>> {
-  if (!agentBinInstalled()) return {}
   const { config } = await client.call<{ config: EffectiveConfig }>("config/read", { cwd })
+  // Setting developer_instructions replaces the user's own, so they lead.
+  const developerInstructions = [
+    config.developer_instructions,
+    MEDIA_CONTEXT_APPEND,
+    browserShimInstalled() ? BROWSER_CONTEXT_APPEND : null,
+  ].filter(Boolean).join("\n\n")
+  if (!agentBinInstalled()) return { developer_instructions: developerInstructions }
   const env = cogpitAgentEnv({
     ...process.env,
     PATH: config.shell_environment_policy?.set?.PATH ?? process.env.PATH,
@@ -27,12 +35,6 @@ export async function codexBrowserConfig(
     "shell_environment_policy.set.PATH": env.PATH!,
     "shell_environment_policy.set.COGPIT_SESSION_ID": sessionId,
     ...(env.COGPIT_PORT ? { "shell_environment_policy.set.COGPIT_PORT": env.COGPIT_PORT } : {}),
-    ...(browserShimInstalled()
-      ? {
-          developer_instructions: [config.developer_instructions, BROWSER_CONTEXT_APPEND]
-            .filter(Boolean)
-            .join("\n\n"),
-        }
-      : {}),
+    developer_instructions: developerInstructions,
   }
 }

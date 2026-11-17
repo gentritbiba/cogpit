@@ -351,6 +351,7 @@ describe("sdk-session browser support", () => {
   it("tells every agent about the panel and hooks a subagent's browser calls", async () => {
     const { BROWSER_CONTEXT_APPEND, BROWSER_HOOK_TOOL, browserPreToolUseHook } =
       await import("../browser/agentContext")
+    const { MEDIA_CONTEXT_APPEND } = await import("../agents/replyContext")
     const { ensureShim } = await import("../browser/shim")
     ensureShim("/usr/local/bin/agent-browser")
 
@@ -359,7 +360,7 @@ describe("sdk-session browser support", () => {
     await waitUntil(() => captured.length === 1)
 
     const { systemPrompt, hooks } = captured[0].options
-    expect(systemPrompt).toEqual({ type: "preset", preset: "claude_code", append: BROWSER_CONTEXT_APPEND })
+    expect(systemPrompt).toEqual({ type: "preset", preset: "claude_code", append: `${MEDIA_CONTEXT_APPEND}\n\n${BROWSER_CONTEXT_APPEND}` })
     expect(hooks!.PreToolUse).toEqual([{ matcher: BROWSER_HOOK_TOOL, hooks: [browserPreToolUseHook] }])
   })
 
@@ -372,7 +373,8 @@ describe("sdk-session browser support", () => {
     expect(env!.PATH).toBe(process.env.PATH)
     expect(env!.COGPIT_SESSION_ID).toBe("browser-absent")
     expect(plugins).toBeUndefined()
-    expect(systemPrompt).toBeUndefined()
+    const { MEDIA_CONTEXT_APPEND } = await import("../agents/replyContext")
+    expect(systemPrompt).toEqual({ type: "preset", preset: "claude_code", append: MEDIA_CONTEXT_APPEND })
     expect(hooks).toBeUndefined()
   })
 })

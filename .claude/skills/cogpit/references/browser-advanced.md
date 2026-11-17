@@ -1,8 +1,8 @@
 # Browser requests, bot checks and screenshot markup
 
-List them and read their notes over Cogpit's HTTP API. The packaged app binds an
-ephemeral port unless network access pins 19384, so resolve the port in this
-order:
+List them and read their notes over Cogpit's HTTP API. The packaged app reuses
+its last port (19383 by default, any free one when that is taken) unless network
+access pins 19384, so resolve the port in this order:
 
 ```bash
 PORT="${COGPIT_PORT:-$(cat ~/.cogpit/port 2>/dev/null || echo 19384)}"

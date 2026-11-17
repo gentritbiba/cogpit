@@ -4,7 +4,7 @@ import { openFile } from "@/lib/fileOpener"
 import { MarkdownCodeBlock } from "./MarkdownCodeBlock"
 import { LocalImage } from "./LocalImage"
 import { LocalVideo } from "./LocalVideo"
-import { IMAGE_EXTENSIONS, VIDEO_EXTENSIONS, hasVideoExtension } from "./localMedia"
+import { IMAGE_EXTENSIONS, VIDEO_EXTENSIONS, hasVideoExtension, localFilePath, remarkLocalPaths } from "./localMedia"
 import { useCapability } from "@/hooks/useCapability"
 import { Separator } from "@/components/ui/separator"
 import {
@@ -27,19 +27,6 @@ export function parseLocalFileHref(href: string | undefined): LocalFileTarget | 
   if (!href) return null
 
   let target = href
-  if (target.toLowerCase().startsWith("file://")) {
-    try {
-      const fileUrl = new URL(target)
-      target = `${fileUrl.pathname}${fileUrl.hash}`
-    } catch {
-      return null
-    }
-  }
-
-  const isPosixPath = target.startsWith("/") && !target.startsWith("//")
-  const isWindowsPath = /^\/?[a-z]:[\\/]/i.test(target)
-  if (!isPosixPath && !isWindowsPath) return null
-
   let line: number | undefined
   let column: number | undefined
 
@@ -57,16 +44,8 @@ export function parseLocalFileHref(href: string | undefined): LocalFileTarget | 
     }
   }
 
-  try {
-    target = decodeURIComponent(target)
-  } catch {
-    return null
-  }
-
-  // file:///C:/path is represented as /C:/path by URL.pathname.
-  if (/^\/[a-z]:[\\/]/i.test(target)) target = target.slice(1)
-
-  return { path: target, line, column }
+  const path = localFilePath(target)
+  return path ? { path, line, column } : null
 }
 
 /**
@@ -114,10 +93,11 @@ function ExternalLink({
 
 /**
  * Matches an absolute image or video path standing alone on a line, such as
- * /tmp/screenshot.png, that is not already wrapped in markdown media syntax.
+ * /tmp/screenshot.png or C:\Users\me\shot.png, that is not already wrapped in
+ * markdown media syntax.
  */
 const MEDIA_EXT_PATTERN = [...IMAGE_EXTENSIONS, ...VIDEO_EXTENSIONS].map(e => e.slice(1)).join("|")
-const BARE_MEDIA_PATH_RE = new RegExp(`^([ \\t]*)(\\/[^\\s]+\\.(?:${MEDIA_EXT_PATTERN}))[ \\t]*$`, "gim")
+const BARE_MEDIA_PATH_RE = new RegExp(`^([ \\t]*)((?:\\/|[a-z]:[\\\\/])[^\\s]+\\.(?:${MEDIA_EXT_PATTERN}))[ \\t]*$`, "gim")
 
 /**
  * Converts bare media file paths into markdown image syntax so they render inline.
@@ -305,4 +285,4 @@ export const markdownComponents: Components = {
   },
 }
 
-export const markdownPlugins: NonNullable<Options["remarkPlugins"]> = [remarkGfm]
+export const markdownPlugins: NonNullable<Options["remarkPlugins"]> = [remarkGfm, remarkLocalPaths]

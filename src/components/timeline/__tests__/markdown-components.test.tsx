@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { fireEvent, render, screen } from "@testing-library/react"
 import ReactMarkdown from "react-markdown"
 import { authUrl, jsonFetch } from "@/lib/auth"
-import { markdownComponents, parseLocalFileHref, preprocessMediaPaths } from "../markdown-components"
+import { markdownComponents, markdownPlugins, parseLocalFileHref, preprocessMediaPaths } from "../markdown-components"
 import { __resetCapabilitiesForTest, setMe } from "@/lib/capabilities"
 import { NO_CAPABILITIES } from "../../../../shared/contracts/identity"
 
@@ -31,6 +31,19 @@ describe("markdown file links", () => {
       path: "/Users/me/project/src/app.ts",
       line: 12,
       column: 3,
+    })
+  })
+
+  it("parses Windows paths, including the /C:/ form markdown links arrive in", () => {
+    expect(parseLocalFileHref(String.raw`C:\repo\src\app.ts:42`)).toEqual({
+      path: String.raw`C:\repo\src\app.ts`,
+      line: 42,
+      column: undefined,
+    })
+    expect(parseLocalFileHref("/C:%5Crepo%5Csrc%5Capp.ts#L3")).toEqual({
+      path: String.raw`C:\repo\src\app.ts`,
+      line: 3,
+      column: undefined,
     })
   })
 
@@ -110,6 +123,24 @@ describe("markdown images", () => {
     expect(img.getAttribute("src")).toBe(
       "/api/local-file?path=%2Ftmp%2Fscreenshot.png"
     )
+  })
+
+  it.each([
+    ["a Windows path", String.raw`![shot](C:\Users\me\shot.png)`, String.raw`C:\Users\me\shot.png`],
+    ["a Windows path with forward slashes", "![shot](C:/Users/me/shot.png)", "C:/Users/me/shot.png"],
+    ["a Windows path with spaces", String.raw`![shot](<C:\Users\John Doe\shot.png>)`, String.raw`C:\Users\John Doe\shot.png`],
+    ["a Windows file URL", "![shot](file:///C:/Users/me/shot.png)", "C:/Users/me/shot.png"],
+    ["a POSIX file URL", "![shot](file:///tmp/my%20shot.png)", "/tmp/my shot.png"],
+    ["a POSIX path with spaces", "![shot](</tmp/my shot.png>)", "/tmp/my shot.png"],
+  ])("routes %s through the local file proxy", (_label, markdown, path) => {
+    render(
+      <ReactMarkdown components={markdownComponents} remarkPlugins={markdownPlugins}>
+        {markdown}
+      </ReactMarkdown>,
+    )
+
+    const img = screen.getByRole("img", { name: "shot" }) as HTMLImageElement
+    expect(img.getAttribute("src")).toBe(`/api/local-file?path=${encodeURIComponent(path)}`)
   })
 
   it("does not request a local image proxy for members", () => {
@@ -238,6 +269,12 @@ describe("preprocessMediaPaths", () => {
   it("promotes bare image and video paths on their own line to markdown media", () => {
     expect(preprocessMediaPaths("Result:\n/tmp/shot.PNG\n  /tmp/run.mp4  \nnot /tmp/inline.mp4 here")).toBe(
       "Result:\n![/tmp/shot.PNG](/tmp/shot.PNG)\n  ![/tmp/run.mp4](/tmp/run.mp4)\nnot /tmp/inline.mp4 here",
+    )
+  })
+
+  it("promotes bare Windows media paths", () => {
+    expect(preprocessMediaPaths(String.raw`C:\Users\me\shot.png`)).toBe(
+      String.raw`![C:\Users\me\shot.png](C:\Users\me\shot.png)`,
     )
   })
 

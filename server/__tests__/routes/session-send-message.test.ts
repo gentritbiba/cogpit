@@ -262,7 +262,7 @@ beforeEach(async () => {
   })
   mockCodexAppServer.startTurn.mockResolvedValue({ turn: { id: "turn-new" } })
   mockCodexAppServer.steerTurn.mockResolvedValue({ turnId: "turn-active" })
-  mockCodexAppServer.call.mockResolvedValue({})
+  mockCodexAppServer.call.mockResolvedValue({ config: {} })
   mockCopilotRuntime.isSessionActive.mockReturnValue(false)
   mockCopilotRuntime.isTurnActive.mockReturnValue(false)
   mockCopilotRuntime.getPendingPermissions.mockReturnValue([])

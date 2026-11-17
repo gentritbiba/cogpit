@@ -4,6 +4,7 @@ import remarkGfm from "remark-gfm"
 import { ArrowRight, Bot, ChevronDown, ChevronUp, CircleDot, GitCommitHorizontal, GitPullRequest, UserRound } from "lucide-react"
 import { Separator } from "@/components/ui/separator"
 import { markdownComponents } from "@/components/timeline/markdown-components"
+import { remarkLocalPaths } from "@/components/timeline/localMedia"
 import { MarkdownCodeBlock } from "@/components/timeline/MarkdownCodeBlock"
 import type { AgentKind } from "@/lib/agents"
 import { agentIcon } from "@/lib/agents/presentation"
@@ -99,7 +100,7 @@ function Time({ at, short, className }: { at: number; short?: boolean; className
 /** A message's text as the chat shows it, without the opening mentions a header already names. */
 export const CrewChatBody = memo(function CrewChatBody({ text: source, mentions, handles, tints, rootId }: { text: string; mentions: readonly string[]; handles: Handles; tints: Tints; rootId: string }) {
   const text = stripLeadingMentions(source, mentions, handles)
-  const plugins = useMemo<NonNullable<Options["remarkPlugins"]>>(() => [remarkGfm, [remarkCrewChat, { handles }]], [handles])
+  const plugins = useMemo<NonNullable<Options["remarkPlugins"]>>(() => [remarkGfm, remarkLocalPaths, [remarkCrewChat, { handles }]], [handles])
   const components = useMemo(() => chatComponents(rootId, tints), [rootId, tints])
   return (
     <Clamp>

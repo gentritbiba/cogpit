@@ -11,7 +11,7 @@ import {
 } from "./codexAppServer"
 import { descriptorFor, type PermissionsConfig } from "../../shared/session/agent-descriptors"
 import { storeFor } from "."
-import { codexBrowserConfig } from "./codexBrowser"
+import { codexSessionConfig } from "./codexSessionConfig"
 import { pluginSkillContext } from "../plugins/skillContext"
 import { AgentRuntimeError } from "./runtimeTypes"
 import { uncompressedTranscriptName } from "./transcriptFile"
@@ -149,14 +149,9 @@ async function threadSettings(client: CodexExecutionClient, options: CodexExecut
   if (model) settings.model = model
   const tier = serviceTier(options.fastMode)
   if (tier !== undefined) settings.serviceTier = tier
-  const browserConfig = await codexBrowserConfig(client, options.cwd, sessionId)
-  const config: JsonObject = { ...browserConfig }
+  const config: JsonObject = { ...await codexSessionConfig(client, options.cwd, sessionId) }
   const instructions = await pluginSkillContext(options.cwd)
-  if (instructions) {
-    const existing = typeof config.developer_instructions === "string" ? config.developer_instructions
-      : (await client.call<{ config: { developer_instructions?: string } }>("config/read", { cwd: options.cwd })).config.developer_instructions
-    config.developer_instructions = [existing, instructions].filter(Boolean).join("\n\n")
-  }
+  if (instructions) config.developer_instructions = [config.developer_instructions, instructions].filter(Boolean).join("\n\n")
   if (options.contextWindowTokens != null) {
     config.model_context_window = options.contextWindowTokens
   }

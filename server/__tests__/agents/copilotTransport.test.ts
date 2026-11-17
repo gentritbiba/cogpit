@@ -5,6 +5,7 @@ import { tmpdir } from "node:os"
 import { delimiter, join } from "node:path"
 import { PassThrough } from "node:stream"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
+import { MEDIA_CONTEXT_APPEND } from "../../agents/replyContext"
 
 vi.mock("../../browser/platform", () => ({ browserUnsupportedReason: () => null }))
 import {
@@ -385,6 +386,7 @@ describe("CopilotRuntime", () => {
     const create = harness.calls.find(({ method }) => method === "session.create")
     expect(create?.params).toMatchObject({
       sessionId: "created",
+      systemMessage: { mode: "append", content: MEDIA_CONTEXT_APPEND },
       workingDirectory: "/workspace",
       model: "gpt-5",
       streaming: false,

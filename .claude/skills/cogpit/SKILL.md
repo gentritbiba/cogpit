@@ -41,9 +41,9 @@ the sessions you start to yours and reach this server and its memory store.
 
 ## Show media
 
-Put markdown image syntax in the reply itself; a tool preview alone does not
-show the user the file. Local paths must be absolute and live on the server
-hosting the session. Download remote media before showing it.
+Put markdown image syntax in the reply itself; a tool preview does not show the
+user the file. Use absolute paths on the session's host, in angle brackets when
+they have spaces (`![Shot](<C:/My Shots/a.png>)`); download remote media first.
 
 ```markdown
 ![Fixed checkout](/tmp/checkout.png)

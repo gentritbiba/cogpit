@@ -2,12 +2,12 @@
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import { join, resolve } from "node:path"
 import { CodexAppServerError, CodexAppServerRpcError, type CodexThread } from "../../agents/codexAppServer"
-import { codexBrowserConfig } from "../../agents/codexBrowser"
+import { codexSessionConfig } from "../../agents/codexSessionConfig"
 
-vi.mock("../../agents/codexBrowser", () => ({ codexBrowserConfig: vi.fn(async () => ({})) }))
+vi.mock("../../agents/codexSessionConfig", () => ({ codexSessionConfig: vi.fn(async () => ({})) }))
 
 beforeEach(() => {
-  vi.mocked(codexBrowserConfig).mockReset().mockResolvedValue({})
+  vi.mocked(codexSessionConfig).mockReset().mockResolvedValue({})
 })
 import {
   buildCodexAccessSettings,
@@ -76,7 +76,7 @@ describe("Codex execution mappings", () => {
     expect(codexSendError(new CodexAppServerRpcError("turn/steer", { code: -32602, message: "There is an issue with the selected model" }))).toMatchObject({ status: 500, code: "INTERNAL_ERROR" })
   })
   it("passes the context limit on start and resume without losing browser configuration", async () => {
-    vi.mocked(codexBrowserConfig).mockResolvedValue({ developer_instructions: "Browser instructions" })
+    vi.mocked(codexSessionConfig).mockResolvedValue({ developer_instructions: "Browser instructions" })
     const runtime = client()
     await startCodexExecution(runtime, { cwd: "/work", message: "Build", contextWindowTokens: 1000000 })
     expect(runtime.startThread).toHaveBeenCalledWith(expect.objectContaining({
@@ -254,7 +254,7 @@ describe("Codex execution mappings", () => {
 
   it("configures browser routing and instructions before the first turn in full access mode", async () => {
     const config = { "shell_environment_policy.set.PATH": "/managed/bin:/usr/bin", developer_instructions: "Browser panel guidance" }
-    vi.mocked(codexBrowserConfig).mockResolvedValue(config)
+    vi.mocked(codexSessionConfig).mockResolvedValue(config)
     const runtime = client()
     await startCodexExecution(runtime, { cwd: "/work", message: "Open site", permissions: { mode: "bypassPermissions" } })
     expect(runtime.startThread).toHaveBeenCalledWith(expect.objectContaining({ config, approvalPolicy: "never", sandbox: "danger-full-access" }))
@@ -263,10 +263,10 @@ describe("Codex execution mappings", () => {
 
   it("supplies browser configuration and the session id for disk resume", async () => {
     const config = { "shell_environment_policy.set.COGPIT_SESSION_ID": "thread-1" }
-    vi.mocked(codexBrowserConfig).mockResolvedValue(config)
+    vi.mocked(codexSessionConfig).mockResolvedValue(config)
     const runtime = client()
     await continueCodexExecution(runtime, "thread-1", { cwd: "/work", message: "Continue" })
-    expect(codexBrowserConfig).toHaveBeenCalledWith(runtime, "/work", "thread-1")
+    expect(codexSessionConfig).toHaveBeenCalledWith(runtime, "/work", "thread-1")
     expect(runtime.resumeThread).toHaveBeenCalledWith("thread-1", expect.objectContaining({ config }))
   })
 

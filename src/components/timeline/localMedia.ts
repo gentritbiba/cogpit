@@ -18,19 +18,61 @@ export function hasVideoExtension(path: string | undefined): boolean {
   return hasExtensionIn(path, VIDEO_EXTENSIONS)
 }
 
-/** True for an absolute filesystem path, as opposed to a web or data URL. */
-function isLocalPath(src: string | undefined): src is string {
-  if (!src) return false
-  if (src.startsWith("http://") || src.startsWith("https://") || src.startsWith("data:")) return false
-  return src.startsWith("/")
+const WINDOWS_DRIVE_PATH = /^[a-z]:[\\/]/i
+
+/**
+ * The absolute filesystem path `src` names, or null for a web or data URL.
+ * Markdown percent-encodes spaces and backslashes, and `remarkLocalPaths`
+ * writes Windows paths as `/C:/…`, so both are undone here.
+ */
+export function localFilePath(src: string | undefined): string | null {
+  if (!src || src.startsWith("//")) return null
+  let path = src
+  try {
+    path = decodeURIComponent(src)
+  } catch { /* a literal % in a raw path */ }
+  if (path.startsWith("/") && WINDOWS_DRIVE_PATH.test(path.slice(1))) return path.slice(1)
+  return path.startsWith("/") || WINDOWS_DRIVE_PATH.test(path) ? path : null
 }
 
 export function isLocalImagePath(src: string | undefined): src is string {
-  return isLocalPath(src) && hasImageExtension(src)
+  return localFilePath(src) !== null && hasImageExtension(src)
 }
 
 export function isLocalVideoPath(src: string | undefined): src is string {
-  return isLocalPath(src) && hasVideoExtension(src)
+  return localFilePath(src) !== null && hasVideoExtension(src)
+}
+
+interface UrlNode {
+  type: string
+  url?: string
+  children?: UrlNode[]
+}
+
+/**
+ * react-markdown drops any URL whose scheme it does not trust, and reads
+ * `C:\…` as the scheme `c:`. Rewriting Windows paths and `file://` URLs to
+ * `/C:/…` or `/tmp/…` keeps them, and `localFilePath` reads them back.
+ */
+export function remarkLocalPaths() {
+  return (tree: UrlNode) => { rewriteUrls(tree) }
+}
+
+function rewriteUrls(node: UrlNode): void {
+  if (typeof node.url === "string") node.url = markdownSafeLocalUrl(node.url)
+  node.children?.forEach(rewriteUrls)
+}
+
+function markdownSafeLocalUrl(url: string): string {
+  if (/^file:\/\//i.test(url)) {
+    try {
+      const parsed = new URL(url)
+      return parsed.pathname + parsed.hash
+    } catch {
+      return url
+    }
+  }
+  return /^[a-z]:(?:[\\/]|%5c)/i.test(url) ? `/${url}` : url
 }
 
 /**
@@ -41,8 +83,9 @@ export function isLocalVideoPath(src: string | undefined): src is string {
  * is never leaked to a third-party host.
  */
 export function resolveMediaSrc(src: string | undefined): string | undefined {
-  if (isLocalImagePath(src) || isLocalVideoPath(src)) {
-    return authUrl(`/api/local-file?path=${encodeURIComponent(src)}`)
+  const path = localFilePath(src)
+  if (path && (hasImageExtension(path) || hasVideoExtension(path))) {
+    return authUrl(`/api/local-file?path=${encodeURIComponent(path)}`)
   }
   return src
 }
