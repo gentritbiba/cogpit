@@ -4,13 +4,13 @@ import { beforeEach, describe, expect, it, vi } from "vitest"
 const mockSharedAgentCheck = vi.hoisted(() => vi.fn())
 vi.mock("../../agents/agentCheck", () => ({ sharedAgentCheck: mockSharedAgentCheck }))
 const mockRestore = vi.hoisted(() => vi.fn())
-vi.mock("../../agents/configRepair", async (importOriginal) => ({
-  ...await importOriginal<typeof import("../../agents/configRepair")>(),
+vi.mock("../../agents/startupFailures", async (importOriginal) => ({
+  ...await importOriginal<typeof import("../../agents/startupFailures")>(),
   restoreReportedConfig: mockRestore,
 }))
 
 import { registerAgentCheckRoutes } from "../../routes/agent-check"
-import { ConfigRestoreError } from "../../agents/configRepair"
+import { ConfigRestoreError } from "../../agents/startupFailures"
 import { collectRoutes, createMockReqRes, getRouteHandler } from "../http-fixtures"
 
 const handler = getRouteHandler(collectRoutes(registerAgentCheckRoutes), "/api/agent-check")

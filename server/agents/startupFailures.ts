@@ -1,7 +1,8 @@
 import { readFile, writeFile } from "node:fs/promises"
 import { homedir } from "node:os"
 import { basename, dirname, join, resolve } from "node:path"
-import { agentConfigInvalidMessage, type InvalidAgentConfig } from "../../shared/session/agentFailures"
+import { descriptorFor } from "../../shared/session/agent-descriptors"
+import { agentConfigInvalidMessage, agentTerminalOnlyMessage, type InvalidAgentConfig } from "../../shared/session/agentFailures"
 
 /**
  * Claude Code refuses to start while its global config file is not valid JSON
@@ -10,6 +11,28 @@ import { agentConfigInvalidMessage, type InvalidAgentConfig } from "../../shared
  * from the error, and nothing a start did not name can be.
  */
 const reported = new Map<string, InvalidAgentConfig>()
+
+/**
+ * Claude Code refuses to resume a session started in Code Mode (2.1.323+),
+ * which runs only in its interactive terminal. The refusal carries no reason
+ * code, only its text, which ends on the command that resumes it there.
+ */
+const CODE_MODE_REFUSAL = /This session was started in Code Mode\b.*can't be resumed/
+const CODE_MODE_COMMAND = /Resume it in the terminal: (.+)$/m
+const CODE_MODE_TITLE = "This session was started in Code Mode, so it can only be continued in Claude Code in a terminal."
+
+function describeCodeModeRefusal(result: Record<string, unknown>, detail: string): string | null {
+  if (!CODE_MODE_REFUSAL.test(detail)) return null
+  const sessionId = typeof result.session_id === "string" ? result.session_id : ""
+  const command = CODE_MODE_COMMAND.exec(detail)?.[1].trim()
+    || `CLAUDE_CODE_EXPERIMENTAL_CODE_MODE=1 ${descriptorFor("claude").resume.command(sessionId)}`
+  return agentTerminalOnlyMessage(CODE_MODE_TITLE, command, detail)
+}
+
+/** The plain-words message for a failed start a person can fix, or null for any other result. */
+export function describeStartupFailure(result: Record<string, unknown>, detail: string): string | null {
+  return describeInvalidConfig(result, detail) ?? describeCodeModeRefusal(result, detail)
+}
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value)
@@ -22,11 +45,8 @@ function invalidConfigFileOf(result: Record<string, unknown>): InvalidAgentConfi
   return { path: file.path, backupPath: typeof file.backup_path === "string" ? file.backup_path : null }
 }
 
-/**
- * The message for a start that failed over an invalid config file, which also
- * remembers the file and its backup. Null for any other result.
- */
-export function describeInvalidConfig(result: Record<string, unknown>, detail: string): string | null {
+/** The message for a start that failed over an invalid config file, which also remembers the file and its backup. */
+function describeInvalidConfig(result: Record<string, unknown>, detail: string): string | null {
   const file = invalidConfigFileOf(result)
   if (!file) return null
   reported.set(file.path, file)

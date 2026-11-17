@@ -25,7 +25,7 @@ import { appendToSystemPrompt, withControlQuery } from "./agents/sdk"
 import { pluginSkillContext } from "./plugins/skillContext"
 import { readSdkRateLimit } from "./agents/rateLimit"
 import { logAgentFailure } from "./agents/failureLog"
-import { describeInvalidConfig } from "./agents/configRepair"
+import { describeStartupFailure } from "./agents/startupFailures"
 import type { UserQuestionAnswers } from "./agents/runtimeTypes"
 import { BROWSER_CONTEXT_APPEND, BROWSER_HOOK_TOOL, browserPreToolUseHook } from "./browser/agentContext"
 import { MEDIA_CONTEXT_APPEND } from "./agents/replyContext"
@@ -506,7 +506,7 @@ export function describeErrorResult(result: Record<string, unknown>): string {
     : []
   if (errors.length > 0) {
     const detail = presentTurnError(errors.join("\n"))
-    return describeInvalidConfig(result, detail) ?? detail
+    return describeStartupFailure(result, detail) ?? detail
   }
   const subtype = result.subtype
   return `Claude returned an error${subtype ? ` (${String(subtype)})` : ""}`

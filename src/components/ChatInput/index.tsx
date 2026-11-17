@@ -195,6 +195,7 @@ const ScopedChatInput = forwardRef<ChatInputHandle, ChatInputProps & { scope: st
   const signInDirName = sessionSource?.dirName ?? composerIdentity
   const signInTarget = useMemo(() => signInTargetFor(agentKind ?? DEFAULT_AGENT_KIND, signInDirName), [agentKind, signInDirName])
   const agentInstalled = isAgentInstalled(useAgentAvailability(), agentKind ?? DEFAULT_AGENT_KIND)
+  const terminalAt = useMemo(() => ({ path: projectCwd ?? undefined, dirName: sessionSource?.dirName }), [projectCwd, sessionSource?.dirName])
   const openQuoteSource = useSessionControls().actions.handleOpenQuoteSource
 
   const draftNow = useCallback((): ComposerDraft => ({ v: 1, text: textRef.current, context: contextRef.current, attachments: imagesRef.current }), [])
@@ -705,11 +706,11 @@ const ScopedChatInput = forwardRef<ChatInputHandle, ChatInputProps & { scope: st
             </div>
           </div>
         </div>
-        {status === "error" && error && <ErrorBanner key={error} error={error} agentKind={agentKind ?? DEFAULT_AGENT_KIND} />}
+        {status === "error" && error && <ErrorBanner key={error} error={error} agentKind={agentKind ?? DEFAULT_AGENT_KIND} terminalAt={terminalAt} />}
         {/* Failures with no HTTP response behind them arrive over SSE instead.
             Mutually exclusive with the banner above: the server only publishes
             when nothing is waiting on a response. */}
-        {turnError && <ErrorBanner key={turnError} error={turnError} agentKind={agentKind ?? DEFAULT_AGENT_KIND} />}
+        {turnError && <ErrorBanner key={turnError} error={turnError} agentKind={agentKind ?? DEFAULT_AGENT_KIND} terminalAt={terminalAt} />}
       </div>
     </div>
   )

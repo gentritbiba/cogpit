@@ -1,6 +1,6 @@
 import type { AgentCheckResponse } from "../../shared/contracts/agentCheck"
 import { sharedAgentCheck } from "../agents/agentCheck"
-import { ConfigRestoreError, restoreReportedConfig } from "../agents/configRepair"
+import { ConfigRestoreError, restoreReportedConfig } from "../agents/startupFailures"
 import { sendJson, withJsonBody, type UseFn } from "../http"
 
 /**

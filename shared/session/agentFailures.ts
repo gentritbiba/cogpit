@@ -119,6 +119,19 @@ export function agentConfigInvalidIn(message: string): (InvalidAgentConfig & { k
   }
 }
 
+const TERMINAL_PREFIX = "Continue it in a terminal: "
+
+/** A failure whose fix is to carry on in the agent's own terminal: what happened, the command, then the agent's own words. */
+export function agentTerminalOnlyMessage(title: string, command: string, detail: string): string {
+  return [title, `${TERMINAL_PREFIX}${command}`, detail].join("\n")
+}
+
+/** The command a message from `agentTerminalOnlyMessage` hands to a terminal, or null for any other message. */
+export function agentTerminalCommandIn(message: string): string | null {
+  const line = message.split("\n")[1]
+  return line?.startsWith(TERMINAL_PREFIX) ? line.slice(TERMINAL_PREFIX.length) : null
+}
+
 /** One line for a status label, in the same plain words the card uses. */
 export function agentFailureTitle(kind: AgentKind, failure: AgentFailure): string {
   switch (failure.reason) {
