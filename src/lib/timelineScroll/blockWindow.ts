@@ -1,4 +1,5 @@
 import { isAnimatingSize } from "./animation"
+import { FlipGuard } from "./flipGuard"
 import { INNER_BAND, OUTER_BAND, layoutTops, mergeSegments, planRange, sameKeys, sumHeights, toExtent, toKeyRange, type Extent, type KeyRange } from "./layout"
 
 /**
@@ -106,6 +107,7 @@ export class BlockWindow {
   private plan: WindowPlan = EMPTY_PLAN
   /** The last plan `update` published: a range the window moved itself, which no commit of its row accounts for. */
   private publishedPlan: WindowPlan | null = null
+  private readonly flipGuard = new FlipGuard()
   private renderedPlan: WindowPlan | null = null
   private container: HTMLElement | null = null
   private gap = 0
@@ -271,6 +273,7 @@ export class BlockWindow {
 
   private publish(plan: WindowPlan): void {
     if (samePlan(plan, this.plan)) return
+    if (!this.flipGuard.allow(() => { if (this.container) this.publish(this.buildPlan()) })) return
     this.plan = plan
     this.publishedPlan = plan
     for (const listener of this.listeners) listener()

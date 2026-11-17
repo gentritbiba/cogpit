@@ -1,4 +1,5 @@
 import { isAnimatingSize } from "./animation"
+import { FlipGuard } from "./flipGuard"
 import { followReducer, RESUME_DISTANCE, type FollowEvent, type FollowState } from "./follow"
 import type { BlockWindow, BlockWindowHost, WindowViewport } from "./blockWindow"
 import { blockHeights, timelineHeights, widthBucket, type SessionHeights } from "./heightCache"
@@ -181,6 +182,7 @@ export class TimelineScrollController implements TimelineHandle, BlockWindowHost
   private readonly viewportListeners = new Set<() => void>()
   private notifyFrame: number | null = null
   private detachScroller: (() => void) | null = null
+  private readonly flipGuard = new FlipGuard()
 
   // ── DOM attachment ─────────────────────────────────────────────────────────
 
@@ -807,6 +809,7 @@ export class TimelineScrollController implements TimelineHandle, BlockWindowHost
       && current.gaps.every((gap, i) => Math.abs(gap - plan.gaps[i]) < PLAN_TOLERANCE)
       && Math.abs(current.bottomPad - plan.bottomPad) < PLAN_TOLERANCE
     if (same) return
+    if (plan !== EMPTY_PLAN && !this.flipGuard.allow(() => { if (this.scroller && this.input) this.replan() })) return
     this.plan = plan
     this.plannedFirstTop = firstTop
     this.planVersion++
