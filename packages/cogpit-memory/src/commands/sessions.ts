@@ -113,8 +113,8 @@ export async function currentSession(cwd: string): Promise<SessionSummary | null
 
   let latest = direct.reduce<SessionFile | null>((newest, file) => (!newest || file.mtimeMs > newest.mtimeMs ? file : newest), null)
   // Newest first, so the first match wins and nothing older than the newest
-  // Claude match needs reading: a full metadata read of every transcript
-  // ever written took ~19 s on a machine with 1,680 Codex rollouts.
+  // direct match needs reading: a metadata read of every transcript ever
+  // written took ~18 s on a machine with 1,680 of them.
   const others = listAllSessionFiles(0)
     .filter((file) => !file.isSubagent && storeForPath(file.path)?.kind !== "claude")
   for (const file of others) {
