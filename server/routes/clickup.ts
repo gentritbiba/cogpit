@@ -1,16 +1,5 @@
 import { ClickUpDataError as ClickUpRouteError, parseViewerResponse, parseTasksPage, parseListResponse } from "@cogpit/plugin-integrations/normalizeClickUp"
-export {
-  ClickUpDataError as ClickUpRouteError,
-  parseUser,
-  parseViewerResponse,
-  parseWorkspacesResponse,
-  parseTask,
-  parseTasksPage,
-  parseListResponse,
-  parseSpacesResponse,
-  parseFoldersResponse,
-  parseFolderlessListsResponse,
-} from "@cogpit/plugin-integrations/normalizeClickUp"
+export { ClickUpDataError as ClickUpRouteError, parseTask, parseTasksPage } from "@cogpit/plugin-integrations/normalizeClickUp"
 import type { IncomingMessage, ServerResponse } from "node:http"
 import type { ClickUpStatusResponse, ClickUpTask } from "../../shared/contracts/clickup"
 import { z } from "zod"

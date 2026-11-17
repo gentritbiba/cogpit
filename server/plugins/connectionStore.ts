@@ -6,7 +6,6 @@ const integer = z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER)
 const identity = z.strictObject({ principalId: z.string().min(1).max(256), publisher: z.string().min(1).max(64), pluginId: z.string().min(1).max(128) })
 export type PluginDataNamespace = z.infer<typeof identity>
 const selection = z.strictObject({ id: z.string().min(1).max(1024), label: z.string().min(1).max(256) })
-export type SavedResourceSelection = z.infer<typeof selection>
 const selections = z.record(z.string().max(128), selection)
 const record = identity.extend({ connectionId: z.string().min(1).max(128), definitionHash: z.string().regex(/^[a-f0-9]{64}$/), secret: z.string().regex(/^[\x21-\x7e]{1,4096}$/).optional(), identity: z.record(z.string().max(128), z.string().max(1024)), selected: selections, projects: z.record(z.string().max(64), selections) })
 export type SavedPluginConnection = z.infer<typeof record>

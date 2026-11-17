@@ -70,7 +70,7 @@ if (typeof Element !== "undefined" && typeof Element.prototype.getAnimations ===
   Element.prototype.getAnimations = () => []
 }
 
-// jsdom lacks matchMedia (reached by useIsMobile and viewTransitions)
+// jsdom lacks matchMedia (reached by useIsMobile)
 if (typeof window !== "undefined" && typeof window.matchMedia === "undefined") {
   Object.defineProperty(window, "matchMedia", {
     writable: true,
