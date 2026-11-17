@@ -337,9 +337,10 @@ describe("GET /api/share/pending", () => {
       permissions: [{
         ...PERMISSION_A,
         sessionId: SESSION_A,
-        availableDecisions: ["allow", "allow_always", "deny"],
+        // No rule to save, so "always" would grant the whole tool: it is not offered.
+        availableDecisions: ["allow", "deny"],
       }],
-      questions: [QUESTION_A],
+      questions: [{ ...QUESTION_A, skippable: true }],
     })
   })
 
@@ -423,7 +424,16 @@ describe("guest mutations act on the token's session", () => {
     })
 
     expect(result.res.statusCode).toBe(200)
-    expect(mocks.resolveUserQuestion).toHaveBeenCalledWith(SESSION_A, "tool-1", ["yes"])
+    expect(mocks.resolveUserQuestion).toHaveBeenCalledWith(SESSION_A, "tool-1", ["yes"], undefined)
+  })
+
+  it("lets a guest skip a question", async () => {
+    const result = await call("/api/share/answer", {
+      body: { toolUseId: "tool-1", answers: [], unanswered: "skipped" },
+    })
+
+    expect(result.res.statusCode).toBe(200)
+    expect(mocks.resolveUserQuestion).toHaveBeenCalledWith(SESSION_A, "tool-1", [], "skipped")
   })
 
   it("passes the delegated handler's own validation errors through", async () => {
