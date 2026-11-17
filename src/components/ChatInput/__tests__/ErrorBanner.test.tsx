@@ -47,6 +47,13 @@ describe("ErrorBanner for a config file the agent would not start with", () => {
     expect(await screen.findByText("Couldn't restore: The backup is not valid JSON either")).toBeInTheDocument()
   })
 
+  it("offers no restore for a session on another account, whose config this server does not keep", () => {
+    render(<ErrorBanner error={agentConfigInvalidMessage("claude", { path: PATH, backupPath: BACKUP }, CLI_TEXT)} agentKind="claude" instanceId="work" />)
+
+    expect(screen.getByText("Claude Code can't start: a config file isn't valid JSON.")).toBeInTheDocument()
+    expect(screen.queryByRole("button", { name: "Restore from backup" })).toBeNull()
+  })
+
   it("offers no restore when the agent named no backup", () => {
     render(<ErrorBanner error={agentConfigInvalidMessage("claude", { path: PATH, backupPath: null }, CLI_TEXT)} agentKind="claude" />)
 

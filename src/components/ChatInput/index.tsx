@@ -711,11 +711,11 @@ const ScopedChatInput = forwardRef<ChatInputHandle, ChatInputProps & { scope: st
             </div>
           </div>
         </div>
-        {status === "error" && error && <ErrorBanner key={error} error={error} agentKind={agentKind ?? DEFAULT_AGENT_KIND} terminalAt={terminalAt} />}
+        {status === "error" && error && <ErrorBanner key={error} error={error} agentKind={agentKind ?? DEFAULT_AGENT_KIND} instanceId={signInTarget.instanceId} terminalAt={terminalAt} />}
         {/* Failures with no HTTP response behind them arrive over SSE instead.
             Mutually exclusive with the banner above: the server only publishes
             when nothing is waiting on a response. */}
-        {turnError && <ErrorBanner key={turnError} error={turnError} agentKind={agentKind ?? DEFAULT_AGENT_KIND} terminalAt={terminalAt} />}
+        {turnError && <ErrorBanner key={turnError} error={turnError} agentKind={agentKind ?? DEFAULT_AGENT_KIND} instanceId={signInTarget.instanceId} terminalAt={terminalAt} />}
       </div>
     </div>
   )

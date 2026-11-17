@@ -1,8 +1,9 @@
-import { readFile, writeFile } from "node:fs/promises"
+import { readFile, realpath, stat } from "node:fs/promises"
 import { homedir } from "node:os"
 import { basename, dirname, join, resolve } from "node:path"
 import { descriptorFor } from "../../shared/session/agent-descriptors"
 import { agentConfigInvalidMessage, agentTerminalOnlyMessage, type InvalidAgentConfig } from "../../shared/session/agentFailures"
+import { writeOwnerOnlyText } from "../atomicJsonFile"
 
 /**
  * Claude Code refuses to start while its global config file is not valid JSON
@@ -69,7 +70,9 @@ export class ConfigRestoreError extends Error {
 /**
  * Copy the backup a failed start named over the config file it named. Only the
  * global config file and one of its own backups qualify, and only a backup
- * that parses: the CLI may name the newest backup even when none does.
+ * that parses: the CLI may name the newest backup even when none does. The
+ * copy replaces the file whole, keeping its mode, and a linked file is
+ * replaced where it lives.
  */
 export async function restoreReportedConfig(path: string): Promise<InvalidAgentConfig & { backupPath: string }> {
   const file = reported.get(path)
@@ -89,7 +92,9 @@ export async function restoreReportedConfig(path: string): Promise<InvalidAgentC
     throw new ConfigRestoreError(422, `The backup is not valid JSON either: ${backupPath}`)
   }
   if (!isRecord(backup)) throw new ConfigRestoreError(422, `The backup is not a config file: ${backupPath}`)
-  await writeFile(file.path, text)
+  const target = await realpath(file.path).catch(() => file.path)
+  const mode = await stat(target).then(({ mode }) => mode & 0o777, () => 0o600)
+  await writeOwnerOnlyText(target, text, mode)
   reported.delete(path)
   return { path: file.path, backupPath }
 }

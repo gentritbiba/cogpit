@@ -1,5 +1,5 @@
 // @vitest-environment node
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs"
+import { chmodSync, lstatSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { afterEach, beforeEach, describe, expect, it } from "vitest"
@@ -59,6 +59,42 @@ describe("a start refused over an invalid config file", () => {
     await expect(restoreReportedConfig(join(configDir, ".claude.json"))).resolves.toEqual({ path: join(configDir, ".claude.json"), backupPath: backup })
     expect(readFileSync(join(configDir, ".claude.json"), "utf8")).toBe('{"numStartups": 2}')
     await expect(restoreReportedConfig(join(configDir, ".claude.json"))).rejects.toMatchObject({ status: 404 })
+  })
+
+  it.skipIf(process.platform === "win32")("replaces the file whole, keeping its mode", async () => {
+    const config = join(configDir, ".claude.json")
+    const backup = join(backups, ".claude.json.backup.1763400000000")
+    writeFileSync(backup, '{"numStartups": 2}')
+    chmodSync(config, 0o640)
+    describeStartupFailure(startupFailure(configDir, backup), "detail")
+
+    await restoreReportedConfig(config)
+
+    expect(readFileSync(config, "utf8")).toBe('{"numStartups": 2}')
+    expect(statSync(config).mode & 0o777).toBe(0o640)
+    expect(readdirSync(configDir).sort()).toEqual([".claude.json", "backups"])
+  })
+
+  it.skipIf(process.platform === "win32")("restores a linked config file where it lives, keeping the link", async () => {
+    const dotfiles = mkdtempSync(join(tmpdir(), "config-repair-dotfiles-"))
+    try {
+      const config = join(configDir, ".claude.json")
+      const real = join(dotfiles, "claude.json")
+      writeFileSync(real, '{"numStartups": 3,')
+      rmSync(config)
+      symlinkSync(real, config)
+      const backup = join(backups, ".claude.json.backup.1763400000000")
+      writeFileSync(backup, '{"numStartups": 2}')
+      describeStartupFailure(startupFailure(configDir, backup), "detail")
+
+      await restoreReportedConfig(config)
+
+      expect(lstatSync(config).isSymbolicLink()).toBe(true)
+      expect(readFileSync(real, "utf8")).toBe('{"numStartups": 2}')
+      expect(readdirSync(dotfiles)).toEqual(["claude.json"])
+    } finally {
+      rmSync(dotfiles, { recursive: true, force: true })
+    }
   })
 
   it("restores nothing a failure did not name, or that has no backup", async () => {

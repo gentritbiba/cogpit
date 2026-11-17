@@ -21,9 +21,11 @@ import { RestoreConfigAction } from "./RestoreConfigAction"
  * CLI's captured stderr) in a copyable dialog so failures can actually be
  * diagnosed instead of just reading "Claude Code process exited with code 1".
  */
-export function ErrorBanner({ error, agentKind, terminalAt }: {
+export function ErrorBanner({ error, agentKind, instanceId = null, terminalAt }: {
   error: string
   agentKind: AgentKind
+  /** The account instance the session runs under; null for the default account, the only one whose config file a restore reaches. */
+  instanceId?: string | null
   /** Where a failure that has to go on in the agent's own terminal opens one. */
   terminalAt?: Omit<TerminalTarget, "command">
 }) {
@@ -77,7 +79,7 @@ export function ErrorBanner({ error, agentKind, terminalAt }: {
           How to install
         </Button>
       )}
-      {invalidConfig?.backupPath && <RestoreConfigAction path={invalidConfig.path} backupPath={invalidConfig.backupPath} />}
+      {invalidConfig?.backupPath && instanceId === null && <RestoreConfigAction path={invalidConfig.path} backupPath={invalidConfig.backupPath} />}
       {canOpenTerminal && (
         <Button variant="outline" size="xs" className="ml-2" onClick={() => openProjectTerminal({ ...terminalAt, command: terminalCommand })}>
           <SquareTerminal data-icon="inline-start" />
