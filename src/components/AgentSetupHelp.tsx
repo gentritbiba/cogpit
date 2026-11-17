@@ -120,6 +120,41 @@ export function AgentSignInCard({ target, detail, className = "mx-4 my-3", onDis
   )
 }
 
+/**
+ * The agent's login ends soon. Quieter than the sign-in card: everything still
+ * works, and signing in again now keeps it that way.
+ */
+export function AgentSignInEndingNotice({ target, endsAt, className, onDismiss }: {
+  target: SignInTarget
+  /** ISO instant the agent reported. */
+  endsAt: string
+  className?: string
+  onDismiss: () => void
+}) {
+  const canRun = useCanRunSignIn()
+  const command = useSignInCommand(target)
+  const [copied, copy] = useCopyWithFeedback()
+  const date = new Date(endsAt).toLocaleDateString([], { month: "short", day: "numeric" })
+  return (
+    <div role="status" data-agent-sign-in-ending className={cn("flex items-center gap-2 text-xs text-muted-foreground", className)}>
+      <LogIn className="size-3.5 shrink-0 text-warning" />
+      <span className="min-w-0 flex-1 truncate">
+        {descriptorFor(target.kind).displayName}'s sign-in ends around {date}. Sign in again to keep sessions running.
+      </span>
+      {canRun ? (
+        <Button variant="ghost" size="xs" onClick={() => startAgentSignIn(target)}>Sign in</Button>
+      ) : command && (
+        <Button variant="ghost" size="xs" onClick={() => copy(command)} title={command}>
+          {copied ? "Copied" : "Copy sign-in command"}
+        </Button>
+      )}
+      <Button variant="ghost" size="icon-xs" onClick={onDismiss} aria-label="Dismiss">
+        <X />
+      </Button>
+    </div>
+  )
+}
+
 /** A turn that ended on an error instead of a reply, in the conversation's last status slot. */
 export function AgentFailureNotice({ target, failure }: { target: SignInTarget; failure: AgentFailure }) {
   const { kind } = target
