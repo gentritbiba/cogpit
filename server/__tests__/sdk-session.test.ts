@@ -1542,6 +1542,7 @@ describe("sdk-session effort propagation", () => {
       sessionId: "live-permissions",
       cwd: "/tmp",
       message: "first",
+      permissionMode: "default",
       mcpConfig: JSON.stringify({ local: { command: "test" } }),
     })
     await waitUntil(() => captured.length === 1)
@@ -1754,7 +1755,7 @@ describe("sdk-session mid-turn permission mode change", () => {
   it("switching to bypassPermissions auto-allows every pending approval", async () => {
     const { createSDKSession, updateSDKSession, sdkSessions } = await loadModule()
     holdQueryOpen = true
-    createSDKSession({ sessionId: "perm-live-1", cwd: "/tmp", message: "first" })
+    createSDKSession({ sessionId: "perm-live-1", cwd: "/tmp", message: "first", permissionMode: "default" })
     await waitUntil(() => captured.length === 1)
 
     const state = sdkSessions.get("perm-live-1")!
@@ -1812,7 +1813,7 @@ describe("sdk-session mid-turn permission mode change", () => {
   it("reports the permission settings it changed and the requests the new mode approved", async () => {
     const { createSDKSession, updateSDKSession, sdkSessions } = await loadModule()
     holdQueryOpen = true
-    createSDKSession({ sessionId: "perm-live-report", cwd: "/tmp", message: "first" })
+    createSDKSession({ sessionId: "perm-live-report", cwd: "/tmp", message: "first", permissionMode: "default" })
     await waitUntil(() => captured.length === 1)
     const state = sdkSessions.get("perm-live-report")!
     addPending(state, "req-bash", "Bash")
@@ -2290,7 +2291,7 @@ describe("sdk-session CLI 2.1.326 catch-up", () => {
     const sdk = await loadModule()
     scriptedMessages = messages
     holdQueryAfterMessages = true
-    const state = sdk.createSDKSession({ sessionId, cwd: "/tmp", message: "hi", ...opts })
+    const state = sdk.createSDKSession({ sessionId, cwd: "/tmp", message: "hi", permissionMode: "default", ...opts })
     await waitUntil(() => releaseQueryAfterMessages !== null)
     return { sdk, state }
   }
@@ -2316,6 +2317,13 @@ describe("sdk-session CLI 2.1.326 catch-up", () => {
     expect(state.permissionMode).toBe("acceptEdits")
     expect(storedConfigs.get("mode-status.jsonl")).toEqual({ permissionMode: "acceptEdits" })
     releaseQueryAfterMessages?.()
+  })
+
+  it("starts every session able to switch to bypass, in bypass when no mode was asked for", async () => {
+    await liveSession("mode-unset", [INIT], { permissionMode: undefined })
+    expect(captured.at(-1)?.options).toEqual(expect.objectContaining({ permissionMode: "bypassPermissions", allowDangerouslySkipPermissions: true }))
+    await liveSession("mode-asked", [INIT], { permissionMode: "plan" })
+    expect(captured.at(-1)?.options).toEqual(expect.objectContaining({ permissionMode: "plan", allowDangerouslySkipPermissions: true }))
   })
 
   it("writes nothing while the CLI runs in the mode the session asked for", async () => {

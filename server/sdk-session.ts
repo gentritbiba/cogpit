@@ -405,14 +405,17 @@ function parseMcpServers(mcpConfig: string | null | undefined): Record<string, M
   }
 }
 
+/** The CLI refuses to start able to skip permissions as root, outside a sandbox. */
+function canSkipPermissions(): boolean {
+  return process.getuid?.() !== 0 || Boolean(process.env.IS_SANDBOX)
+}
+
 function buildQueryOptions(state: SDKSessionState, opts: {
   isResume?: boolean
   name?: string
   worktreeName?: string
   mcpConfig?: string | null
 }): Options {
-  const isBypass = state.permissionMode === "bypassPermissions"
-
   const queryOpts: Options = {
     abortController: state.abort!,
     cwd: state.cwd,
@@ -449,9 +452,8 @@ function buildQueryOptions(state: SDKSessionState, opts: {
     promptSuggestions: true,
   }
 
-  if (isBypass) {
-    queryOpts.allowDangerouslySkipPermissions = true
-  }
+  // Every session can be switched to bypass later, not only one that starts there.
+  if (canSkipPermissions()) queryOpts.allowDangerouslySkipPermissions = true
 
   if (opts.isResume) {
     queryOpts.resume = state.sessionId
@@ -999,7 +1001,7 @@ function initSDKSessionState(opts: SDKSessionInitOpts): SDKSessionState {
     jsonlPath: null,
     subagentTasks: new Map(),
     subagentWatcher: null,
-    permissionMode: opts.permissionMode || "default",
+    permissionMode: opts.permissionMode || (canSkipPermissions() ? "bypassPermissions" : "default"),
     capabilities: NO_CAPABILITIES,
     launchMcpServers: null,
     allowedTools: opts.allowedTools ? [...opts.allowedTools] : [],
