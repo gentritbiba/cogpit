@@ -856,6 +856,26 @@ describe("sdk-session silent turn failures", () => {
     expect(describeErrorResult({ subtype: "error_max_turns", errors: [] })).toBe("Claude returned an error (error_max_turns)")
   })
 
+  it("names the config file and backup of a start refused over an invalid config file", async () => {
+    const { describeErrorResult } = await loadModule()
+    const cliText = "Configuration error in /Users/me/.claude.json: JSON Parse error: Property name must be a string literal"
+    const message = describeErrorResult({
+      type: "result",
+      subtype: "error_during_execution",
+      is_error: true,
+      errors: [cliText],
+      startup_failure_reason: "config_file_invalid",
+      invalid_config_file: { path: "/Users/me/.claude.json", is_global: true, backup_searched: true, backup_path: "/Users/me/.claude/backups/.claude.json.backup.1763400000000" },
+    })
+
+    expect(message).toBe([
+      "Claude Code can't start: a config file isn't valid JSON.",
+      "File: /Users/me/.claude.json",
+      "Backup: /Users/me/.claude/backups/.claude.json.backup.1763400000000",
+      cliText,
+    ].join("\n"))
+  })
+
   it("reports a thrown query error over the stream bus when nothing is listening", async () => {
     const streamBus = await import("../lib/streamBus")
     const { createSDKSession } = await loadModule()

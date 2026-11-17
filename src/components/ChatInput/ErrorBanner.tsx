@@ -9,7 +9,8 @@ import {
 } from "@/components/ui/dialog"
 import { Button } from "@/components/ui/button"
 import { descriptorFor, type AgentKind } from "@/lib/agents"
-import { agentNotInstalledIn, agentSignedOutTitle, classifyAgentFailure } from "../../../shared/session/agentFailures"
+import { agentConfigInvalidIn, agentNotInstalledIn, agentSignedOutTitle, classifyAgentFailure } from "../../../shared/session/agentFailures"
+import { RestoreConfigAction } from "./RestoreConfigAction"
 
 /**
  * Inline send error shown under the composer. The preview is a single
@@ -27,6 +28,7 @@ export function ErrorBanner({ error, agentKind }: { error: string; agentKind: Ag
   const hasMore = error.includes("\n") || error !== firstLine
   const missing = agentNotInstalledIn(error)
   const installPage = missing ? descriptorFor(missing).cli.install?.page : null
+  const invalidConfig = agentConfigInvalidIn(error)
 
   const handleCopy = async () => {
     try {
@@ -64,6 +66,7 @@ export function ErrorBanner({ error, agentKind }: { error: string; agentKind: Ag
           How to install
         </Button>
       )}
+      {invalidConfig?.backupPath && <RestoreConfigAction path={invalidConfig.path} backupPath={invalidConfig.backupPath} />}
 
       <Dialog open={open} onOpenChange={setOpen}>
         <DialogContent className="max-w-2xl">

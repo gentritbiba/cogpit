@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vitest"
 import {
+  agentConfigInvalidIn,
+  agentConfigInvalidMessage,
   agentFailureTitle,
   agentNotInstalledIn,
   agentNotInstalledMessage,
@@ -73,6 +75,27 @@ describe("what the user is told", () => {
   it("finds the agent a not-installed message is about", () => {
     expect(agentNotInstalledIn(agentNotInstalledMessage("codex", "linux"))).toBe("codex")
     expect(agentNotInstalledIn("Something else broke")).toBeNull()
+  })
+
+  it("names a config file the agent would not start with, and reads it back with its backup", () => {
+    const detail = "Configuration error in /Users/me/.claude.json: JSON Parse error: Property name must be a string literal"
+    const message = agentConfigInvalidMessage("claude", { path: "/Users/me/.claude.json", backupPath: "/Users/me/.claude/backups/.claude.json.backup.1763400000000" }, detail)
+
+    expect(message).toBe([
+      "Claude Code can't start: a config file isn't valid JSON.",
+      "File: /Users/me/.claude.json",
+      "Backup: /Users/me/.claude/backups/.claude.json.backup.1763400000000",
+      detail,
+    ].join("\n"))
+    expect(agentConfigInvalidIn(message)).toEqual({ kind: "claude", path: "/Users/me/.claude.json", backupPath: "/Users/me/.claude/backups/.claude.json.backup.1763400000000" })
+    expect(classifyAgentFailure(message)).toEqual({ reason: "config_invalid", message })
+    expect(agentFailureTitle("claude", classifyAgentFailure(message))).toBe("Claude Code can't start: a config file isn't valid JSON.")
+  })
+
+  it("reads a config failure without a backup, and nothing from other messages", () => {
+    const message = agentConfigInvalidMessage("claude", { path: "/Users/me/.claude.json", backupPath: null }, "Configuration error")
+    expect(agentConfigInvalidIn(message)).toEqual({ kind: "claude", path: "/Users/me/.claude.json", backupPath: null })
+    expect(agentConfigInvalidIn("Configuration error in /Users/me/.claude.json")).toBeNull()
   })
 })
 
