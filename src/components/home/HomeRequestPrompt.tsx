@@ -49,6 +49,12 @@ export function HomeRequestPrompt({
               if (result.gone) setGoneQuestions((gone) => new Set(gone).add(toolUseId))
             }
             : undefined}
+          onSkip={canAnswer
+            ? async (toolUseId) => {
+              const result = await input.answerQuestion(sessionId, toolUseId, [], "skipped")
+              if (result.gone) setGoneQuestions((gone) => new Set(gone).add(toolUseId))
+            }
+            : undefined}
           onOpenSession={onOpen}
         />
       )

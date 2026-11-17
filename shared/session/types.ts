@@ -189,7 +189,7 @@ export interface UserMessage extends BaseMessage {
   origin?: { kind?: string } | null
   permissionMode?: string
   thinkingMetadata?: { maxThinkingTokens: number }
-  toolUseResult?: Partial<AgentToolUseResult> & { staged?: boolean; bashEditDiff?: unknown }
+  toolUseResult?: Partial<AgentToolUseResult> & { staged?: boolean; bashEditDiff?: unknown; annotations?: unknown }
   sourceToolAssistantUUID?: string
 }
 
@@ -492,6 +492,9 @@ export interface ElidedResult {
   source: { dirName: string; fileName: string }
 }
 
+/** How Claude Code records a question that went unanswered. */
+export type QuestionUnansweredKind = "skipped" | "replied_in_chat" | "dismissed"
+
 export interface ToolCall {
   id: string
   name: string
@@ -519,6 +522,8 @@ export interface ToolCall {
   asyncQuestion?: boolean
   /** The reader's reply to an async question, once the transcript holds one. */
   asyncAnswer?: string
+  /** Questions of an AskUserQuestion call the user skipped, dismissed or set aside with a chat message, by question text. */
+  unansweredQuestions?: Record<string, QuestionUnansweredKind>
   /** Set by parser when a PostToolUse hook replaced this tool's output */
   outputReplacedByHook?: boolean
   /** Total duration of PostToolUse hooks attached to this call, summed in ms */

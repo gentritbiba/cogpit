@@ -6,9 +6,10 @@ import {
   ChevronDown,
   ChevronRight,
   CircleHelp,
+  CircleSlash,
   Clock3,
 } from "lucide-react"
-import type { ToolCall } from "../../../shared/session/types"
+import type { QuestionUnansweredKind, ToolCall } from "../../../shared/session/types"
 import { cn } from "@/lib/utils"
 import { AskUserAnswerForm, QuestionOptionBody, type AskUserQuestion } from "./AskUserAnswerForm"
 import { Badge } from "@/components/ui/badge"
@@ -106,6 +107,19 @@ function getAnswers(toolCall: ToolCall, questions: AskUserQuestion[]): Record<st
   return parsed
 }
 
+const UNANSWERED_LABELS: Record<QuestionUnansweredKind, string> = {
+  skipped: "Skipped",
+  replied_in_chat: "Replied in chat",
+  dismissed: "Dismissed",
+}
+
+/** The one way every question went unanswered, when they all went the same way. */
+function unansweredAll(toolCall: ToolCall, questions: AskUserQuestion[]): QuestionUnansweredKind | null {
+  const kinds = new Set(questions.map((question) => toolCall.unansweredQuestions?.[question.question]))
+  const [kind] = kinds
+  return kinds.size === 1 && kind ? kind : null
+}
+
 function isSelectedOption(question: AskUserQuestion, answer: string | undefined, label: string): boolean {
   if (answer === undefined) return false
   if (!question.multiSelect) return answer === label
@@ -114,15 +128,20 @@ function isSelectedOption(question: AskUserQuestion, answer: string | undefined,
 
 function QuestionHistoryItem({
   question,
-  answer,
+  answer: recorded,
+  unanswered,
   index,
   completed,
 }: {
   question: AskUserQuestion
   answer?: string
+  /** How the question went unanswered; its recorded answer is then only the agent's notice. */
+  unanswered?: QuestionUnansweredKind
   index: number
   completed: boolean
 }): React.ReactElement {
+  // A chat reply is the user's own words; a skip or dismissal records none.
+  const answer = unanswered && unanswered !== "replied_in_chat" ? undefined : recorded
   const options = question.options ?? []
   const selectedOptionCount = options.filter((option) => (
     isSelectedOption(question, answer, option.label)
@@ -174,11 +193,18 @@ function QuestionHistoryItem({
 
       {showWrittenAnswer && (
         <div className="mt-2 border-l-2 border-border pl-3">
-          <div className="mb-0.5 text-xs font-medium text-muted-foreground">Answer</div>
+          <div className="mb-0.5 text-xs font-medium text-muted-foreground">
+            {unanswered ? UNANSWERED_LABELS[unanswered] : "Answer"}
+          </div>
           <p className="whitespace-pre-wrap break-words text-sm leading-relaxed text-foreground/90">
             {answer.trim() || "No answer provided"}
           </p>
         </div>
+      )}
+      {unanswered && !showWrittenAnswer && (
+        <p className="mt-2 border-l-2 border-border pl-3 text-xs font-medium text-muted-foreground">
+          {UNANSWERED_LABELS[unanswered]}
+        </p>
       )}
     </div>
   )
@@ -190,6 +216,7 @@ export function AskUserQuestionCard({
   isAwaitingAnswer,
   sessionId,
   canAnswer,
+  canSkip = false,
 }: {
   toolCall: ToolCall
   expandToolPayloads: boolean
@@ -198,6 +225,8 @@ export function AskUserQuestionCard({
   sessionId?: string
   /** False for a viewer, who sees the open question without the form to answer it. */
   canAnswer: boolean
+  /** The session's agent takes a skip. */
+  canSkip?: boolean
 }): React.ReactElement {
   const [detailsOpen, setDetailsOpen] = useDisclosure(useDisclosureKey("details"), false)
   const questions = useMemo(() => getQuestions(toolCall), [toolCall])
@@ -210,19 +239,24 @@ export function AskUserQuestionCard({
   const isWaiting = !isAnswered && !toolCall.isError
     && isAwaitingAnswer && Boolean(sessionId) && questions.length > 0
   const hasStructuredAnswers = Object.keys(answers).length > 0
+  const allUnanswered = isAnswered ? unansweredAll(toolCall, questions) : null
 
   const Status = toolCall.isError
     ? AlertCircle
-    : isAnswered
-      ? CheckCircle2
-      : Clock3
+    : allUnanswered === "skipped" || allUnanswered === "dismissed"
+      ? CircleSlash
+      : isAnswered
+        ? CheckCircle2
+        : Clock3
   const statusLabel = toolCall.isError
     ? "Not answered"
-    : isAnswered
-      ? "Answered"
-      : isWaiting
-        ? "Waiting for answer"
-        : "No answer recorded"
+    : allUnanswered
+      ? UNANSWERED_LABELS[allUnanswered]
+      : isAnswered
+        ? "Answered"
+        : isWaiting
+          ? "Waiting for answer"
+          : "No answer recorded"
 
   return (
     <section
@@ -259,13 +293,14 @@ export function AskUserQuestionCard({
 
       <div className="px-3">
         {isWaiting && sessionId && canAnswer ? (
-          <AskUserAnswerForm toolCall={toolCall} sessionId={sessionId} />
+          <AskUserAnswerForm toolCall={toolCall} sessionId={sessionId} canSkip={canSkip} />
         ) : questions.length > 0 ? (
           questions.map((question, index) => (
             <QuestionHistoryItem
               key={`${question.question}-${index}`}
               question={question}
               answer={answers[question.question]}
+              unanswered={toolCall.unansweredQuestions?.[question.question]}
               index={index}
               completed={response !== null}
             />
