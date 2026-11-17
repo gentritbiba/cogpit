@@ -397,6 +397,14 @@ export interface SummaryMessage extends BaseMessage {
   summary?: string
 }
 
+/** The first record of a forked subagent's transcript (Claude Code 2.1.325+): where its parent's history ends. */
+export interface ForkContextRefMessage extends BaseMessage {
+  type: "fork-context-ref"
+  parentSessionId?: string
+  parentLastUuid?: string
+  contextLength?: number
+}
+
 /** Claude Code persists prompts submitted during an active turn as queue operations. */
 export interface QueueOperationMessage extends BaseMessage {
   type: "queue-operation"
@@ -472,6 +480,7 @@ export type RawMessage =
   | SummaryMessage
   | QueueOperationMessage
   | AttachmentMessage
+  | ForkContextRefMessage
 
 // ── Parsed Structures ───────────────────────────────────────────────────────
 

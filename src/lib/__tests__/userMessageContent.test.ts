@@ -29,6 +29,11 @@ describe("stripSystemTags", () => {
     expect(stripSystemTags(input)).toBe("real prompt")
   })
 
+  it("shows a fork's directive without the instructions every fork gets", () => {
+    const input = "<fork-boilerplate>\nYou are a worker fork. Execute ONE directive, then stop.\n</fork-boilerplate>\n\nYour directive: Fix the scroll-up loop"
+    expect(stripSystemTags(input)).toBe("Your directive: Fix the scroll-up loop")
+  })
+
   it("shows only what the user said in a voice-mode message", () => {
     expect(stripSystemTags(withVoiceModeInstruction("how did the deploy go"))).toBe("how did the deploy go")
   })

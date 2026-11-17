@@ -13,6 +13,7 @@
 
 import { describe, it, expect, beforeEach } from "vitest"
 import { parseSession, parseSessionAppend } from "../../../shared/session/parser"
+import { claudeTurnBoundaries } from "../../../shared/session/claude"
 import {
   resetFixtureCounter,
   userMsg,
@@ -23,8 +24,9 @@ import {
   toJsonl,
   peerAttachment,
   peerEnqueueMsg,
+  agentProgressMsg,
 } from "@/__tests__/fixtures"
-import type { ProgressMessage, SystemMessage, TurnContentBlock } from "../../../shared/session/types"
+import type { ForkContextRefMessage, ProgressMessage, RawMessage, SystemMessage, TurnContentBlock } from "../../../shared/session/types"
 
 beforeEach(() => {
   resetFixtureCounter()
@@ -1790,5 +1792,62 @@ describe("structured tool results", () => {
       } } }),
     ]))
     expect(session.turns[0].toolCalls[0]).toMatchObject({ result: "Command output", additionalFileDiffs: 2, fileDiffs: [{ filePath: "/a.ts", hunks: [{ lines: ["-before", "+after"] }] }] })
+  })
+})
+
+describe("forked subagents", () => {
+  // Shapes from a Claude Code 2.1.325 fork transcript, text shortened.
+  const SPAWN_ID = "toolu_01Fgi7Wqmn4pwmgvk11d3NPi"
+  const forkContextRef: ForkContextRefMessage = { type: "fork-context-ref", agentId: "a956c90fe0e8d8de4", parentSessionId: "b5a1b984", parentLastUuid: "d19de15a", contextLength: 109 }
+  const spawnCall = toolUseAssistant("Agent", { description: "Diagnose React #185 on scroll up", subagent_type: "fork", prompt: "Fix the scroll-up loop" }, SPAWN_ID, { isSidechain: true, agentId: "a956c90fe0e8d8de4" })
+  const directive = "<fork-boilerplate>\nYou are a worker fork. Execute ONE directive, then stop.\n</fork-boilerplate>\n\nYour directive: Fix the scroll-up loop"
+  const forkStarted = userMsg([
+    { type: "tool_result", tool_use_id: SPAWN_ID, content: [{ type: "text", text: "Fork started \u2014 that fork is you." }] },
+    { type: "text", text: directive },
+  ], { isSidechain: true })
+
+  it("opens the fork's view with its directive, not the parent's call that started it", () => {
+    const records: RawMessage[] = [
+      forkContextRef,
+      spawnCall,
+      forkStarted,
+      textAssistant("Task: find and fix the React #185 loop."),
+      toolUseAssistant("Bash", { command: "rg virtua" }, "toolu_bash"),
+      toolResultMsg("toolu_bash", "src/components/timeline/TimelineList.tsx"),
+      textAssistant("Fixed."),
+    ]
+    const session = parseSession(toJsonl(records))
+
+    expect(session.turns).toHaveLength(1)
+    expect(session.turns[0].userMessage).toEqual([{ type: "text", text: directive }])
+    expect(session.turns[0].toolCalls.map((call) => call.name)).toEqual(["Bash"])
+    expect(session.turns[0].contentBlocks.map((block) => block.kind)).toEqual(["text", "tool_calls", "text"])
+    // The turn still starts where it did, so page cuts and undo see the same boundary.
+    expect(claudeTurnBoundaries(records)).toEqual([1])
+  })
+
+  it("keeps the Agent calls of a later page, which follow a prompt rather than the marker", () => {
+    const session = parseSession(toJsonl([
+      forkContextRef,
+      userMsg("Now check mobile too"),
+      toolUseAssistant("Agent", { description: "mobile", prompt: "check" }, "toolu_later"),
+      toolResultMsg("toolu_later", "done"),
+    ]))
+
+    expect(session.turns[0].toolCalls.map((call) => call.id)).toEqual(["toolu_later"])
+  })
+
+  it("leaves the fork's own call and answer out of the parent's sub-agent activity", () => {
+    const session = parseSession(toJsonl([
+      userMsg("Fork three agents"),
+      toolUseAssistant("Agent", { description: "Diagnose React #185 on scroll up", subagent_type: "fork", prompt: "Fix it" }, SPAWN_ID),
+      agentProgressMsg("a956c90fe0e8d8de4", SPAWN_ID, "assistant", [{ type: "tool_use", id: SPAWN_ID, name: "Agent", input: { description: "Diagnose React #185 on scroll up" } }]),
+      agentProgressMsg("a956c90fe0e8d8de4", SPAWN_ID, "user", forkStarted.message.content),
+      agentProgressMsg("a956c90fe0e8d8de4", SPAWN_ID, "assistant", [{ type: "text", text: "Task: find and fix the React #185 loop." }]),
+    ]))
+
+    const activity = session.turns[0].subAgentActivity
+    expect(activity.map((message) => message.text)).toEqual([["Task: find and fix the React #185 loop."]])
+    expect(activity.flatMap((message) => message.toolCalls)).toEqual([])
   })
 })

@@ -20,6 +20,11 @@ function extractToolResultText(content: string | ContentBlock[] | undefined | nu
     .join("\n")
 }
 
+function isAgentCallsOnly(content: unknown): boolean {
+  return Array.isArray(content) && content.length > 0
+    && (content as ContentBlock[]).every((block) => block.type === "tool_use" && (block.name === "Agent" || block.name === "Task"))
+}
+
 /**
  * Parses a subagent JSONL file into SubAgentMessage[].
  * Supports native Codex rollouts and Claude user/assistant transcript records.
@@ -51,6 +56,8 @@ export function parseSubagentJsonl(jsonlText: string, agentId: string): SubAgent
 
   const messages: SubAgentMessage[] = []
   const pendingToolCalls = new Map<string, ToolCall>()
+  // A fork's transcript opens with the parent's own call that started it.
+  let awaitingForkSpawn = false
 
   for (const line of jsonlText.split("\n")) {
     const trimmed = line.trim()
@@ -63,12 +70,18 @@ export function parseSubagentJsonl(jsonlText: string, agentId: string): SubAgent
     }
 
     const type = raw.type as string
+    if (type === "fork-context-ref") {
+      awaitingForkSpawn = true
+      continue
+    }
     if (type !== "user" && type !== "assistant") continue
 
     const message = raw.message as { role: string; content: unknown; model?: string; id?: string; usage?: Record<string, number> }
     if (!message) continue
 
     const content = message.content
+    if (awaitingForkSpawn && type === "assistant" && isAgentCallsOnly(content)) continue
+    awaitingForkSpawn = false
     const timestamp = (raw.timestamp as string) ?? ""
 
     if (type === "assistant") {
