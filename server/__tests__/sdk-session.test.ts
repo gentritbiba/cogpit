@@ -31,7 +31,7 @@ interface CapturedCall {
     canUseTool?: (
       toolName: string,
       input: Record<string, unknown>,
-      options: { toolUseID: string; signal?: AbortSignal; defaultToNo?: boolean; suppressAlwaysAllowRule?: boolean; suggestions?: Array<Record<string, unknown>> },
+      options: { toolUseID: string; signal?: AbortSignal; defaultToNo?: boolean; suppressAlwaysAllowRule?: boolean; suggestions?: Array<Record<string, unknown>>; matchedAskRule?: { source: string; toolName: string; ruleContent?: string } },
     ) => Promise<unknown>
     onElicitation?: (
       request: Record<string, unknown>,
@@ -2379,6 +2379,66 @@ describe("sdk-session CLI 2.1.326 catch-up", () => {
     expect(plain).toHaveBeenCalledWith(expect.objectContaining({ behavior: "allow" }))
     expect(explicit).not.toHaveBeenCalled()
     expect(result.permissionChange?.autoApproved).toEqual([{ requestId: "plain", toolName: "Bash" }])
+    releaseQueryAfterMessages?.()
+  })
+
+  it("approves only the asks pending before the switch was sent, as soon as it lands", async () => {
+    const { sdk, state } = await liveSession("mode-snapshot", [INIT])
+    const before = vi.fn()
+    const duringSwitch = vi.fn()
+    const afterSwitch = vi.fn()
+    const ask = (requestId: string, resolve: () => void) => state.pendingPermissions.set(requestId, { requestId, toolName: "Bash", input: {}, toolUseId: requestId, timestamp: 0, resolve })
+    ask("before", before)
+    // The CLI may take the new mode and ask again before its answer arrives.
+    setPermissionModeSpy!.mockImplementationOnce(async () => { ask("during", duringSwitch) })
+    // An effort change follows the switch, and raises an ask while it is out.
+    let answerFlags!: () => void
+    applyFlagSettingsSpy!.mockImplementationOnce(() => new Promise<void>((resolve) => {
+      ask("after", afterSwitch)
+      answerFlags = resolve
+    }))
+
+    const update = sdk.updateSDKSession("mode-snapshot", { permissionMode: "bypassPermissions", effort: "low" })
+
+    await waitUntil(() => before.mock.calls.length === 1)
+    expect(before).toHaveBeenCalledWith(expect.objectContaining({ behavior: "allow" }))
+    answerFlags()
+    expect((await update).permissionChange?.autoApproved).toEqual([{ requestId: "before", toolName: "Bash" }])
+    expect(duringSwitch).not.toHaveBeenCalled()
+    expect(afterSwitch).not.toHaveBeenCalled()
+    expect([...state.pendingPermissions.keys()]).toEqual(["during", "after"])
+    releaseQueryAfterMessages?.()
+  })
+
+  it("leaves an ask the user's own ask rule forced for a person, and keeps the rule off the dashboard", async () => {
+    const { sdk, state } = await liveSession("mode-ask-rule", [INIT])
+    const canUseTool = captured.at(-1)!.options.canUseTool!
+    const signal = new AbortController().signal
+    const ruled = canUseTool("Bash", { command: "git push" }, { toolUseID: "ruled", signal, matchedAskRule: { source: "userSettings", toolName: "Bash", ruleContent: "git push:*" } })
+    void canUseTool("Bash", { command: "ls" }, { toolUseID: "plain", signal })
+
+    expect(sdk.getSDKPermissions("mode-ask-rule").some((request) => "matchedAskRule" in request)).toBe(false)
+    const result = await sdk.updateSDKSession("mode-ask-rule", { permissionMode: "bypassPermissions" })
+
+    expect(result.permissionChange?.autoApproved).toEqual([{ requestId: "plain", toolName: "Bash" }])
+    expect([...state.pendingPermissions.keys()]).toEqual(["ruled"])
+    sdk.resolvePermission("mode-ask-rule", "ruled", "deny")
+    await expect(ruled).resolves.toMatchObject({ behavior: "deny" })
+    releaseQueryAfterMessages?.()
+  })
+
+  it("leaves an edit outside the workspace waiting when the mode switches to acceptEdits", async () => {
+    const { sdk, state } = await liveSession("mode-blocked-path", [INIT])
+    const inside = vi.fn()
+    const outside = vi.fn()
+    state.pendingPermissions.set("inside", { requestId: "inside", toolName: "Edit", input: { file_path: "/tmp/a.ts" }, toolUseId: "inside", timestamp: 0, resolve: inside })
+    state.pendingPermissions.set("outside", { requestId: "outside", toolName: "Write", input: { file_path: "/etc/hosts" }, toolUseId: "outside", timestamp: 0, blockedPath: "/etc/hosts", resolve: outside })
+
+    const result = await sdk.updateSDKSession("mode-blocked-path", { permissionMode: "acceptEdits" })
+
+    expect(result.permissionChange?.autoApproved).toEqual([{ requestId: "inside", toolName: "Edit" }])
+    expect(outside).not.toHaveBeenCalled()
+    expect([...state.pendingPermissions.keys()]).toEqual(["outside"])
     releaseQueryAfterMessages?.()
   })
 

@@ -71,7 +71,14 @@ export interface PermissionRequestData extends Omit<PermissionRequest, "suggesti
 }
 
 interface PendingPermission extends PermissionRequestData {
+  /** The user's own ask rule that forced this ask: a person answers it, never a mode switch. */
+  matchedAskRule?: Parameters<CanUseTool>[2]["matchedAskRule"]
   resolve: (result: PermissionResult) => void
+}
+
+/** A pending ask as the dashboard sees it. */
+function permissionRequestOf({ resolve: _, matchedAskRule: _rule, ...request }: PendingPermission): PermissionRequestData {
+  return request
 }
 
 interface PendingUserQuestion {
@@ -273,6 +280,7 @@ function makeCanUseTool(state: SDKSessionState): CanUseTool {
         suggestions: options.suggestions,
         defaultToNo: options.defaultToNo,
         suppressAlwaysAllowRule: options.suppressAlwaysAllowRule,
+        matchedAskRule: options.matchedAskRule,
         timestamp: Date.now(),
         resolve,
       }
@@ -1105,17 +1113,39 @@ function applySessionUpdates(
   }
 }
 
+/** What a live update got through to the running process, recorded as it goes. */
+interface PushedUpdates {
+  applied: string[]
+  /** Pending requests the new permission mode approved. */
+  autoApproved: AutoApprovedRequest[]
+}
+
+/** Ask the running CLI to switch modes; false when it refused and kept its mode. */
+async function switchPermissionMode(state: SDKSessionState, queryHandle: Query, requested: string, previous: string): Promise<boolean> {
+  try {
+    await queryHandle.setPermissionMode(requested as PermissionMode)
+    return true
+  } catch (error) {
+    // The CLI keeps its mode: bypassPermissions in a process launched
+    // without it, auto mode where it is unavailable.
+    state.permissionMode = previous
+    streamBus.publishError(state.sessionId, `The session kept its permission mode. ${error instanceof Error ? error.message : String(error)}`)
+    return false
+  }
+}
+
 /**
  * Send the changes to the running process, recording each one it took in
- * `applied` — a failure part-way keeps the record of what went before it.
+ * `pushed` — a failure part-way keeps the record of what went before it.
  */
 async function pushSessionUpdates(
   state: SDKSessionState,
   changes: AppliedSessionUpdates,
-  applied: string[] = [],
-): Promise<string[]> {
+  pushed: PushedUpdates = { applied: [], autoApproved: [] },
+): Promise<void> {
   const queryHandle = state.activeQuery
-  if (!queryHandle) return applied
+  if (!queryHandle) return
+  const { applied } = pushed
 
   if (changes.modelChanged) {
     await queryHandle.setModel(state.model || undefined)
@@ -1123,16 +1153,14 @@ async function pushSessionUpdates(
   }
   if (changes.permissionModeChanged) {
     const requested = state.permissionMode
-    try {
-      await queryHandle.setPermissionMode(requested as PermissionMode)
+    // Asks raised before the switch was sent are the old mode's to answer;
+    // one raised after it may be one the CLI asks even in the new mode.
+    const askedBefore = [...state.pendingPermissions.keys()]
+    if (await switchPermissionMode(state, queryHandle, requested, changes.previousPermissionMode)) {
       // A status report from before the switch may have moved the mode back.
       adoptPermissionMode(state, requested)
       applied.push("permissionMode")
-    } catch (error) {
-      // The CLI keeps its mode: bypassPermissions in a process launched
-      // without it, auto mode where it is unavailable.
-      state.permissionMode = changes.previousPermissionMode
-      streamBus.publishError(state.sessionId, `The session kept its permission mode. ${error instanceof Error ? error.message : String(error)}`)
+      pushed.autoApproved.push(...autoResolvePendingForMode(state, askedBefore))
     }
   }
 
@@ -1182,14 +1210,11 @@ async function pushSessionUpdates(
       // next query, where the normal SDK option validation will report it.
     }
   }
-  return applied
 }
 
 // Switching permission mode mid-turn must take effect immediately: once the
 // CLI runs in the new mode, approvals the user is currently being asked for are
 // re-evaluated under it so the turn continues without further clicks.
-// bypassPermissions allows everything pending; acceptEdits allows pending file
-// edits. An ask the CLI marks for a person's own answer stays.
 const EDIT_TOOL_NAMES = new Set(["Edit", "Write", "MultiEdit", "NotebookEdit"])
 
 /** A pending tool request that a permission mode change approved without asking. */
@@ -1198,14 +1223,23 @@ export interface AutoApprovedRequest {
   toolName: string
 }
 
-function autoResolvePendingForMode(state: SDKSessionState): AutoApprovedRequest[] {
-  const allowAll = state.permissionMode === "bypassPermissions"
-  const allowEdits = state.permissionMode === "acceptEdits"
-  if (!allowAll && !allowEdits) return []
+/**
+ * Whether a switch to `mode` answers a pending ask: bypassPermissions any,
+ * acceptEdits a file edit inside the workspace (outside it the CLI still
+ * asks). Never one the CLI or the user's own ask rule wants a person for.
+ */
+function modeApproves(mode: string, pending: PendingPermission): boolean {
+  if (pending.defaultToNo || pending.suppressAlwaysAllowRule || pending.matchedAskRule) return false
+  if (mode === "bypassPermissions") return true
+  return mode === "acceptEdits" && EDIT_TOOL_NAMES.has(pending.toolName) && !pending.blockedPath
+}
+
+/** Approve those of the asks `requestIds` names that are still pending and the session's new mode answers. */
+function autoResolvePendingForMode(state: SDKSessionState, requestIds: readonly string[]): AutoApprovedRequest[] {
   const approved: AutoApprovedRequest[] = []
-  for (const [requestId, pending] of [...state.pendingPermissions]) {
-    if (pending.defaultToNo || pending.suppressAlwaysAllowRule) continue
-    if (!allowAll && !EDIT_TOOL_NAMES.has(pending.toolName)) continue
+  for (const requestId of requestIds) {
+    const pending = state.pendingPermissions.get(requestId)
+    if (!pending || !modeApproves(state.permissionMode, pending)) continue
     state.pendingPermissions.delete(requestId)
     applyDecision(pending, "allow")
     approved.push({ requestId, toolName: pending.toolName })
@@ -1247,20 +1281,20 @@ export async function updateSDKSession(
   if (!state) return { found: false, appliedLive: [], staged: Object.keys(updates), permissionChange: null }
   const permissionsBefore = JSON.stringify(permissionSettingsOf(state))
   const changes = applySessionUpdates(state, updates)
-  const appliedLive: string[] = []
+  const pushed: PushedUpdates = { applied: [], autoApproved: [] }
   try {
-    await pushSessionUpdates(state, changes, appliedLive)
+    await pushSessionUpdates(state, changes, pushed)
   } catch {
     // The query may finish between checking `running` and sending a control
     // request. State is still updated, so the next resume applies the values.
   }
-  const autoApproved = appliedLive.includes("permissionMode") ? autoResolvePendingForMode(state) : []
+  const { applied, autoApproved } = pushed
   const permissionsAfter = permissionSettingsOf(state)
   const refused = changes.permissionModeChanged && state.permissionMode === changes.previousPermissionMode
   return {
     found: true,
-    appliedLive,
-    staged: Object.keys(updates).filter((key) => !appliedLive.includes(key) && !(refused && key === "permissionMode")),
+    appliedLive: applied,
+    staged: Object.keys(updates).filter((key) => !applied.includes(key) && !(refused && key === "permissionMode")),
     permissionChange: JSON.stringify(permissionsAfter) === permissionsBefore
       ? null
       : { ...permissionsAfter, autoApproved },
@@ -1580,7 +1614,7 @@ export function resolveAllPermissions(
   const state = sdkSessions.get(sessionId)
   if (!state) return []
 
-  const resolved = Array.from(state.pendingPermissions.values(), ({ resolve: _, ...request }) => request)
+  const resolved = Array.from(state.pendingPermissions.values(), permissionRequestOf)
   for (const pending of state.pendingPermissions.values()) applyDecision(pending, behavior)
   state.pendingPermissions.clear()
   return resolved
@@ -1591,7 +1625,7 @@ export function resolveAllPermissions(
 export function getSDKPermissions(sessionId: string): PermissionRequestData[] {
   const state = sdkSessions.get(sessionId)
   if (!state) return []
-  return Array.from(state.pendingPermissions.values(), ({ resolve: _, ...rest }) => rest)
+  return Array.from(state.pendingPermissions.values(), permissionRequestOf)
 }
 
 // ── Get pending AskUserQuestion calls ────────────────────────────────
