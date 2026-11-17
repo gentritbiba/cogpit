@@ -11,7 +11,7 @@ import { PluginLeaseManager, type PluginLease } from "./leases"
 import { PluginProjects } from "./projects"
 import { pluginRuntimeDescriptor } from "./runtime"
 import { openPluginStore, type PluginStore } from "./store"
-import { inspectPackage } from "./package"
+import { inspectPackage, type InspectedPackage } from "./package"
 import { PluginConnectionStore, type PluginDataNamespace, type SavedPluginConnection } from "./connectionStore"
 import { PluginStateStore } from "./stateStore"
 import { PluginDataError, type DataGuard } from "./privateStore"
@@ -46,6 +46,7 @@ const allowed = () => {}
 const LEGACY_IMPORT_WARNING = "Legacy ClickUp settings could not be imported. Connect ClickUp or import the saved settings from Connections."
 const unavailable = (): never => { throw new PluginDataError("CAPABILITY_UNAVAILABLE", "Plugin capability is unavailable") }
 const canceled = (): never => { throw new PluginDataError("CANCELED", "Plugin operation was canceled") }
+const MAX_INSPECTED_PACKAGES = 8
 function result<T>(value: ConnectionResult<T>): T {
   if (value.ok) return value.data
   throw new PluginDataError(value.error, value.error === "RESOURCE_REQUIRED" ? "Select the required connection resources" : "Connection operation failed")
@@ -73,6 +74,8 @@ export class PluginManager {
   private readonly installationChanges = new Set<string>()
   private dataDeletionQueue: Promise<void> = Promise.resolve()
   private readonly legacyRateKeys = new Map<string, string>()
+  /** Packages are content-addressed, so a digest inspected once never needs re-reading for the next call. */
+  private readonly inspectedPackages = new Map<string, InspectedPackage>()
   private readonly root: string
   private unregisterSkills?: () => void
   private unregisterWorktreeSetup?: () => void
@@ -184,7 +187,7 @@ export class PluginManager {
     let bytes = 0
     for (const plugin of candidates) {
       if (plugin.scope.type !== "all" && (!project || !plugin.scope.projectIds.includes(project.id))) continue
-      const inspected = inspectPackage(await this.store.payload(plugin.selectedDigest), plugin.manifest.publisher)
+      const inspected = await this.inspected(plugin.selectedDigest, plugin.manifest.publisher)
       for (const skill of plugin.manifest.contributes.skills ?? []) {
         const source = inspected.files.get(skill.source)!.bytes.toString("utf8")
         const section = `Plugin skill ${plugin.id}:${skill.id} — ${skill.title}\n${skill.description}\n${source}`
@@ -274,11 +277,20 @@ export class PluginManager {
     }
     try {
       await guard()
-      const payload = await this.store.payload(plugin.selectedDigest)
+      const inspected = await this.inspected(plugin.selectedDigest, plugin.manifest.publisher)
       check()
-      const inspected = inspectPackage(payload, plugin.manifest.publisher)
       return { binding, plugin, revision, scope, inspected, projectId: target.projectId, workspacePath: lease?.workspacePath ?? null, signal, guard, check, leaseId: lease?.id, dispose: () => { disposed = true; unsubscribe() } }
     } catch (error) { unsubscribe(); if (error instanceof PluginDataError || error instanceof PluginAuthorizationError) throw error; return unavailable() }
+  }
+
+  private async inspected(digest: string, publisher: string): Promise<InspectedPackage> {
+    const key = `${publisher}\0${digest}`
+    const cached = this.inspectedPackages.get(key)
+    if (cached) return cached
+    const inspected = inspectPackage(await this.store.payload(digest), publisher)
+    if (this.inspectedPackages.size >= MAX_INSPECTED_PACKAGES) this.inspectedPackages.delete(this.inspectedPackages.keys().next().value!)
+    this.inspectedPackages.set(key, inspected)
+    return inspected
   }
 
   private connection(context: Awaited<ReturnType<PluginManager["context"]>>, id: string) {
@@ -425,7 +437,7 @@ export class PluginManager {
       if (input.projectPath !== undefined) {
         if (!isAbsolute(input.projectPath)) throw new PluginDataError("RESOURCE_REQUIRED", "Choose an absolute workspace path")
         try { projectPath = await realpath(input.projectPath) } catch { throw new PluginDataError("RESOURCE_REQUIRED", "The selected project is unavailable") }
-        const project = projectForPath(projectPath, await this.projects.list(true))
+        const project = projectForPath(projectPath, await this.projects.list()) ?? projectForPath(projectPath, await this.projects.list(true))
         if (!project) throw new PluginDataError("PERMISSION_REQUIRED", "The selected project is not available to plugins")
         projectId = project.id
       }
@@ -441,9 +453,9 @@ export class PluginManager {
       }
       const guard = async () => {
         check()
+        // Re-inspect only this workspace; a forced inventory of every project took seconds per guard.
         try {
-          await this.projects.resolve(projectId)
-          if (projectPath && projectForPath(await realpath(projectPath), await this.projects.list(true))?.id !== projectId) throw new Error("Project identity changed")
+          if (projectPath) await this.projects.resolveWorkspace(projectId, await realpath(projectPath))
         } catch { throw new PluginDataError("RESOURCE_REQUIRED", "The selected project is unavailable") }
         check()
       }

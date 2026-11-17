@@ -28,10 +28,43 @@ function readHeader(format: AgentFormat, lines: readonly string[]): HeaderMetada
   return format.metadataFromLines(lines) as HeaderMetadata
 }
 
+/** How far back a head-only read looks for the latest prompt and model. */
+const TAIL_CHUNK_BYTES = 4096
+const TAIL_MAX_CHUNKS = 128
+/** A model id as raw text: assistant records are too large to survive a chunked read as whole lines. */
+const MODEL_RE = /"model":"([^"]+)"/g
+
 /** Strip inline XML-ish wrappers Claude Code injects around real user text. */
 function cleanUserText(text: string): string {
   const cleaned = text.replace(/<[^>]+>[\s\S]*?<\/[^>]+>/g, "").trim()
   return cleaned.length > 5 ? cleaned.slice(0, 120) : ""
+}
+
+interface UserRecord {
+  type?: string
+  isMeta?: boolean
+  timestamp?: string
+  origin?: { kind?: string } | null
+  message?: { content?: unknown }
+}
+
+/** A user record someone typed: tool results and task wake-ups are user records too, and open no turn. */
+function isPromptRecord(record: UserRecord): boolean {
+  if (record.origin?.kind === "task-notification") return false
+  const content = record.message?.content
+  return !Array.isArray(content) || !content.some((block) => (block as { type?: string } | null)?.type === "tool_result")
+}
+
+function promptText(record: UserRecord): string {
+  const content = record.message?.content
+  if (typeof content === "string") return cleanUserText(content)
+  if (!Array.isArray(content)) return ""
+  for (const block of content as Array<{ type?: string; text?: string }>) {
+    if (block.type !== "text" || typeof block.text !== "string") continue
+    const extracted = cleanUserText(block.text)
+    if (extracted) return extracted
+  }
+  return ""
 }
 
 /**
@@ -48,12 +81,7 @@ function scanClaudeMessages(lines: readonly string[]): ConversationMeta {
 
   for (const line of lines) {
     if (isAnyAgentNoiseLine(line)) continue
-    let record: {
-      type?: string
-      isMeta?: boolean
-      timestamp?: string
-      message?: { content?: unknown }
-    }
+    let record: UserRecord
     try {
       record = JSON.parse(line)
     } catch {
@@ -61,18 +89,9 @@ function scanClaudeMessages(lines: readonly string[]): ConversationMeta {
     }
     if (record.type !== "user" || record.isMeta) continue
     if (!meta.timestamp) meta.timestamp = record.timestamp || ""
+    if (!isPromptRecord(record)) continue
 
-    const content = record.message?.content
-    let extracted = ""
-    if (typeof content === "string") {
-      extracted = cleanUserText(content)
-    } else if (Array.isArray(content)) {
-      for (const block of content as Array<{ type?: string; text?: string }>) {
-        if (block.type !== "text" || typeof block.text !== "string") continue
-        extracted = cleanUserText(block.text)
-        if (extracted) break
-      }
-    }
+    const extracted = promptText(record)
     if (extracted) {
       if (!meta.firstUserMessage) meta.firstUserMessage = extracted
       meta.lastUserMessage = extracted
@@ -81,6 +100,42 @@ function scanClaudeMessages(lines: readonly string[]): ConversationMeta {
   }
 
   return meta
+}
+
+/**
+ * The latest prompt and model of a transcript read from its head only: both
+ * sit near the end, past the head of a session that opens with a large prompt.
+ */
+async function scanTail(filePath: string, size: number): Promise<{ lastUserMessage: string; model: string }> {
+  const found = { lastUserMessage: "", model: "" }
+  const handle = await open(filePath, "r")
+  try {
+    let cursor = size
+    let leftover = ""
+    for (let chunk = 0; chunk < TAIL_MAX_CHUNKS && cursor > 0 && !(found.lastUserMessage && found.model); chunk++) {
+      const length = Math.min(TAIL_CHUNK_BYTES, cursor)
+      cursor -= length
+      const buffer = Buffer.alloc(length)
+      const { bytesRead } = await handle.read(buffer, 0, length, cursor)
+      const text = buffer.subarray(0, bytesRead).toString("utf-8") + leftover
+      if (!found.model) {
+        for (const match of text.matchAll(MODEL_RE)) if (!match[1].startsWith("<")) found.model = match[1]
+      }
+      const lines = text.split("\n")
+      leftover = cursor > 0 ? lines.shift() ?? "" : ""
+      for (let index = lines.length - 1; index >= 0 && !found.lastUserMessage; index--) {
+        const line = lines[index]
+        if (!line.includes('"user"') || isAnyAgentNoiseLine(line)) continue
+        try {
+          const record = JSON.parse(line) as UserRecord
+          if (record.type === "user" && !record.isMeta && isPromptRecord(record)) found.lastUserMessage = promptText(record)
+        } catch { /* a line cut by the chunk edge */ }
+      }
+    }
+  } finally {
+    await handle.close()
+  }
+  return found
 }
 
 async function readLines(filePath: string, size: number): Promise<{
@@ -132,6 +187,7 @@ export async function getSessionMeta(filePath: string) {
 
   const header = readHeader(format, lines)
   const instanceId = storeForPath(filePath)?.instanceId ?? "default"
+  const scanned = header.turnCount === undefined
   const conversation: ConversationMeta = header.turnCount === undefined
     ? scanClaudeMessages(lines)
     : {
@@ -141,11 +197,18 @@ export async function getSessionMeta(filePath: string) {
         turnCount: header.turnCount,
       }
 
+  let model = header.model
+  if (scanned && isPartialRead) {
+    const tail = await scanTail(filePath, fileStat.size)
+    if (tail.lastUserMessage) conversation.lastUserMessage = tail.lastUserMessage
+    if (tail.model) model = tail.model
+  }
+
   return {
     sessionId: instanceSessionId(instanceId, header.sessionId),
     version: header.version,
     gitBranch: header.gitBranch,
-    model: header.model,
+    model,
     slug: header.slug,
     cwd: header.cwd,
     ...conversation,

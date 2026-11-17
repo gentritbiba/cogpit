@@ -1,8 +1,9 @@
 /**
  * Set by `cogpitAgentEnv` for agents. A server started inside an agent must not share its parent's
- * orchestration store and dispatcher lease, nor hand its parent's port to the agents it starts.
+ * orchestration store and dispatcher lease, nor its memory store (its indexer would file the copies
+ * it sees under the parent's sessions), nor hand its parent's port to the agents it starts.
  */
-const PARENT_CONTEXT = ["COGPIT_SESSION_ID", "COGPIT_ORCHESTRATION_ROOT", "COGPIT_PORT"] as const
+const PARENT_CONTEXT = ["COGPIT_SESSION_ID", "COGPIT_ORCHESTRATION_ROOT", "COGPIT_PORT", "COGPIT_MEMORY_DIR"] as const
 
 export function detachFromParentCogpit(env: NodeJS.ProcessEnv = process.env): void {
   if (!env.COGPIT_SESSION_ID) return

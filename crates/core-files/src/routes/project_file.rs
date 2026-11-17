@@ -46,7 +46,7 @@ fn resolve_project_file(cwd: &str, file_path: &str) -> Result<ProjectFile, Failu
         return Err(Failure(403, "File is outside the project"));
     }
 
-    let info = std::fs::metadata(&absolute_path).map_err(|_| UNEXPECTED)?;
+    let info = std::fs::metadata(&absolute_path).map_err(|cause| UNEXPECTED.because(cause))?;
     if !info.is_file() {
         return Err(Failure(400, "Path must point to a file"));
     }
@@ -86,7 +86,8 @@ pub async fn read(uri: Uri) -> Response {
     let path = query_param(uri.query(), "path").unwrap_or_default();
     let result = blocking(move || {
         let file = resolve_project_file(&cwd, &path)?;
-        let bytes = std::fs::read(&file.absolute_path).map_err(|_| UNEXPECTED)?;
+        let bytes =
+            std::fs::read(&file.absolute_path).map_err(|cause| UNEXPECTED.because(cause))?;
         Ok::<_, Failure>(ReadResponse {
             content: decode_text_file(bytes)?,
             mtime_ms: JsNumber(mtime_ms(&file.info)),
@@ -102,7 +103,7 @@ pub async fn read(uri: Uri) -> Response {
 }
 
 fn current_mtime(path: &str) -> Result<f64, Failure> {
-    let info = std::fs::metadata(path).map_err(|_| UNEXPECTED)?;
+    let info = std::fs::metadata(path).map_err(|cause| UNEXPECTED.because(cause))?;
     Ok(mtime_ms(&info))
 }
 
@@ -118,13 +119,22 @@ fn write_temporary(path: &str, content: &str, info: &Metadata) -> std::io::Resul
     let mut options = std::fs::OpenOptions::new();
     options.write(true).create(true).truncate(true);
     #[cfg(unix)]
-    {
+    let mode = {
         use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
-        options.mode(info.permissions().mode() & 0o7777);
-    }
+        let mode = info.permissions().mode() & 0o7777;
+        options.mode(mode);
+        mode
+    };
     #[cfg(not(unix))]
     let _ = info;
-    options.open(path)?.write_all(content.as_bytes())
+    let mut file = options.open(path)?;
+    // `open` masks the mode with the umask, so a 0666 file would come back 0644.
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        file.set_permissions(std::fs::Permissions::from_mode(mode))?;
+    }
+    file.write_all(content.as_bytes())
 }
 
 /// Write beside the file and rename over it, re-checking the mtime before
@@ -139,11 +149,12 @@ fn write_atomically(
     }
     let temporary = temporary_path(&file.absolute_path);
     let result = (|| {
-        write_temporary(&temporary, content, &file.info).map_err(|_| UNEXPECTED)?;
+        write_temporary(&temporary, content, &file.info)
+            .map_err(|cause| UNEXPECTED.because(cause))?;
         if current_mtime(&file.absolute_path)? != expected_mtime_ms {
             return Err(Failure(409, CONFLICT));
         }
-        std::fs::rename(&temporary, &file.absolute_path).map_err(|_| UNEXPECTED)
+        std::fs::rename(&temporary, &file.absolute_path).map_err(|cause| UNEXPECTED.because(cause))
     })();
     let _ = std::fs::remove_file(&temporary);
     result
@@ -169,7 +180,8 @@ fn write_project_file(
         return Err(Failure(409, CONFLICT));
     }
     write_atomically(&file, content, expected_mtime_ms)?;
-    let saved = std::fs::metadata(&file.absolute_path).map_err(|_| UNEXPECTED)?;
+    let saved =
+        std::fs::metadata(&file.absolute_path).map_err(|cause| UNEXPECTED.because(cause))?;
     Ok(SaveResponse {
         ok: true,
         mtime_ms: JsNumber(mtime_ms(&saved)),
@@ -181,8 +193,9 @@ pub async fn save(body: Body) -> Response {
     let result = async {
         let bytes = to_bytes(body, MAX_REQUEST_BODY_BYTES)
             .await
-            .map_err(|_| UNEXPECTED)?;
-        let body: Value = serde_json::from_slice(&bytes).map_err(|_| UNEXPECTED)?;
+            .map_err(|cause| UNEXPECTED.because(cause))?;
+        let body: Value =
+            serde_json::from_slice(&bytes).map_err(|cause| UNEXPECTED.because(cause))?;
         if body.is_null() {
             return Err(UNEXPECTED);
         }

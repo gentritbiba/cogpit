@@ -14,7 +14,6 @@ import type { CommandReceipt } from "./orchestration"
 
 /** What an unattended execution may do; a grant names the ones it allows. */
 export type UnattendedAction = "session.create" | "session.send"
-export const UNATTENDED_ACTIONS: readonly UnattendedAction[] = ["session.create", "session.send"]
 
 /**
  * Exactly what a grant lets its executions reach. Every field present must

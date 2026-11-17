@@ -89,7 +89,8 @@ One ranked list, merged by reciprocal rank fusion from up to three lists:
   within `--max-age` (default 5 days).
 
 Before a search answers it spends up to 600 ms bringing both stores up to date.
-One parse of a file feeds both. Transcripts never indexed go first, then ones
+The tool index only takes transcripts written within the search's `--max-age`
+window, the only ones its tool rows can come from. One parse of a file feeds both. Transcripts never indexed go first, then ones
 that changed, each newest first. A file whose last sync took longer than the
 time left is skipped. A transcript still being written is re-read at most
 once per max(1 minute, 20 × its last sync). `--session <id>` brings that

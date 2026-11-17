@@ -14,6 +14,7 @@
   "include": [
     "vite.config.ts",
     "server/**/*.ts",
+    "src/types/css-tree-subpaths.d.ts",
     "editions/team/index.ts",
     "editions/team/server/**/*.ts",
     "editions/team/shared/**/*.ts",

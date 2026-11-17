@@ -1,5 +1,6 @@
 import { parseManifest, type PluginManifest } from "@cogpit/plugin-contracts"
-import { ident, string as cssString, tokenize, tokenTypes, url } from "css-tree"
+import { tokenize, tokenTypes } from "css-tree/tokenizer"
+import { ident, string as cssString, url } from "css-tree/utils"
 import { z } from "zod"
 
 const MAX_UPLOAD = 4 * 1024 * 1024

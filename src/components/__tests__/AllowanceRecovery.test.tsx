@@ -142,3 +142,28 @@ it("explains delivery already started instead of offering a scheduled cancellati
   expect(await screen.findByText(/Continuation has started/)).toHaveTextContent(/Use Stop/)
   expect(screen.queryByRole("button", { name: "Cancel scheduled resume" })).toBeNull()
 })
+
+it("reads nothing while the window is hidden and catches up when it shows", async () => {
+  const visibility = vi.spyOn(document, "visibilityState", "get").mockReturnValue("hidden")
+  mount()
+  await act(async () => { await Promise.resolve() })
+  expect(mocks.fetch).not.toHaveBeenCalled()
+  visibility.mockReturnValue("visible")
+  act(() => { document.dispatchEvent(new Event("visibilitychange")) })
+  expect(await screen.findByRole("button", { name: "Resume when limit resets" })).toBeInTheDocument()
+  expect(mocks.fetch).toHaveBeenCalledTimes(1)
+})
+
+it("waits 15 seconds between reads while nothing is in flight", async () => {
+  vi.useFakeTimers({ shouldAdvanceTime: true })
+  try {
+    mount()
+    await screen.findByRole("button", { name: "Resume when limit resets" })
+    await act(async () => { await vi.advanceTimersByTimeAsync(3_000) })
+    expect(mocks.fetch).toHaveBeenCalledTimes(1)
+    await act(async () => { await vi.advanceTimersByTimeAsync(12_000) })
+    expect(mocks.fetch).toHaveBeenCalledTimes(2)
+  } finally {
+    vi.useRealTimers()
+  }
+})

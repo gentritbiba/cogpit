@@ -7,7 +7,6 @@ export const pluginConnectionTargetSchema = z.strictObject({
   pluginId: z.string().regex(/^[a-z][a-z0-9-]*\.[a-z][a-z0-9-]*$/).max(128),
   projectId: z.string().regex(/^p_[a-f0-9]{40}$/).nullable(),
 })
-export const pluginConnectionRevisionSchema = pluginConnectionTargetSchema.extend({ expectedRevision: revision })
 export const pluginConnectionIdentitySchema = pluginConnectionTargetSchema.extend({ connectionId: identifier })
 export const pluginConnectionMutationSchema = pluginConnectionIdentitySchema.extend({ expectedRevision: revision })
 export const pluginResourceSelectionSchema = z.strictObject({ id: z.string().min(1).max(1024), label: z.string().min(1).max(256) })

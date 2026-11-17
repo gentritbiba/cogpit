@@ -181,8 +181,12 @@ pub async fn handler(uri: Uri) -> Response {
         "-z",
         "--untracked-files=all",
     ];
-    let Ok(stdout) = run_git(&root, &args).await else {
-        return error(500, "Unable to read git status");
+    let stdout = match run_git(&root, &args).await {
+        Ok(stdout) => stdout,
+        Err(cause) => {
+            tracing::warn!(%cause, %root, "Unable to read git status");
+            return error(500, "Unable to read git status");
+        }
     };
     let (branch, files) = parse_git_status(&stdout);
     json(

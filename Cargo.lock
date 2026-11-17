@@ -159,6 +159,7 @@ dependencies = [
  "tokio",
  "tokio-util",
  "tower",
+ "tracing",
  "uuid",
 ]
 
