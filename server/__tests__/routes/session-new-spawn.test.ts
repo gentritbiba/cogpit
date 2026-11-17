@@ -170,6 +170,8 @@ vi.mock("../../sdk-session", () => ({
       onResult: null,
       onInit: null as (() => void) | null,
       cwd: opts.cwd,
+      // A session asked for no mode runs in the one the CLI reports at init.
+      permissionMode: opts.permissionMode ?? "bypassPermissions",
       proc: { kill: vi.fn() },
       dead: false,
     }
@@ -372,6 +374,18 @@ describe("registerCreateAndSendRoute (Claude cwd)", () => {
       expect.objectContaining({ cwd: "/tmp/my-project" }),
     )
     expect(mockReaddir).not.toHaveBeenCalled()
+  })
+
+  it("stores the mode a session started without one runs in", async () => {
+    const body = JSON.stringify({ dirName: "-tmp-my-project", cwd: "/tmp/my-project", message: "hello" })
+    const { req, res, next, sendBody } = createMockReqRes("POST", body)
+
+    handler(req as never, res as never, next)
+    await sendBody()
+    await new Promise((resolve) => setTimeout(resolve, 20))
+
+    expect(res._getStatus()).toBe(200)
+    expect(mockStoreStartedSettings).toHaveBeenCalledWith("test-session-uuid", { mode: "bypassPermissions", effort: undefined })
   })
 
   it.each([

@@ -210,7 +210,7 @@ vi.mock("../lib/sessionConfigStore", () => ({
     const before = storedConfigs.get(key) ?? {}
     const config = { ...before, ...change(before) }
     storedConfigs.set(key, config)
-    return { before, config, changed: [] }
+    return { before, config, changed: Object.keys(config).filter((field) => config[field] !== before[field]) }
   }),
 }))
 
@@ -2313,7 +2313,8 @@ describe("sdk-session CLI 2.1.326 catch-up", () => {
       INIT,
       { type: "system", subtype: "status", status: null, permissionMode: "acceptEdits" },
     ])
-    await waitUntil(() => vi.mocked(streamBus.publishSessionConfig).mock.calls.length === 1)
+    // Once for the mode the session started in, once for the change.
+    await waitUntil(() => vi.mocked(streamBus.publishSessionConfig).mock.calls.length === 2)
     expect(state.permissionMode).toBe("acceptEdits")
     expect(storedConfigs.get("mode-status.jsonl")).toEqual({ permissionMode: "acceptEdits" })
     releaseQueryAfterMessages?.()
@@ -2326,10 +2327,27 @@ describe("sdk-session CLI 2.1.326 catch-up", () => {
     expect(captured.at(-1)?.options).toEqual(expect.objectContaining({ permissionMode: "plan", allowDangerouslySkipPermissions: true }))
   })
 
-  it("writes nothing while the CLI runs in the mode the session asked for", async () => {
+  it("tells no viewer to read the config again while it holds the mode the CLI reports", async () => {
+    const streamBus = await import("../lib/streamBus")
     const { updateSessionConfig } = await import("../lib/sessionConfigStore")
-    await liveSession("mode-same", [INIT])
-    expect(updateSessionConfig).not.toHaveBeenCalled()
+    storedConfigs.set("mode-same.jsonl", { permissionMode: "default" })
+    const { state } = await liveSession("mode-same", [INIT, { ...INIT }])
+    await waitUntil(() => vi.mocked(updateSessionConfig).mock.calls.length === 2)
+    expect(storedConfigs.get("mode-same.jsonl")).toEqual({ permissionMode: "default" })
+    expect(streamBus.publishSessionConfig).not.toHaveBeenCalled()
+    expect(state.permissionMode).toBe("default")
+    releaseQueryAfterMessages?.()
+  })
+
+  it("stores the bypass a session started without a mode runs in, over the mode a client seeded", async () => {
+    const streamBus = await import("../lib/streamBus")
+    // The owner opened the session and seeded the picker's Ask before the next turn's init.
+    storedConfigs.set("mode-seeded.jsonl", { permissionMode: "default", effort: "high" })
+    const { state } = await liveSession("mode-seeded", [{ ...INIT, permissionMode: "bypassPermissions" }], { permissionMode: undefined })
+    await waitUntil(() => vi.mocked(streamBus.publishSessionConfig).mock.calls.length === 1)
+    expect(state.permissionMode).toBe("bypassPermissions")
+    expect(storedConfigs.get("mode-seeded.jsonl")).toEqual({ permissionMode: "bypassPermissions", effort: "high" })
+    expect(streamBus.publishSessionConfig).toHaveBeenCalledWith("mode-seeded")
     releaseQueryAfterMessages?.()
   })
 

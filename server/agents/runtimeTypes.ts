@@ -81,6 +81,8 @@ export interface StartedSession {
   /** Transcript path relative to the agent's sessions root. */
   fileName: string
   filePath: string
+  /** The permission mode the agent reported running in, which a start that asked for none leaves to the agent. */
+  permissionMode?: string
   /**
    * Transcript bytes already on disk, when the spawn managed to read them.
    * Only older clients read it; the current one loads the tail instead.

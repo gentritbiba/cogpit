@@ -153,7 +153,7 @@ function startInteractive(req: StartSessionRequest): Promise<StartedSession> {
       } catch {
         // The client polls for it; an unreadable file is not a failed spawn.
       }
-      resolve({ sessionId, dirName, cwd: state.cwd, fileName, filePath, initialContent })
+      resolve({ sessionId, dirName, cwd: state.cwd, fileName, filePath, permissionMode: state.permissionMode, initialContent })
     }
     const fail = (message: string) => {
       if (settled) return

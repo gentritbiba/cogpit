@@ -56,8 +56,8 @@ function sameValue(a: unknown, b: unknown): boolean {
 
 /**
  * Merge the patch `change` makes of the stored config into it and write the
- * result; a field set to null is removed. `change` runs in turn with every
- * other write to the key, so it sees what they left.
+ * result, when it moved a field; a field set to null is removed. `change` runs
+ * in turn with every other write to the key, so it sees what they left.
  */
 export function updateSessionConfig(key: string, change: (stored: SessionConfig) => SessionConfig): Promise<SessionConfigUpdate> {
   return inTurn(key, async () => {
@@ -66,9 +66,12 @@ export function updateSessionConfig(key: string, change: (stored: SessionConfig)
     for (const [field, value] of Object.entries(config)) {
       if (value === null) delete config[field]
     }
-    await mkdir(dirs.SESSION_CONFIG_DIR, { recursive: true })
-    await writeOwnerOnlyJson(configFilePath(key), config)
     const fields = new Set([...Object.keys(before), ...Object.keys(config)])
-    return { before, config, changed: [...fields].filter((field) => !sameValue(before[field], config[field])) }
+    const changed = [...fields].filter((field) => !sameValue(before[field], config[field]))
+    if (changed.length > 0) {
+      await mkdir(dirs.SESSION_CONFIG_DIR, { recursive: true })
+      await writeOwnerOnlyJson(configFilePath(key), config)
+    }
+    return { before, config, changed }
   })
 }

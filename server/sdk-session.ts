@@ -528,16 +528,17 @@ export function describeErrorResult(result: Record<string, unknown>): string {
 
 /**
  * Follow the mode the CLI says it runs in, which can differ from the one asked
- * for: auto mode starts in Manual where it is unavailable, and approving a
- * plan moves a session on. The stored config follows, and every client
- * showing the session reads it again.
+ * for: a session started without one runs in bypassPermissions, auto mode
+ * starts in Manual where it is unavailable, and approving a plan moves a
+ * session on. The stored config follows, whatever a client stored there
+ * before, and every client showing the session reads it again.
  */
 function adoptPermissionMode(state: SDKSessionState, mode: string | undefined): void {
-  if (!mode || mode === state.permissionMode) return
+  if (!mode) return
   state.permissionMode = mode
   const { sessionId } = state
   void updateSessionConfig(sessionConfigKey(sessionId), () => ({ permissionMode: mode }))
-    .then(() => streamBus.publishSessionConfig(sessionId), () => {})
+    .then(({ changed }) => { if (changed.length > 0) streamBus.publishSessionConfig(sessionId) }, () => {})
 }
 
 /** How long before a sign-in ends its sessions warn about it. The CLI's date can be up to 3 days late. */

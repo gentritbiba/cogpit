@@ -9,13 +9,15 @@ import type { SessionAccessState } from "@/lib/sessionAccessPermissions"
 vi.mock("@/lib/sessionConfig", () => ({
   fetchSessionConfig: vi.fn(),
   saveSessionConfig: vi.fn(),
+  seedSessionConfig: vi.fn(),
   flushSessionConfig: vi.fn(),
 }))
 
-import { fetchSessionConfig, flushSessionConfig, saveSessionConfig } from "@/lib/sessionConfig"
+import { fetchSessionConfig, flushSessionConfig, saveSessionConfig, seedSessionConfig } from "@/lib/sessionConfig"
 
 const mockFetch = fetchSessionConfig as unknown as ReturnType<typeof vi.fn>
 const mockSave = saveSessionConfig as unknown as ReturnType<typeof vi.fn>
+const mockSeed = vi.mocked(seedSessionConfig)
 const mockFlush = vi.mocked(flushSessionConfig)
 
 const VALUES: ComposerConfigValues = {
@@ -96,6 +98,8 @@ beforeEach(() => {
   mockFetch.mockResolvedValue(null)
   // A save stays unanswered, as one waiting out its debounce does, unless a test answers it.
   mockSave.mockReturnValue(new Promise<boolean>(() => {}))
+  // A seed the server stored as it came.
+  mockSeed.mockImplementation(async (_key, patch) => patch)
   mockFlush.mockResolvedValue()
   Object.defineProperty(document, "visibilityState", { configurable: true, get: () => "visible" })
 })
@@ -127,7 +131,26 @@ describe("useSessionConfigSync", () => {
 
     renderSync({ sessionKey: "fresh.jsonl" })
 
-    await waitFor(() => expect(mockSave).toHaveBeenCalledWith("fresh.jsonl", VALUES))
+    await waitFor(() => expect(mockSeed).toHaveBeenCalledWith("fresh.jsonl", VALUES))
+    await settle()
+    expect(mockFetch).toHaveBeenCalledOnce()
+    expect(mockSave).not.toHaveBeenCalled()
+  })
+
+  it("reads back the mode the server stored first instead of the one it seeded", async () => {
+    mockFetch.mockResolvedValueOnce({})
+    // The session started without a mode and runs in bypass; the server stored that while this read was out.
+    mockSeed.mockResolvedValueOnce({ ...VALUES, permissionMode: "bypassPermissions" })
+    mockFetch.mockResolvedValueOnce({ ...VALUES, permissionMode: "bypassPermissions" })
+
+    const { result } = renderSync({ sessionKey: "started-bare.jsonl", values: { ...VALUES, permissionMode: "default" } })
+
+    await waitFor(() => expect(result.current.values.permissionMode).toBe("bypassPermissions"))
+    expect(mockSeed).toHaveBeenCalledWith("started-bare.jsonl", { ...VALUES, permissionMode: "default" })
+    expect(mockFetch).toHaveBeenCalledTimes(2)
+    await settle()
+    expect(result.current.picked).toEqual([])
+    expect(mockSave).not.toHaveBeenCalled()
   })
 
   it("seeds a config that only has foreign fields (e.g. mcpServers)", async () => {
@@ -135,7 +158,7 @@ describe("useSessionConfigSync", () => {
 
     const { onHydrate } = renderSync({ sessionKey: "mcp-only.jsonl" })
 
-    await waitFor(() => expect(mockSave).toHaveBeenCalledWith("mcp-only.jsonl", VALUES))
+    await waitFor(() => expect(mockSeed).toHaveBeenCalledWith("mcp-only.jsonl", VALUES))
     expect(onHydrate).not.toHaveBeenCalled()
   })
 
@@ -145,7 +168,7 @@ describe("useSessionConfigSync", () => {
     renderSync({ sessionKey: "theirs.jsonl", access: "interact" })
 
     const { permissionMode: _mode, ...rest } = VALUES
-    await waitFor(() => expect(mockSave).toHaveBeenCalledWith("theirs.jsonl", rest))
+    await waitFor(() => expect(mockSeed).toHaveBeenCalledWith("theirs.jsonl", rest))
   })
 
   it("neither seeds nor saves when the read fails", async () => {
@@ -192,7 +215,7 @@ describe("useSessionConfigSync", () => {
 
     await waitFor(() => expect(mockFetch).toHaveBeenCalledWith("shared.jsonl"))
     await settle()
-    expect(mockSave).not.toHaveBeenCalled()
+    expect(mockSeed).not.toHaveBeenCalled()
   })
 
   it("reads the stored config again when the access level changes", async () => {
@@ -214,11 +237,11 @@ describe("useSessionConfigSync", () => {
     const { rerender } = renderSync({ sessionKey: "mine.jsonl", access: "unknown" })
     await waitFor(() => expect(mockFetch).toHaveBeenCalledTimes(1))
     await settle()
-    expect(mockSave).not.toHaveBeenCalled()
+    expect(mockSeed).not.toHaveBeenCalled()
 
     rerender({ sessionKey: "mine.jsonl", access: "own" })
 
-    await waitFor(() => expect(mockSave).toHaveBeenCalledWith("mine.jsonl", VALUES))
+    await waitFor(() => expect(mockSeed).toHaveBeenCalledWith("mine.jsonl", VALUES))
     expect(mockFetch).toHaveBeenCalledTimes(2)
   })
 
@@ -342,11 +365,11 @@ describe("useSessionConfigSync", () => {
     rerender({ sessionKey: "a.jsonl", access: "own" })
     await settle()
     expect(mockFetch).toHaveBeenLastCalledWith("a.jsonl")
-    expect(mockSave).not.toHaveBeenCalled()
+    expect(mockSeed).not.toHaveBeenCalled()
 
     await act(async () => resolveA({}))
-    await waitFor(() => expect(mockSave).toHaveBeenCalledWith("a.jsonl", { ...VALUES, model: "b-model" }))
-    expect(mockSave).toHaveBeenCalledOnce()
+    await waitFor(() => expect(mockSeed).toHaveBeenCalledWith("a.jsonl", { ...VALUES, model: "b-model" }))
+    expect(mockSeed).toHaveBeenCalledOnce()
   })
 
   it("does not seed a reopened session whose read found a stored config", async () => {
@@ -366,6 +389,7 @@ describe("useSessionConfigSync", () => {
     await waitFor(() => expect(mockFetch).toHaveBeenCalledTimes(4))
     await settle()
     expect(mockSave).not.toHaveBeenCalled()
+    expect(mockSeed).not.toHaveBeenCalled()
   })
 
   it("re-hydrates when switching sessions, with one read per switch", async () => {

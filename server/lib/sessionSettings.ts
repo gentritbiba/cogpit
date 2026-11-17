@@ -6,6 +6,7 @@ import { editionModule, type ActivitySessionRef } from "../edition"
 import { readTranscriptEffort } from "../helpers"
 import { findJsonlPath } from "../sessionPaths"
 import { readSessionConfig, sessionConfigKey, updateSessionConfig, type SessionConfig } from "./sessionConfigStore"
+import * as streamBus from "./streamBus"
 
 /**
  * A session's stored config as the account of the settings its turns run
@@ -16,16 +17,20 @@ import { readSessionConfig, sessionConfigKey, updateSessionConfig, type SessionC
  */
 
 /**
- * `PUT /api/session-config/:key`: merge the patch into the key's config. The
- * edition hears of a write to a session's own key that moved a field.
+ * `PUT /api/session-config/:key`: merge the patch into the key's config, or
+ * with `fill` only its fields the config holds no value for. The edition hears
+ * of a write to a session's own key that moved a field.
  */
 export async function writeSessionConfig(
   req: IncomingMessage,
   key: string,
   sessionId: string | null,
   patch: SessionConfig,
+  { fill = false }: { fill?: boolean } = {},
 ): Promise<SessionConfig> {
-  const update = await updateSessionConfig(key, () => patch)
+  const update = await updateSessionConfig(key, (stored) => (
+    fill ? Object.fromEntries(Object.entries(patch).filter(([field]) => stored[field] === undefined)) : patch
+  ))
   if (sessionId !== null && update.changed.length > 0) {
     await editionModule().sessionSettings.onConfigWrite(req, sessionId, update)
   }
@@ -64,13 +69,18 @@ export async function withSessionSettings(sessionId: string, request: SendReques
   return moded.effort === undefined && typeof config.effort === "string" && config.effort ? { ...moded, effort: config.effort } : moded
 }
 
-/** Keep the mode and effort a session started with, so a later resume that names none runs the same way. */
+/**
+ * Keep the mode and effort a session started with, so a later resume that
+ * names none runs the same way, without replacing what a client stored first.
+ * Anyone already watching the session reads its config again.
+ */
 export async function storeStartedSettings(sessionId: string, { mode, effort }: { mode?: string; effort?: string }): Promise<void> {
   if (!mode && !effort) return
-  await updateSessionConfig(sessionConfigKey(sessionId), (stored) => ({
+  const { changed } = await updateSessionConfig(sessionConfigKey(sessionId), (stored) => ({
     ...(mode && stored.permissionMode === undefined ? { permissionMode: mode } : {}),
     ...(effort && stored.effort === undefined ? { effort } : {}),
   }))
+  if (changed.length > 0) streamBus.publishSessionConfig(sessionId)
 }
 
 /**

@@ -183,7 +183,7 @@ export async function createSession(
     ? await creationRequests.run(retry.scope, retry.requestId, startRequest, run)
     : await run()
   orchestrationStore().ensureConversation(await nativeBinding(started.sessionId, kind, started.filePath, started.cwd ?? cwd))
-  await storeStartedSettings(started.sessionId, { mode: request.permissions?.mode, effort: request.effort }).catch(() => {})
+  await storeStartedSettings(started.sessionId, { mode: started.permissionMode ?? request.permissions?.mode, effort: request.effort }).catch(() => {})
   if (parentSessionId) await recordSessionOrigin(started.sessionId, { parentSessionId, ...(request.name ? { name: request.name } : {}) })
   return started
 }

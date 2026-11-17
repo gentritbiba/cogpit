@@ -640,7 +640,8 @@ const claude: AgentDescriptor = {
   },
   launchArgs: {
     permissions: (permissions) => {
-      // A missing mode is NOT a bypass: it falls back to the safe default.
+      // As flags, a missing mode starts the CLI asking first. A session the SDK
+      // runtime starts without one runs in bypass instead (server/sdk-session.ts).
       if (!permissions?.mode) return ["--permission-mode", "default"]
       if (permissions.mode === "bypassPermissions") return ["--dangerously-skip-permissions"]
       return [
