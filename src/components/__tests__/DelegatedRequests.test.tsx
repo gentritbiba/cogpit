@@ -34,8 +34,12 @@ const localPermission: DelegatedRequest = {
   waiting: [{ kind: "permission", requestId: "perm-1", toolName: "Bash", summary: "rm -rf build", availableDecisions: ["allow", "deny"] }],
 }
 
-function serve(requests: DelegatedRequest[]) {
-  mocks.authFetch.mockResolvedValue(new Response(JSON.stringify({ requests })))
+function serve(requests: DelegatedRequest[], delegated = 1) {
+  mocks.authFetch.mockImplementation(async (url: string) => new Response(JSON.stringify(
+    url.startsWith("/api/delegated-tasks")
+      ? { counts: { total: delegated, running: delegated, unread: 0, unreadRunning: 0 } }
+      : { requests },
+  )))
 }
 
 beforeEach(() => {
@@ -47,6 +51,15 @@ afterEach(() => {
 })
 
 describe("DelegatedRequests", () => {
+  it("does not ask for delegated requests while the session has delegated nothing", async () => {
+    serve([remoteQuestion], 0)
+    const { container } = render(<DelegatedRequests sessionId="parent-1" />)
+    await waitFor(() => expect(mocks.authFetch).toHaveBeenCalledWith(expect.stringContaining("/api/delegated-tasks?sessionId=parent-1"), expect.anything()))
+    await new Promise((resolve) => setTimeout(resolve, 20))
+    expect(mocks.authFetch).not.toHaveBeenCalledWith("/api/session-requests?parent=parent-1")
+    expect(container).toBeEmptyDOMElement()
+  })
+
   it("renders nothing while no delegated session is waiting", async () => {
     serve([])
     const { container } = render(<DelegatedRequests sessionId="parent-1" />)

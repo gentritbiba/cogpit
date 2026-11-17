@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from "react"
 import { authFetch, jsonFetch } from "@/lib/auth"
 import { jsonEqual } from "@/lib/jsonEqual"
 import { useVisiblePolling } from "@/hooks/useVisiblePolling"
+import { useDelegatedTaskCounts } from "@/hooks/useDelegatedTaskCounts"
 import type { DelegatedRequest } from "../../shared/contracts/delegatedRequests"
 import type { PendingInputResponse } from "../../shared/contracts/pendingInput"
 
@@ -15,6 +16,8 @@ const POLL_INTERVAL = 3_000
 export function useDelegatedRequests(parentSessionId: string | null) {
   const [requests, setRequests] = useState<DelegatedRequest[]>([])
   const [responding, setResponding] = useState<Set<string>>(new Set())
+  // Only a session that started others can have delegated requests waiting.
+  const delegates = useDelegatedTaskCounts(parentSessionId).total > 0
 
   const poll = useCallback(async (isActive: () => boolean) => {
     if (!parentSessionId) return
@@ -28,11 +31,11 @@ export function useDelegatedRequests(parentSessionId: string | null) {
       // The next poll retries.
     }
   }, [parentSessionId])
-  useVisiblePolling(parentSessionId ? poll : null, POLL_INTERVAL)
+  useVisiblePolling(parentSessionId && delegates ? poll : null, POLL_INTERVAL)
   // Another session's prompts must not linger while this one's first poll runs.
   useEffect(() => {
     setRequests([])
-  }, [parentSessionId])
+  }, [parentSessionId, delegates])
 
   const respond = useCallback(async (sessionId: string, requestId: string, response: PendingInputResponse) => {
     setResponding((prev) => new Set(prev).add(requestId))
