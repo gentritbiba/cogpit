@@ -931,6 +931,23 @@ describe("sdk-session silent turn failures", () => {
     expect(published.every((message) => message.startsWith("Claude Code can't start: a config file isn't valid JSON.\nFile: /Users/me/.claude.json\n"))).toBe(true)
   })
 
+  it("reports a crash in a later turn as itself, not as an earlier turn's error", async () => {
+    const streamBus = await import("../lib/streamBus")
+    const { createSDKSession } = await loadModule()
+    scriptedMessages = [
+      { type: "system", subtype: "init", cwd: "/tmp", permissionMode: "default" },
+      { type: "result", subtype: "success", is_error: true, result: "API Error: 529 Overloaded" },
+      { type: "system", subtype: "init", cwd: "/tmp", permissionMode: "default" },
+      { type: "assistant", parent_tool_use_id: null, message: { content: [] } },
+    ]
+    scriptedError = new Error("Claude Code process exited with code 1")
+
+    createSDKSession({ sessionId: "later-crash", cwd: "/tmp", message: "hi" })
+
+    await waitUntil(() => vi.mocked(streamBus.publishError).mock.calls.length > 1)
+    expect(vi.mocked(streamBus.publishError).mock.calls.at(-1)).toEqual(["later-crash", "Error: Claude Code process exited with code 1"])
+  })
+
   it("reports a thrown query error over the stream bus when nothing is listening", async () => {
     const streamBus = await import("../lib/streamBus")
     const { createSDKSession } = await loadModule()

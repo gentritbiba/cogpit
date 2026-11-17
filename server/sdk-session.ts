@@ -853,11 +853,13 @@ function runQuery(state: SDKSessionState, prompt: string, opts: {
 
   ;(async () => {
     let failureLogged = false
-    // The SDK rethrows the last error result's text when the CLI exits after it.
+    // The SDK rethrows the last error result's text when the CLI exits after
+    // it. A later turn's output means the CLI went on past that result.
     let lastErrorResult: Record<string, unknown> | null = null
     try {
       for await (const msg of q) {
         if (msg.type === "result") lastErrorResult = msg.is_error ? msg as unknown as Record<string, unknown> : null
+        else if (msg.type === "assistant" || msg.type === "user" || msg.type === "stream_event" || (msg.type === "system" && msg.subtype === "init")) lastErrorResult = null
         processSDKEvent(state, msg)
       }
     } catch (err) {
