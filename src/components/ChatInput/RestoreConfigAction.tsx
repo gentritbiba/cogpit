@@ -56,10 +56,14 @@ export function RestoreConfigAction({ path, backupPath }: { path: string; backup
         <AlertDialogContent size="sm">
           <AlertDialogHeader>
             <AlertDialogTitle>Restore the config file from its backup?</AlertDialogTitle>
-            <AlertDialogDescription className="break-all">
-              This replaces {path} with {backupPath}. Changes made since that backup are lost.
-            </AlertDialogDescription>
+            <AlertDialogDescription>The backup replaces the file. Changes made since that backup are lost.</AlertDialogDescription>
           </AlertDialogHeader>
+          <dl className="grid grid-cols-[auto_1fr] gap-x-2 gap-y-1 text-xs">
+            <dt className="text-muted-foreground">File</dt>
+            <dd className="break-all font-mono">{path}</dd>
+            <dt className="text-muted-foreground">Backup</dt>
+            <dd className="break-all font-mono">{backupPath}</dd>
+          </dl>
           <AlertDialogFooter>
             <AlertDialogCancel size="sm">Cancel</AlertDialogCancel>
             <AlertDialogAction size="sm" onClick={() => void restore()}>Restore</AlertDialogAction>

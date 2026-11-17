@@ -783,12 +783,15 @@ function runQuery(state: SDKSessionState, prompt: string, opts: {
 
   ;(async () => {
     let failureLogged = false
+    // The SDK rethrows the last error result's text when the CLI exits after it.
+    let lastErrorResult: Record<string, unknown> | null = null
     try {
       for await (const msg of q) {
+        if (msg.type === "result") lastErrorResult = msg.is_error ? msg as unknown as Record<string, unknown> : null
         processSDKEvent(state, msg)
       }
     } catch (err) {
-      const base = String(err)
+      const base = lastErrorResult ? describeErrorResult(lastErrorResult) : String(err)
       const detail = state.stderr?.trim()
       // Append captured stderr so the surfaced error is verbose enough to
       // diagnose (the SDK's own message is just "exited with code 1").

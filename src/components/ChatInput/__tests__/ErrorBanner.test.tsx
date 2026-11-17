@@ -27,7 +27,9 @@ describe("ErrorBanner for a config file the agent would not start with", () => {
     expect(screen.getByText("Claude Code can't start: a config file isn't valid JSON.")).toBeInTheDocument()
     fireEvent.click(screen.getByRole("button", { name: "Restore from backup" }))
     expect(mocks.authFetch).not.toHaveBeenCalled()
-    expect(await screen.findByText(`This replaces ${PATH} with ${BACKUP}. Changes made since that backup are lost.`)).toBeInTheDocument()
+    expect(await screen.findByText("The backup replaces the file. Changes made since that backup are lost.")).toBeInTheDocument()
+    expect(screen.getByText(PATH)).toBeInTheDocument()
+    expect(screen.getByText(BACKUP)).toBeInTheDocument()
 
     fireEvent.click(screen.getByRole("button", { name: "Restore" }))
 
