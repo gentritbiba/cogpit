@@ -1,3 +1,4 @@
+/// <reference path="../types/css-tree-subpaths.d.ts" />
 import { parseManifest, type PluginManifest } from "@cogpit/plugin-contracts"
 import { tokenize, tokenTypes } from "css-tree/tokenizer"
 import { ident, string as cssString, url } from "css-tree/utils"
