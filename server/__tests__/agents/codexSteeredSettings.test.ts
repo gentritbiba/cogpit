@@ -123,6 +123,17 @@ function turnCompleted(turnId: string, error?: Record<string, unknown>): void {
   })
 }
 
+/** `turn/completed` for a turn the user stopped. */
+function turnInterrupted(turnId: string): void {
+  wire.child.send({
+    method: "turn/completed",
+    params: {
+      threadId: "thread-1",
+      turn: { id: turnId, rootTurnId: turnId, items: [], itemsView: "notLoaded", status: "interrupted", error: null, startedAt: 1794940675, completedAt: 1794940676, durationMs: 1000 },
+    },
+  })
+}
+
 /** The thread's first turn ran on `model` and finished. */
 async function ranOn(model: string, effort = "low"): Promise<void> {
   execution.continueCodexExecution.mockResolvedValueOnce(started("turn-1", { model, effort, fastMode: false }))
@@ -286,6 +297,40 @@ describe("a picked model Codex refuses", () => {
     execution.continueCodexExecution.mockResolvedValueOnce(started("turn-4"))
     await codexRuntime.send("thread-1", { message: "a later turn" })
     expect(sent().model).toBeUndefined()
+  })
+
+  it("does not go back to a model whose only turn was stopped before Codex refused it", async () => {
+    await ranOn("gpt-6-astra", "high")
+    execution.continueCodexExecution.mockResolvedValueOnce(started("turn-2", { model: "gpt-no-such-model" }))
+    await codexRuntime.send("thread-1", { message: "hello", model: "gpt-no-such-model" })
+    turnInterrupted("turn-2")
+    await expect(codexRuntime.waitForCompletion!("thread-1", "turn-2")).resolves.toEqual({ isError: true })
+
+    execution.continueCodexExecution.mockResolvedValueOnce(started("turn-3", { model: "gpt-no-such-model" }))
+    await codexRuntime.send("thread-1", { message: "again", model: "gpt-no-such-model" })
+    turnCompleted("turn-3", REFUSED)
+    await codexRuntime.waitForCompletion!("thread-1", "turn-3")
+
+    execution.continueCodexExecution.mockResolvedValueOnce(started("turn-4"))
+    await codexRuntime.send("thread-1", { message: "on Default this time" })
+    expect(sent()).toMatchObject({ model: "gpt-6-astra", effort: "high" })
+  })
+
+  it("logs a turn that could not start to answer the refused one, and settles with the refusal", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {})
+    await ranOn("gpt-6.1-sol")
+    execution.continueCodexExecution.mockResolvedValueOnce(steered)
+    await codexRuntime.send("thread-1", { message: "pick", model: "gpt-no-such-model" })
+    execution.continueCodexExecution.mockResolvedValueOnce(started("turn-2", { model: "gpt-no-such-model" }))
+    await codexRuntime.send("thread-1", { message: "A crew member finished" })
+    const completion = codexRuntime.waitForCompletion!("thread-1", "turn-2")
+    execution.continueCodexExecution.mockRejectedValueOnce(new Error("Codex app-server thread/resume timed out after 30000ms"))
+
+    turnCompleted("turn-2", REFUSED)
+
+    await expect(completion).resolves.toMatchObject({ isError: true, failure: { reason: "model_unavailable" } })
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining("session=thread-1 turn=turn-2"), expect.objectContaining({ message: expect.stringContaining("timed out") }))
+    warn.mockRestore()
   })
 
   it("goes back to Codex's recommended model when the thread ran no other", async () => {
