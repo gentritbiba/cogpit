@@ -1120,15 +1120,22 @@ interface PushedUpdates {
   autoApproved: AutoApprovedRequest[]
 }
 
-/** Ask the running CLI to switch modes; false when it refused and kept its mode. */
+/**
+ * Ask the running CLI to switch modes; false when it refused and kept its mode.
+ * A process that exits meanwhile fails the request too, which throws: the
+ * requested mode then waits for the next resume.
+ */
 async function switchPermissionMode(state: SDKSessionState, queryHandle: Query, requested: string, previous: string): Promise<boolean> {
   try {
     await queryHandle.setPermissionMode(requested as PermissionMode)
     return true
   } catch (error) {
+    // The SDK fails the request just before the ended query reaches runQuery.
+    await new Promise((resolve) => setImmediate(resolve))
+    if (state.activeQuery !== queryHandle || !isSDKQueryLive(state)) throw error
     // The CLI keeps its mode: bypassPermissions in a process launched
     // without it, auto mode where it is unavailable.
-    state.permissionMode = previous
+    if (state.permissionMode === requested) state.permissionMode = previous
     streamBus.publishError(state.sessionId, `The session kept its permission mode. ${error instanceof Error ? error.message : String(error)}`)
     return false
   }

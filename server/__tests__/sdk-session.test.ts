@@ -2382,6 +2382,25 @@ describe("sdk-session CLI 2.1.326 catch-up", () => {
     releaseQueryAfterMessages?.()
   })
 
+  it("keeps the asked-for mode for the next resume when the process exits during the switch", async () => {
+    const streamBus = await import("../lib/streamBus")
+    const { sdk, state } = await liveSession("mode-closing", [INIT])
+    const resolve = vi.fn()
+    state.pendingPermissions.set("req-bash", { requestId: "req-bash", toolName: "Bash", input: {}, toolUseId: "req-bash", timestamp: 0, resolve })
+    // The SDK fails the request as the process exits, and ends the query just after.
+    setPermissionModeSpy!.mockImplementationOnce(async () => {
+      releaseQueryAfterMessages?.()
+      throw new Error("Query closed before response received")
+    })
+
+    const result = await sdk.updateSDKSession("mode-closing", { permissionMode: "bypassPermissions" })
+
+    expect(state.permissionMode).toBe("bypassPermissions")
+    expect(result).toMatchObject({ permissionMode: "bypassPermissions", appliedLive: [], staged: ["permissionMode"] })
+    expect(streamBus.publishError).not.toHaveBeenCalledWith("mode-closing", expect.stringContaining("kept its permission mode"))
+    expect(resolve).not.toHaveBeenCalledWith(expect.objectContaining({ behavior: "allow" }))
+  })
+
   it("approves only the asks pending before the switch was sent, as soon as it lands", async () => {
     const { sdk, state } = await liveSession("mode-snapshot", [INIT])
     const before = vi.fn()
