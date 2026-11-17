@@ -201,11 +201,35 @@ function httpStatusIn(info: unknown, depth = 0): number | undefined {
   return undefined
 }
 
+/**
+ * The provider's own sentence when Codex passes its error body through as the
+ * message, which CLIs before 0.165 do for a model they cannot find.
+ */
+function providerErrorMessage(message: string): string {
+  try {
+    const body: unknown = JSON.parse(message)
+    if (isObject(body) && isObject(body.error) && typeof body.error.message === "string" && body.error.message.trim()) return body.error.message.trim()
+  } catch {
+    // Not a JSON body: the message is already the sentence.
+  }
+  return message
+}
+
+/**
+ * A model Codex accepted but the provider would not serve. Codex 0.165+ says
+ * so in its error info; earlier CLIs report `other` with the provider's body.
+ */
+function isModelNotFound(info: unknown, message: string): boolean {
+  return info === "modelNotFound" || info === "model_not_found" || /"code"\s*:\s*"model_not_found"/.test(message)
+}
+
 /** Why a Codex turn failed, from a rollout `task_complete.error` or an app-server `TurnError`. */
 export function codexErrorFailure(error: unknown): AgentFailure | null {
   if (!isObject(error) || typeof error.message !== "string" || !error.message.trim()) return null
+  const info = error.codex_error_info ?? error.codexErrorInfo
+  if (isModelNotFound(info, error.message)) return { reason: "model_unavailable", message: providerErrorMessage(error.message.trim()) }
   const details = [error.additional_details, error.additionalDetails].find((value) => typeof value === "string" && value.trim())
-  const status = httpStatusIn(error.codex_error_info ?? error.codexErrorInfo)
+  const status = httpStatusIn(info)
   const failure = classifyAgentFailure(error.message.trim(), status)
   return failure.reason === "other" && typeof details === "string"
     ? { ...classifyAgentFailure(details, status), message: error.message.trim() }

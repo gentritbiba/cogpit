@@ -49,7 +49,8 @@ import { cogpitAgentEnv } from "../browser/agentEnv"
 import { NO_COGPIT_SESSION } from "../browser/paths"
 import { forwardCodexStreamNotification } from "../lib/codexStreamAdapter"
 import { codexErrorFailure } from "../../shared/session/codex"
-import { agentSignedOutTitle } from "../../shared/session/agentFailures"
+import { agentModelUnavailableTitle, agentSignedOutTitle } from "../../shared/session/agentFailures"
+import type { AgentFailure } from "../../shared/session/types"
 import { logAgentFailure } from "./failureLog"
 import { publishError } from "../lib/streamBus"
 import { codexQuestions } from "./codexQuestions"
@@ -105,6 +106,13 @@ interface ServerRequest {
   id: JsonRpcId
   method: string
   params?: unknown
+}
+
+/** How a turn ended; `failure` says why one failed, when Codex said. */
+export interface CodexTurnResult {
+  isError: boolean
+  message?: string
+  failure?: AgentFailure
 }
 
 const DEFAULT_REQUEST_TIMEOUT_MS = 30_000
@@ -166,8 +174,8 @@ export class CodexAppServer {
   private readonly pendingRequests = new Map<JsonRpcId, PendingRequest>()
   private readonly notificationListeners = new Set<CodexNotificationListener>()
   private readonly activeTurnIds = new Map<string, string>()
-  private readonly completedTurns = new Map<string, { isError: boolean; message?: string }>()
-  private readonly completionWaiters = new Map<string, Array<{ resolve: (result: { isError: boolean; message?: string }) => void; reject: (error: Error) => void }>>()
+  private readonly completedTurns = new Map<string, CodexTurnResult>()
+  private readonly completionWaiters = new Map<string, Array<{ resolve: (result: CodexTurnResult) => void; reject: (error: Error) => void }>>()
   private readonly parentThreadIds = new Map<string, string>()
   private readonly approvals = new PendingRequests<PendingApproval>()
   private readonly elicitations = new PendingRequests<PendingElicitation>()
@@ -579,7 +587,7 @@ export class CodexAppServer {
     return () => this.notificationListeners.delete(listener)
   }
 
-  waitForCompletion(threadId: string, turnId: string): Promise<{ isError: boolean; message?: string }> {
+  waitForCompletion(threadId: string, turnId: string): Promise<CodexTurnResult> {
     const key = JSON.stringify([threadId, turnId])
     const completed = this.completedTurns.get(key)
     if (completed) return Promise.resolve(completed)
@@ -906,11 +914,11 @@ export class CodexAppServer {
         }
         if (turnId) {
           const key = JSON.stringify([threadId, turnId])
-          const error = isRecord(turn) && isRecord(turn.error) ? stringField(turn.error, "message") : undefined
-          const result = { isError: isRecord(turn) && ["failed", "interrupted"].includes(String(turn.status)), ...(error ? { message: error } : {}) }
+          const failure = isRecord(turn) && turn.status === "failed" ? codexErrorFailure(turn.error) : null
+          const error = failure?.message ?? (isRecord(turn) && isRecord(turn.error) ? stringField(turn.error, "message") : undefined)
+          const result: CodexTurnResult = { isError: isRecord(turn) && ["failed", "interrupted"].includes(String(turn.status)), ...(error ? { message: error } : {}), ...(failure ? { failure } : {}) }
           if (isRecord(turn) && turn.status === "failed") {
-            const failure = codexErrorFailure(turn.error)
-            logAgentFailure("turn", { sessionId: threadId, kind: "codex", message: failure?.message ?? "The turn failed", httpStatus: failure?.httpStatus })
+            logAgentFailure("turn", { sessionId: threadId, kind: "codex", message: failure?.message ?? "The turn failed", httpStatus: failure?.httpStatus, reason: failure?.reason })
           }
           this.completedTurns.set(key, result)
           while (this.completedTurns.size > 256) this.completedTurns.delete(this.completedTurns.keys().next().value!)
@@ -1142,7 +1150,10 @@ export function publishTurnError(notification: CodexNotification): void {
   if (notification.method !== "error" || !isRecord(notification.params)) return
   const threadId = stringField(notification.params, "threadId")
   const failure = codexErrorFailure(notification.params.error)
-  if (threadId && failure) publishError(threadId, failure.reason === "not_signed_in" ? agentSignedOutTitle("codex") : failure.message)
+  if (!threadId || !failure) return
+  if (failure.reason === "not_signed_in") publishError(threadId, agentSignedOutTitle("codex"))
+  else if (failure.reason === "model_unavailable") publishError(threadId, `${agentModelUnavailableTitle("codex")}\n${failure.message}`)
+  else publishError(threadId, failure.message)
 }
 codexAppServer.subscribe(publishTurnError)
 codexAppServer.subscribe((notification) => codexQuestions.observe(notification))

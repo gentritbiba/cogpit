@@ -22,6 +22,7 @@ const { codex, execution } = vi.hoisted(() => ({
     listActiveTurns: vi.fn(() => [] as unknown[]),
     interruptTurn: vi.fn(async () => ({})),
     subscribe: vi.fn(() => () => {}),
+    waitForCompletion: vi.fn(() => new Promise(() => {})),
     shutdown: vi.fn(async () => {}),
   },
   execution: {
@@ -29,6 +30,7 @@ const { codex, execution } = vi.hoisted(() => ({
       action: "started" as const,
       threadId: "thread-1",
       turnId: "turn-2",
+      turnModel: {},
     })),
   },
 }))

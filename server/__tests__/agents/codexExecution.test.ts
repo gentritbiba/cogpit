@@ -218,7 +218,18 @@ describe("Codex execution mappings", () => {
       serviceTier: null,
     }))
     expect(runtime.steerTurn).not.toHaveBeenCalled()
-    expect(result).toEqual({ action: "started", threadId: "thread-1", turnId: "turn-new" })
+    expect(result).toEqual({ action: "started", threadId: "thread-1", turnId: "turn-new", turnModel: { fastMode: false } })
+  })
+
+  it("reports what a started turn runs on: what the send named, else what the thread reported", async () => {
+    const resumed = { thread: thread(), model: "gpt-6.1-sol", reasoningEffort: "low", serviceTier: "priority" }
+    const named = await continueCodexExecution(client({ resumeThread: vi.fn().mockResolvedValue(resumed) }), "thread-1", { cwd: "/work", message: "Go", effort: "xhigh", fastMode: false })
+    const reported = await continueCodexExecution(client({ resumeThread: vi.fn().mockResolvedValue({ ...resumed, serviceTier: null }) }), "thread-1", { cwd: "/work", message: "Go" })
+    const started = await startCodexExecution(client({ startThread: vi.fn().mockResolvedValue(resumed) }), { cwd: "/work", message: "Go" })
+
+    expect(named).toMatchObject({ turnModel: { model: "gpt-6.1-sol", effort: "xhigh", fastMode: false } })
+    expect(reported).toMatchObject({ turnModel: { model: "gpt-6.1-sol", effort: "low", fastMode: false } })
+    expect(started.turnModel).toEqual({ model: "gpt-6.1-sol", effort: "low", fastMode: true })
   })
 
   it("steers a known active turn without resuming", async () => {

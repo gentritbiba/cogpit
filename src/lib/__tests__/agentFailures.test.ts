@@ -68,6 +68,7 @@ describe("what the user is told", () => {
     expect(agentNotInstalledMessage("acp", "darwin")).toBe("ACP agent isn't installed on this computer.")
     expect(agentFailureTitle("codex", { reason: "not_signed_in", message: "401" })).toBe("Codex isn't signed in.")
     expect(agentFailureTitle("copilot", { reason: "other", message: "boom" })).toBe("GitHub Copilot CLI stopped with an error.")
+    expect(agentFailureTitle("codex", { reason: "model_unavailable", message: "not supported" })).toBe("Codex can't use that model. Pick another model.")
   })
 
   it("finds the agent a not-installed message is about", () => {
@@ -121,6 +122,49 @@ describe("a failed turn ends the session's turn", () => {
     })
     const turn = parseSession(jsonl(records)).turns.at(-1)!
     expect(turn.assistantText.join("\n")).toBe("Codex isn't signed in.")
+  })
+
+  // The records Codex 0.167.2 wrote for a turn on a model it could not find,
+  // then a turn that answered the same message on another model.
+  const NOT_FOUND = "The 'gpt-does-not-exist-9' model is not supported when using Codex with a ChatGPT account."
+  const refusedTurn = (error: object) => [
+    { type: "session_meta", timestamp: "2026-11-17T18:37:55.000Z", payload: { id: "01a1eacd-2542-7a33-a41d-d8c04bf58bd8", cwd: "/work", originator: "cogpit", cli_version: "0.167.2" } },
+    { type: "event_msg", timestamp: "2026-11-17T18:37:55.100Z", payload: { type: "task_started", turn_id: "01a1eacd-258a", turn_attribution: { turn_id: "01a1eacd-258a", turn_trigger: null, parent_turn_id: null, initiating_agent_path: null, root_turn_id: "01a1eacd-258a" } } },
+    { type: "turn_context", timestamp: "2026-11-17T18:37:55.200Z", payload: { turn_id: "01a1eacd-258a", root_turn_id: "01a1eacd-258a", cwd: "/work", model: "gpt-does-not-exist-9", effort: "low" } },
+    { type: "event_msg", timestamp: "2026-11-17T18:37:55.250Z", payload: { type: "thread_settings_applied", thread_id: "01a1eacd-2542-7a33-a41d-d8c04bf58bd8", thread_settings: { model: "gpt-does-not-exist-9", model_provider_id: "openai", service_tier: "default" } } },
+    { type: "response_item", timestamp: "2026-11-17T18:37:55.300Z", payload: { type: "message", id: "msg_01a1eacd-305a", role: "user", content: [{ type: "input_text", text: "Reply with the single word ok." }], internal_chat_message_metadata_passthrough: { turn_id: "01a1eacd-258a" } } },
+    { type: "event_msg", timestamp: "2026-11-17T18:37:55.310Z", payload: { type: "item_completed", thread_id: "01a1eacd-2542-7a33-a41d-d8c04bf58bd8", turn_id: "01a1eacd-258a", item: { type: "UserMessage", id: "01a1eacd-305a", content: [{ type: "text", text: "Reply with the single word ok." }] } } },
+    { type: "event_msg", timestamp: "2026-11-17T18:37:58.000Z", payload: { type: "task_complete", root_turn_id: "01a1eacd-258a", turn_id: "01a1eacd-258a", last_agent_message: null, error } },
+  ]
+  const answeredTurn = [
+    { type: "event_msg", timestamp: "2026-11-17T18:38:02.000Z", payload: { type: "task_started", turn_id: "01a1eacd-31a7" } },
+    { type: "turn_context", timestamp: "2026-11-17T18:38:02.100Z", payload: { turn_id: "01a1eacd-31a7", root_turn_id: "01a1eacd-31a7", cwd: "/work", model: "gpt-6.1-sol", effort: "low" } },
+    { type: "response_item", timestamp: "2026-11-17T18:38:04.000Z", payload: { type: "message", role: "assistant", content: [{ type: "output_text", text: "ok" }] } },
+    { type: "event_msg", timestamp: "2026-11-17T18:38:04.100Z", payload: { type: "task_complete", turn_id: "01a1eacd-31a7", last_agent_message: "ok" } },
+  ]
+
+  it.each([
+    ["0.165+", { message: NOT_FOUND, codex_error_info: "model_not_found" }],
+    ["0.164 and earlier", { message: JSON.stringify({ type: "error", status: 400, error: { type: "invalid_request_error", message: NOT_FOUND, code: "model_not_found" } }), codex_error_info: "other" }],
+  ])("Codex %s: a model it could not use ends the turn asking for another", (_version, error) => {
+    const records = refusedTurn(error)
+    expect(deriveSessionStatus(records)).toMatchObject({
+      status: "completed", terminalReason: "turn_failed", failure: { reason: "model_unavailable", message: NOT_FOUND },
+    })
+    const turn = parseSession(jsonl(records)).turns.at(-1)!
+    expect(turn.userMessage).toBe("Reply with the single word ok.")
+    expect(turn.assistantText).toEqual([NOT_FOUND])
+  })
+
+  it("Codex: the turn that answers a refused turn's message ends the session normally", () => {
+    const records = [...refusedTurn({ message: NOT_FOUND, codex_error_info: "model_not_found" }), ...answeredTurn]
+    expect(deriveSessionStatus(records)).toMatchObject({ status: "completed" })
+    expect(deriveSessionStatus(records)).not.toHaveProperty("failure")
+    const turns = parseSession(jsonl(records)).turns
+    expect(turns.map((turn) => [turn.userMessage, turn.assistantText])).toEqual([
+      ["Reply with the single word ok.", [NOT_FOUND]],
+      [null, ["ok"]],
+    ])
   })
 
   it("Copilot: a session that was not created with authentication info is a sign-in failure", () => {
