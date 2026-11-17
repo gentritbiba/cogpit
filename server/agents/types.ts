@@ -88,12 +88,21 @@ export interface ProjectSessionFileInfo extends SessionFileInfo {
   sessionId?: string
 }
 
+/** An archive or restore the agent CLI recorded for a session itself, beside its transcript. */
+export interface ArchiveMark {
+  archived: boolean
+  /** When it was recorded, epoch ms. */
+  atMs: number
+}
+
 /** A top-level session, with the dirName the UI addresses it by. */
 export interface TopLevelSessionInfo extends SessionFileInfo {
   dirName: string
   /** The recorded cwd, where the dirName was derived from it. */
   projectPath?: string
   sessionId?: string
+  /** Set where the agent CLI keeps an archive of its own and has marked this session in it. */
+  archiveMark?: ArchiveMark
 }
 
 /** A sub-agent transcript written beside its parent session. */
@@ -203,4 +212,10 @@ export interface AgentStore {
    * because a date-stamped name read twice can differ.
    */
   transcriptPath(dirName: string, sessionId: string): { filePath: string; fileName: string } | null
+  /**
+   * Record the user's archive or restore of the session at `filePath` in the
+   * agent CLI's own archive, for an agent whose CLI keeps one. Throws when the
+   * CLI refuses it.
+   */
+  setArchiveMark?(filePath: string, archived: boolean): Promise<void>
 }

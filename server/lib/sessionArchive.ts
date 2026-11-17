@@ -1,3 +1,4 @@
+import type { ArchiveMark } from "../agents/types"
 import { SESSION_ARCHIVE_FILE } from "./sessionConfigDir"
 import { SessionConfigFile } from "./sessionConfigFile"
 
@@ -7,9 +8,10 @@ import { SessionConfigFile } from "./sessionConfigFile"
  *
  * A session is archived when the user archived it (`archived`, keyed by
  * session id with the archive time) or when its transcript has been idle for
- * {@link AUTO_ARCHIVE_AFTER_MS}. Restoring a session lists it in `kept`, which
- * exempts it from the idle rule. New activity overrides a manual archive: see
- * {@link isStillArchived}.
+ * {@link AUTO_ARCHIVE_AFTER_MS}. Restoring or using a session lists it in
+ * `kept`, with the time, which exempts it from the idle rule. An agent CLI
+ * that keeps an archive of its own adds its mark, and the newest of these
+ * choices wins. New activity overrides an archive: see {@link isStillArchived}.
  */
 
 /**
@@ -26,18 +28,21 @@ export type ArchiveReason = "manual" | "inactive"
 export interface ArchiveSnapshot {
   /** Session id → epoch ms of the user's archive action. */
   archived: ReadonlyMap<string, number>
-  /** Sessions the user restored, exempt from the idle rule. */
-  kept: ReadonlySet<string>
+  /**
+   * Session id → epoch ms the user restored or used it, exempt from the idle
+   * rule; 0 where that predates restores being timed.
+   */
+  kept: ReadonlyMap<string, number>
 }
 
 interface PersistedArchive {
-  version: 2
+  version: 3
   sessions: Record<string, number>
-  kept: string[]
+  kept: Record<string, number>
 }
 
 let archived = new Map<string, number>()
-let kept = new Set<string>()
+let kept = new Map<string, number>()
 const archiveListeners = new Set<(sessionIds: readonly string[]) => void>()
 
 export function subscribeSessionArchive(listener: (sessionIds: readonly string[]) => void): () => void {
@@ -58,33 +63,48 @@ async function persistChange(): Promise<void> {
   for (const listener of changeListeners) listener()
 }
 
+function readTimes(record: unknown, into: Map<string, number>): void {
+  if (typeof record !== "object" || record === null) return
+  for (const [sessionId, at] of Object.entries(record)) {
+    if (sessionId && typeof at === "number" && Number.isFinite(at)) into.set(sessionId, at)
+  }
+}
+
 const file = new SessionConfigFile(SESSION_ARCHIVE_FILE, {
   reset() {
     archived = new Map()
-    kept = new Set()
+    kept = new Map()
   },
   apply(parsed) {
     if (typeof parsed !== "object" || parsed === null) return
-    const candidate = parsed as Partial<PersistedArchive>
-    if (typeof candidate.sessions === "object" && candidate.sessions) {
-      for (const [sessionId, archivedAt] of Object.entries(candidate.sessions)) {
-        if (typeof archivedAt === "number" && Number.isFinite(archivedAt)) archived.set(sessionId, archivedAt)
-      }
-    }
+    const candidate = parsed as { sessions?: unknown; kept?: unknown }
+    readTimes(candidate.sessions, archived)
+    // Version 2 listed kept sessions without a time.
     if (Array.isArray(candidate.kept)) {
       for (const sessionId of candidate.kept) {
-        if (typeof sessionId === "string" && sessionId) kept.add(sessionId)
+        if (typeof sessionId === "string" && sessionId) kept.set(sessionId, 0)
       }
+    } else {
+      readTimes(candidate.kept, kept)
     }
   },
   snapshot(): PersistedArchive {
-    return { version: 2, sessions: Object.fromEntries(archived), kept: [...kept] }
+    return { version: 3, sessions: Object.fromEntries(archived), kept: Object.fromEntries(kept) }
   },
 })
 
 export async function readArchive(): Promise<ArchiveSnapshot> {
   await file.load()
-  return { archived: new Map(archived), kept: new Set(kept) }
+  return { archived: new Map(archived), kept: new Map(kept) }
+}
+
+export interface ArchiveWrite {
+  now?: number
+  /**
+   * The user's own choice: recorded at `now` even where the session already
+   * stands that way, so it outranks an older mark of the agent CLI's.
+   */
+  byUser?: boolean
 }
 
 /**
@@ -95,24 +115,27 @@ export async function readArchive(): Promise<ArchiveSnapshot> {
 export async function setSessionsArchived(
   sessionIds: readonly string[],
   archive: boolean,
-  now = Date.now(),
+  { now = Date.now(), byUser = false }: ArchiveWrite = {},
 ): Promise<string[]> {
   await file.load()
   const changed: string[] = []
+  let written = false
   for (const sessionId of sessionIds) {
-    const wasArchived = archived.has(sessionId)
-    const wasKept = kept.has(sessionId)
+    const stateChanges = archive
+      ? !archived.has(sessionId) || kept.has(sessionId)
+      : archived.has(sessionId) || !kept.has(sessionId)
+    if (!stateChanges && !byUser) continue
     if (archive) {
-      archived.set(sessionId, archived.get(sessionId) ?? now)
+      archived.set(sessionId, byUser ? now : archived.get(sessionId) ?? now)
       kept.delete(sessionId)
-      if (!wasArchived || wasKept) changed.push(sessionId)
     } else {
       archived.delete(sessionId)
-      kept.add(sessionId)
-      if (wasArchived || !wasKept) changed.push(sessionId)
+      kept.set(sessionId, now)
     }
+    written = true
+    if (stateChanges) changed.push(sessionId)
   }
-  if (changed.length > 0) await persistChange()
+  if (written) await persistChange()
   if (archive) for (const listener of archiveListeners) listener(sessionIds)
   return changed
 }
@@ -137,14 +160,38 @@ export function isStillArchived(archivedAt: number | undefined, mtimeMs: number)
   return archivedAt !== undefined && mtimeMs <= archivedAt + REACTIVATION_GRACE_MS
 }
 
-/** Why a session is archived right now, or null when it is listed. */
+interface ArchiveChoice {
+  archived: boolean
+  at: number
+}
+
+/** The newest archive or restore on record: Cogpit's own, or the agent CLI's mark. */
+function latestChoice(snapshot: ArchiveSnapshot, sessionId: string, mark: ArchiveMark | undefined): ArchiveChoice | null {
+  const choices: ArchiveChoice[] = []
+  const archivedAt = snapshot.archived.get(sessionId)
+  if (archivedAt !== undefined) choices.push({ archived: true, at: archivedAt })
+  const keptAt = snapshot.kept.get(sessionId)
+  if (keptAt !== undefined) choices.push({ archived: false, at: keptAt })
+  if (mark) choices.push({ archived: mark.archived, at: mark.atMs })
+  let latest: ArchiveChoice | null = null
+  for (const choice of choices) if (!latest || choice.at > latest.at) latest = choice
+  return latest
+}
+
+/**
+ * Why a session is archived right now, or null when it is listed. `mark` is
+ * the agent CLI's own archive mark for the session, where it keeps one.
+ */
 export function archiveReason(
   snapshot: ArchiveSnapshot,
   sessionId: string,
   mtimeMs: number,
   now = Date.now(),
+  mark?: ArchiveMark,
 ): ArchiveReason | null {
-  if (isStillArchived(snapshot.archived.get(sessionId), mtimeMs)) return "manual"
+  const choice = latestChoice(snapshot, sessionId, mark)
+  if (choice?.archived && isStillArchived(choice.at, mtimeMs)) return "manual"
+  if (choice && !choice.archived) return null
   if (!snapshot.kept.has(sessionId) && now - mtimeMs > AUTO_ARCHIVE_AFTER_MS) return "inactive"
   return null
 }

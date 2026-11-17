@@ -4,6 +4,7 @@ import { basename, dirname, join, resolve } from "node:path"
 import { descriptorFor, type AgentDescriptor } from "../../shared/session/agent-descriptors"
 import { dirs } from "../dirs"
 import { isWithinDir } from "../pathSafety"
+import { archiveMarkPath, archiveMarkTranscript, readArchiveMark, writeArchiveMark } from "./claudeArchive"
 import { readClaudeSessionMeta } from "./claudeMetadata"
 import {
   canonicalPathWithin,
@@ -110,6 +111,11 @@ export function createClaudeStore(projectsRoot?: string, configuredDescriptor?: 
     readSessionMeta: readClaudeSessionMeta,
     identityIsFinal: () => false,
     readProjectPath,
+    archiveMarks: {
+      pathFor: (filePath) => archiveMarkPath(descriptor.sessionFile, filePath),
+      transcriptOf: (markPath) => archiveMarkTranscript(descriptor.sessionFile, markPath),
+      read: readArchiveMark,
+    },
   }
   const catalog = createStoreCatalog(catalogSource)
 
@@ -304,6 +310,12 @@ export function createClaudeStore(projectsRoot?: string, configuredDescriptor?: 
       if (!root) return null
       const fileName = descriptor.sessionFile.name(sessionId)
       return { filePath: join(root, dirName, fileName), fileName }
+    },
+
+    async setArchiveMark(filePath, archived) {
+      const root = sessionsRoot()
+      if (!root || !isWithinDir(root, filePath)) throw new Error(`${filePath} is not in this store`)
+      await writeArchiveMark(root, descriptor.sessionFile, filePath, archived)
     },
   }
   return claudeStore

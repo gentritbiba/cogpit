@@ -26,7 +26,7 @@ import { revokeExecutionGrant } from "../../lib/triggers/authority"
 import type { AgentRuntime } from "../../agents/runtimeTypes"
 
 const mocks = vi.hoisted(() => ({
-  filePath: "", running: false, approvals: [] as unknown[], archived: new Map<string, number>(), kept: new Set<string>(),
+  filePath: "", running: false, approvals: [] as unknown[], archived: new Map<string, number>(), kept: new Map<string, number>(),
   archiveListeners: [] as Array<(ids: readonly string[]) => void>,
   send: vi.fn(), resolve: vi.fn(), runtime: {} as AgentRuntime,
 }))
@@ -51,7 +51,7 @@ beforeEach(async () => {
   root = await mkdtemp(join(tmpdir(), "recovery-native-"))
   mocks.filePath = join(root, `${SESSION}.jsonl`)
   await writeFile(mocks.filePath, JSON.stringify({ type: "user", uuid: "blocked-prompt", message: { role: "user", content: "Finish the task" } }) + "\n")
-  mocks.running = false; mocks.approvals = []; mocks.archived.clear(); mocks.kept.clear(); mocks.kept.add(SESSION)
+  mocks.running = false; mocks.approvals = []; mocks.archived.clear(); mocks.kept.clear(); mocks.kept.set(SESSION, 0)
   mocks.send.mockReset().mockResolvedValue({ delivery: "started", completion: Promise.resolve({ isError: false }) })
   mocks.resolve.mockReset().mockImplementation(async () => ({ kind: "claude", instanceId: "default", filePath: mocks.filePath }))
   mocks.runtime = {

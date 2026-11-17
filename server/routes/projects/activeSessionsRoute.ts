@@ -181,7 +181,7 @@ async function buildActiveSessions(
   const archivedById = new Map<string, ArchiveReason>()
   for (const c of everySession) {
     const id = listedSessionId(c)
-    const reason = archiveReason(archive, id, c.mtimeMs, now)
+    const reason = archiveReason(archive, id, c.mtimeMs, now, c.archiveMark)
     if (reason) archivedById.set(id, reason)
     else if (archive.archived.has(id)) resumedSessionIds.push(id)
   }

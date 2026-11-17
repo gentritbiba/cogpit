@@ -1,5 +1,5 @@
 // @vitest-environment node
-import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises"
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
@@ -45,33 +45,58 @@ describe("sessionArchive", () => {
   })
 
   it("archives, persists, and restores sessions, keeping restored ones", async () => {
-    expect(await setSessionsArchived(["a", "b"], true, 1_000)).toEqual(["a", "b"])
-    expect(await setSessionsArchived(["a"], true, 2_000)).toEqual([])
+    expect(await setSessionsArchived(["a", "b"], true, { now: 1_000 })).toEqual(["a", "b"])
+    expect(await setSessionsArchived(["a"], true, { now: 2_000 })).toEqual([])
 
     expect(JSON.parse(await readFile(filePath(), "utf-8"))).toEqual({
-      version: 2, sessions: { a: 1_000, b: 1_000 }, kept: [],
+      version: 3, sessions: { a: 1_000, b: 1_000 }, kept: {},
     })
 
-    expect(await setSessionsArchived(["a", "missing"], false)).toEqual(["a", "missing"])
-    expect(await setSessionsArchived(["a"], false)).toEqual([])
+    expect(await setSessionsArchived(["a", "missing"], false, { now: 2_500 })).toEqual(["a", "missing"])
+    expect(await setSessionsArchived(["a"], false, { now: 2_600 })).toEqual([])
     const snapshot = await readArchive()
     expect([...snapshot.archived.keys()]).toEqual(["b"])
-    expect([...snapshot.kept]).toEqual(["a", "missing"])
+    expect([...snapshot.kept]).toEqual([["a", 2_500], ["missing", 2_500]])
 
     // Archiving a kept session drops the exemption again.
-    expect(await setSessionsArchived(["a"], true, 3_000)).toEqual(["a"])
+    expect(await setSessionsArchived(["a"], true, { now: 3_000 })).toEqual(["a"])
     expect((await readArchive()).kept.has("a")).toBe(false)
   })
 
+  it("records the user's own choice at its time even where the session already stands that way", async () => {
+    await setSessionsArchived(["a"], true, { now: 1_000 })
+    await setSessionsArchived(["k"], false, { now: 1_000 })
+    const changed = vi.fn()
+    const unsubscribe = subscribeArchiveChanges(changed)
+
+    expect(await setSessionsArchived(["a"], true, { now: 2_000, byUser: true })).toEqual([])
+    expect(await setSessionsArchived(["k"], false, { now: 2_000, byUser: true })).toEqual([])
+    unsubscribe()
+
+    expect(changed).toHaveBeenCalledTimes(2)
+    const snapshot = await readArchive()
+    expect(snapshot.archived.get("a")).toBe(2_000)
+    expect(snapshot.kept.get("k")).toBe(2_000)
+  })
+
+  it("reads the version 2 file, whose kept sessions carry no time", async () => {
+    await mkdir(mockDirs.SESSION_CONFIG_DIR, { recursive: true })
+    await writeFile(filePath(), JSON.stringify({ version: 2, sessions: { a: 5 }, kept: ["k"] }))
+
+    const snapshot = await readArchive()
+    expect(snapshot.archived.get("a")).toBe(5)
+    expect(snapshot.kept.get("k")).toBe(0)
+  })
+
   it("returns a snapshot that later writes do not mutate", async () => {
-    await setSessionsArchived(["a"], true, 5)
+    await setSessionsArchived(["a"], true, { now: 5 })
     const snapshot = await readArchive()
     await setSessionsArchived(["a"], false)
     expect(snapshot.archived.has("a")).toBe(true)
   })
 
   it("forgets deleted sessions entirely", async () => {
-    await setSessionsArchived(["a"], true, 5)
+    await setSessionsArchived(["a"], true, { now: 5 })
     await setSessionsArchived(["b"], false)
     await forgetSessions(["a", "b"])
     const snapshot = await readArchive()
@@ -80,7 +105,7 @@ describe("sessionArchive", () => {
   })
 
   it("reloads the file after a reset, ignoring corrupt content", async () => {
-    await setSessionsArchived(["a"], true, 5)
+    await setSessionsArchived(["a"], true, { now: 5 })
     await setSessionsArchived(["k"], false)
     __resetSessionArchiveForTest()
     const snapshot = await readArchive()
@@ -109,12 +134,48 @@ describe("sessionArchive", () => {
 
   it("explains why a session is archived", () => {
     const now = 10 * AUTO_ARCHIVE_AFTER_MS
-    const snapshot = { archived: new Map([["manual", now - 1_000]]), kept: new Set(["kept"]) }
+    const snapshot = { archived: new Map([["manual", now - 1_000]]), kept: new Map([["kept", 0]]) }
     expect(archiveReason(snapshot, "manual", now - 2_000, now)).toBe("manual")
     expect(archiveReason(snapshot, "manual", now + REACTIVATION_GRACE_MS * 2, now)).toBe(null)
     expect(archiveReason(snapshot, "fresh", now - 1_000, now)).toBe(null)
     expect(archiveReason(snapshot, "idle", now - AUTO_ARCHIVE_AFTER_MS - 1, now)).toBe("inactive")
     expect(archiveReason(snapshot, "kept", now - AUTO_ARCHIVE_AFTER_MS - 1, now)).toBe(null)
+  })
+
+  describe("with the agent CLI's own archive mark", () => {
+    const now = 10 * AUTO_ARCHIVE_AFTER_MS
+    const empty = { archived: new Map<string, number>(), kept: new Map<string, number>() }
+    const archivedAt = (atMs: number) => ({ archived: true, atMs })
+    const restoredAt = (atMs: number) => ({ archived: false, atMs })
+
+    it("archives a session the CLI marked, until the transcript is written well after the mark", () => {
+      expect(archiveReason(empty, "s", now - 5_000, now, archivedAt(now - 1_000))).toBe("manual")
+      expect(archiveReason(empty, "s", now - 1_000 + REACTIVATION_GRACE_MS + 1, now, archivedAt(now - 1_000))).toBe(null)
+    })
+
+    it("lets the newer of Cogpit's choice and the CLI's mark decide", () => {
+      const keptEarlier = { ...empty, kept: new Map([["s", now - 3_000]]) }
+      const keptLater = { ...empty, kept: new Map([["s", now - 500]]) }
+      const archivedEarlier = { ...empty, archived: new Map([["s", now - 3_000]]) }
+      const archivedLater = { ...empty, archived: new Map([["s", now - 500]]) }
+      const mtime = now - 5_000
+
+      expect(archiveReason(keptEarlier, "s", mtime, now, archivedAt(now - 1_000))).toBe("manual")
+      expect(archiveReason(keptLater, "s", mtime, now, archivedAt(now - 1_000))).toBe(null)
+      expect(archiveReason(archivedEarlier, "s", mtime, now, restoredAt(now - 1_000))).toBe(null)
+      expect(archiveReason(archivedLater, "s", mtime, now, restoredAt(now - 1_000))).toBe("manual")
+    })
+
+    it("keeps a session the CLI unarchived out of the idle rule", () => {
+      const idle = now - AUTO_ARCHIVE_AFTER_MS - 1
+      expect(archiveReason(empty, "s", idle, now, restoredAt(idle + 1))).toBe(null)
+      expect(archiveReason(empty, "s", idle, now)).toBe("inactive")
+    })
+
+    it("applies the idle rule again to a session resumed after the CLI archived it", () => {
+      const idle = now - AUTO_ARCHIVE_AFTER_MS - 1
+      expect(archiveReason(empty, "s", idle, now, archivedAt(idle - REACTIVATION_GRACE_MS * 2))).toBe("inactive")
+    })
   })
 
   it("tells subscribers after every write that changed the archive", async () => {

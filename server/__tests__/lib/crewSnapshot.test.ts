@@ -48,7 +48,7 @@ vi.mock("../../lib/sessionPrIndex", () => ({ getScannedSessionPullRequests: () =
 vi.mock("../../lib/sessionPrSearchIndex", () => ({ peekSessionPullRequests: mocks.peekSessionPullRequests }))
 vi.mock("../../lib/sessionArchive", async (importOriginal) => ({
   ...await importOriginal<typeof import("../../lib/sessionArchive")>(),
-  readArchive: async () => ({ archived: new Map(), kept: new Set() }),
+  readArchive: async () => ({ archived: new Map(), kept: new Map() }),
 }))
 vi.mock("../../sessionHosts", () => ({
   localHost: { id: "local", name: "this machine", address: async () => null },
