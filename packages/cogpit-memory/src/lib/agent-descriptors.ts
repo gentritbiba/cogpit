@@ -117,6 +117,11 @@ export interface AgentCapabilities {
   readonly nativeFork: boolean
   /** A title can be given to a session when it is created. */
   readonly namedSessions: boolean
+  /**
+   * A question the agent asked can be skipped, or set aside by a chat message,
+   * and the agent is told which.
+   */
+  readonly skipQuestions: boolean
 }
 
 // ── Descriptor ──────────────────────────────────────────────────────────────
@@ -765,6 +770,7 @@ const claude: AgentDescriptor = {
     tokenStreaming: true,
     nativeFork: false,
     namedSessions: true,
+    skipQuestions: true,
   },
 }
 
@@ -940,6 +946,7 @@ const codex: AgentDescriptor = {
     nativeFork: false,
     // Codex derives its own thread name.
     namedSessions: false,
+    skipQuestions: false,
   },
 }
 
@@ -1086,6 +1093,7 @@ const copilot: AgentDescriptor = {
     tokenStreaming: false,
     nativeFork: true,
     namedSessions: true,
+    skipQuestions: false,
   },
 }
 

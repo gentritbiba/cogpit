@@ -5,7 +5,7 @@ import {
   type AgentRuntime,
   type ResolvedSessionAgent,
 } from "../agents/runtimes"
-import { isUserQuestionAnswers } from "../agents/runtimeTypes"
+import { isQuestionUnanswered, isUserQuestionAnswers } from "../agents/runtimeTypes"
 import type { AgentKind } from "../../shared/session/agent-descriptors"
 import { sendJson, type UseFn, withJsonBody } from "../http"
 import { authorizeSession, reportSessionEvent, sendTurn, type ActivitySessionRef } from "../edition"
@@ -58,8 +58,9 @@ export function registerAskUserRoutes(
       sessionId?: unknown
       toolUseId?: unknown
       answers?: unknown
+      unanswered?: unknown
       commandId?: unknown
-    }>(req, res, async ({ sessionId, toolUseId, answers, commandId }) => {
+    }>(req, res, async ({ sessionId, toolUseId, answers, unanswered, commandId }) => {
       const receivedAt = Date.now()
       if (!sessionId || typeof sessionId !== "string") {
         sendJson(res, 400, { error: "sessionId is required" })
@@ -77,6 +78,10 @@ export function registerAskUserRoutes(
         sendJson(res, 400, { error: "answers must be a string, a list of strings or an object of strings" })
         return
       }
+      if (unanswered !== undefined && !isQuestionUnanswered(unanswered)) {
+        sendJson(res, 400, { error: "unanswered must be 'skipped' or 'replied_in_chat'" })
+        return
+      }
 
       const authorized = await authorizeSession(req, res, { sessionId }, "interact")
       if (authorized === null) return
@@ -86,6 +91,10 @@ export function registerAskUserRoutes(
       // session down the Copilot path to collect a misleading error.
       const { kind, filePath, instanceId } = await runtimes.resolveSessionAgent(sessionId)
       const runtime = runtimes.runtimeFor(kind, instanceId)
+      if (unanswered !== undefined && !runtime.descriptor.capabilities.skipQuestions) {
+        sendJson(res, 400, { error: `${runtime.descriptor.displayName} questions can only be answered` })
+        return
+      }
       const session: ActivitySessionRef = { sessionId: authorized.sessionId, agent: kind }
       try {
         const old = typeof commandId === "string" ? orchestrationStore().command(commandScope(req), commandId) : null
@@ -93,13 +102,13 @@ export function registerAskUserRoutes(
           if (old.receipt.sessionId !== sessionId || old.payload.questionId !== toolUseId || fingerprint(old.payload.answerInput) !== fingerprint(answers)) return sendJson(res, 409, { error: "commandId was reused with another answer" })
           return sendJson(res, 202, { ok: true, receipt: old.receipt })
         }
-        const accepted = await runtime.answerQuestion(sessionId, toolUseId, answers)
+        const accepted = await runtime.answerQuestion(sessionId, toolUseId, answers, unanswered)
         if (!accepted) {
           sendJson(res, 404, { error: "Question not found or already answered" })
           return
         }
         if (accepted.message === null) {
-          reportSessionEvent(req, "session.answer", session, { toolUseId, answers })
+          reportSessionEvent(req, "session.answer", session, { toolUseId, answers, ...(unanswered && { unanswered }) })
         } else {
           if (commandId !== undefined) {
             if (typeof commandId !== "string") { sendJson(res, 400, { error: "commandId must be a string" }); return }

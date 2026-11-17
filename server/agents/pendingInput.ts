@@ -43,6 +43,7 @@ export function listPendingInput(sessionId: string): PendingInput[] {
           multiSelect: item.multiSelect,
           options: item.options.map((option) => option.label),
         })),
+        ...(question.skippable && { skippable: true }),
       })
     }
     for (const plan of runtime.listPendingPlans?.(sessionId) ?? []) pending.push({
@@ -93,7 +94,10 @@ export async function respondToPendingInput(
       if (!("answers" in response)) throw mismatch(request.kind, "answers")
       for (const runtime of allRuntimes()) {
         if (!runtime.listPendingQuestions(sessionId).some((q) => q.toolUseId === requestId)) continue
-        const accepted = await runtime.answerQuestion(sessionId, requestId, response.answers)
+        if (response.unanswered && !runtime.descriptor.capabilities.skipQuestions) {
+          throw new AgentRuntimeError(400, "INVALID_RESPONSE", `${runtime.descriptor.displayName} questions can only be answered`)
+        }
+        const accepted = await runtime.answerQuestion(sessionId, requestId, response.answers, response.unanswered)
         if (accepted?.message) {
           if (options.commandId) {
             await admitSessionCommand({ sessionId, commandId: options.commandId, request: accepted.message, req: options.req, runtime, answer: accepted, answerInput: response.answers })

@@ -4,7 +4,7 @@ import { registerAskUserRoutes, type QuestionRuntimes } from "../../routes/ask-u
 import { normalizeCopilotQuestion } from "../../agents/copilotRuntime"
 import { AgentRuntimeError, type AgentRuntime } from "../../agents/runtimeTypes"
 import type { CopilotPendingUserInput } from "../../agents/copilotTransport"
-import type { AgentKind } from "../../../shared/session/agent-descriptors"
+import { descriptorFor, type AgentKind } from "../../../shared/session/agent-descriptors"
 import type { UseFn, Middleware } from "../../helpers"
 
 /**
@@ -32,11 +32,12 @@ function copilotQuestion(
   }
 }
 
-type FakeRuntime = Pick<AgentRuntime, "kind" | "listPendingQuestions" | "answerQuestion" | "send">
+type FakeRuntime = Pick<AgentRuntime, "kind" | "descriptor" | "listPendingQuestions" | "answerQuestion" | "send">
 
 function fakeRuntime(kind: AgentKind, overrides: Partial<FakeRuntime> = {}): FakeRuntime {
   return {
     kind,
+    descriptor: descriptorFor(kind),
     listPendingQuestions: vi.fn(() => []),
     answerQuestion: vi.fn(async () => null),
     send: vi.fn(async () => ({ delivery: "started" as const })),
@@ -150,7 +151,7 @@ describe("POST /api/ask-user-answer", () => {
 
       expect(res._getStatus()).toBe(200)
       expect(res._getData()).toEqual({ ok: true })
-      expect(runtime.answerQuestion).toHaveBeenCalledWith("session-abc", "tu-1", ["Yes", "No"])
+      expect(runtime.answerQuestion).toHaveBeenCalledWith("session-abc", "tu-1", ["Yes", "No"], undefined)
       for (const other of others) {
         expect(other.answerQuestion).not.toHaveBeenCalled()
       }
@@ -170,7 +171,29 @@ describe("POST /api/ask-user-answer", () => {
       "session-abc",
       "tu-2",
       { q1: "blue", q2: "fast" },
+      undefined,
     )
+  })
+
+  it("passes a skip or a chat reply to an agent that takes one", async () => {
+    const runtime = fakeRuntime("claude", { answerQuestion: vi.fn(async () => TAKEN_BY_TURN) })
+    const skipped = await post(registryOf({ claude: runtime }), { sessionId: "session-abc", toolUseId: "tu-3", answers: [], unanswered: "skipped" })
+    const replied = await post(registryOf({ claude: runtime }), { sessionId: "session-abc", toolUseId: "tu-4", answers: "teal", unanswered: "replied_in_chat" })
+
+    expect(skipped.res._getStatus()).toBe(200)
+    expect(replied.res._getStatus()).toBe(200)
+    expect(runtime.answerQuestion).toHaveBeenNthCalledWith(1, "session-abc", "tu-3", [], "skipped")
+    expect(runtime.answerQuestion).toHaveBeenNthCalledWith(2, "session-abc", "tu-4", "teal", "replied_in_chat")
+  })
+
+  it("refuses a skip the agent cannot take, and one of an unknown kind", async () => {
+    const codex = fakeRuntime("codex")
+    const notSkippable = await post(registryOf({ codex }, "codex"), { sessionId: "session-abc", toolUseId: "tu-5", answers: [], unanswered: "skipped" })
+    const unknown = await post(registryOf({}), { sessionId: "session-abc", toolUseId: "tu-6", answers: [], unanswered: "dismissed" })
+
+    expect(notSkippable.res._getStatus()).toBe(400)
+    expect(unknown.res._getStatus()).toBe(400)
+    expect(codex.answerQuestion).not.toHaveBeenCalled()
   })
 
   it("delivers an answer the agent reads as its next message, with the transcript it resolved", async () => {

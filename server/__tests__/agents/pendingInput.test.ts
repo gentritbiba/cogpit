@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest"
 
 const mocks = vi.hoisted(() => ({
   approvals: [] as Array<Record<string, unknown>>,
+  skipQuestions: true,
   questions: [] as Array<Record<string, unknown>>,
   plans: [] as Array<Record<string, unknown>>,
   respondToApproval: vi.fn(),
@@ -12,6 +13,7 @@ const mocks = vi.hoisted(() => ({
 
 vi.mock("../../agents/runtimes", () => ({
   allRuntimes: () => [{
+    descriptor: { displayName: "Agent", capabilities: { skipQuestions: mocks.skipQuestions } },
     listPendingApprovals: (id: string) => mocks.approvals.filter((a) => a.sessionId === id),
     listPendingQuestions: (id: string) => mocks.questions.filter((q) => q.sessionId === id),
     respondToApproval: mocks.respondToApproval,
@@ -42,6 +44,7 @@ beforeEach(() => {
   mocks.respondToApproval.mockReset().mockResolvedValue(true)
   mocks.answerQuestion.mockReset().mockResolvedValue(true)
   mocks.answerExitPlan.mockReset().mockResolvedValue(true)
+  mocks.skipQuestions = true
 })
 
 describe("listPendingInput", () => {
@@ -72,10 +75,24 @@ describe("respondToPendingInput", () => {
     expect(mocks.respondToApproval).toHaveBeenCalledWith("s", "perm-1", "deny")
 
     await respondToPendingInput("s", "q-1", { answers: "Red" })
-    expect(mocks.answerQuestion).toHaveBeenCalledWith("s", "q-1", "Red")
+    expect(mocks.answerQuestion).toHaveBeenCalledWith("s", "q-1", "Red", undefined)
 
     await respondToPendingInput("s", "plan-1", { approved: false, feedback: "smaller" })
     expect(mocks.answerExitPlan).toHaveBeenCalledWith("s", "plan-1", { approved: false, feedback: "smaller" })
+  })
+
+  it("lists a skippable question as one and skips it for an agent that takes a skip", async () => {
+    mocks.questions[0].skippable = true
+    expect(listPendingInput("s")).toContainEqual(expect.objectContaining({ kind: "question", requestId: "q-1", skippable: true }))
+
+    await respondToPendingInput("s", "q-1", { answers: [], unanswered: "skipped" })
+    expect(mocks.answerQuestion).toHaveBeenCalledWith("s", "q-1", [], "skipped")
+  })
+
+  it("refuses a skip for an agent that cannot take one", async () => {
+    mocks.skipQuestions = false
+    await expect(respondToPendingInput("s", "q-1", { answers: [], unanswered: "skipped" })).rejects.toMatchObject({ status: 400 })
+    expect(mocks.answerQuestion).not.toHaveBeenCalled()
   })
 
   it("refuses an answer of the wrong shape, an unknown id, and a rejected answer", async () => {

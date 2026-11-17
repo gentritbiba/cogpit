@@ -115,8 +115,9 @@ Start and drive other agent sessions through Cogpit. Output is JSON unless noted
   approve ID [--request REQ] [--always]
   deny ID [--request REQ] [--feedback TEXT]
         Answer a permission prompt (or a plan approval).
-  answer ID ANSWER... [--request REQ] [--json '{"question":"answer"}']
-        Answer a question the session asked; one ANSWER per question.
+  answer ID ANSWER... [--request REQ] [--json '{"question":"answer"}'] | --skip
+        Answer a question the session asked; one ANSWER per question. --skip
+        tells the session its questions were skipped, where its agent allows.
   interrupt ID              Stop the current turn, keep the session.
   stop ID... | --children   End sessions and cancel messages still queued for them;
                             --children stops every session you started.
@@ -561,7 +562,7 @@ async function approvalCommand(inv: CliInvocation, rest: string[], verb: "approv
 }
 
 async function answerCommand(inv: CliInvocation, rest: string[]): Promise<CliOutput> {
-  const args = parseArgs(rest, ["request", "json", "command-id"], [])
+  const args = parseArgs(rest, ["request", "json", "command-id"], ["skip"])
   const sessionId = sessionIdArg(args, "answer")
   await requireSessionAccess(inv, sessionId, true)
   const host = await hostForSession(sessionId)
@@ -569,6 +570,10 @@ async function answerCommand(inv: CliInvocation, rest: string[]): Promise<CliOut
   const cached = args.values.has("request") || !host.receipt ? null : await host.receipt(commandId, inv.req)
   if (cached && cached.sessionId !== sessionId) throw new UsageError("This answer receipt belongs to another session")
   const { requestId } = await pickRequest(host, sessionId, args.values.get("request") ?? cached?.questionId, ["question"])
+  if (args.switches.has("skip")) {
+    if (args.positionals.length > 0 || args.values.has("json")) throw new UsageError("--skip takes no ANSWER or --json")
+    return respond(host, sessionId, requestId, { answers: [], unanswered: "skipped" }, inv, args.values.get("command-id"))
+  }
   const rawJson = args.values.get("json")
   if (rawJson !== undefined) {
     let answers: unknown

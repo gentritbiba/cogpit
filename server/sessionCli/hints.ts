@@ -12,7 +12,7 @@ export function answerHints(sessionId: string, waiting: readonly PendingInput[])
       case "plan":
         return `${target.replace("%s", "approve")}  |  ${target.replace("%s", "deny")} --feedback "..."`
       case "question":
-        return `${target.replace("%s", "answer")} "<one answer per question>"`
+        return `${target.replace("%s", "answer")} "<one answer per question>"${request.skippable ? `  |  ${target.replace("%s", "answer")} --skip` : ""}`
     }
   })
 }
