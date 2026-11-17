@@ -24,6 +24,13 @@ impl Failure {
     pub fn respond(self) -> Response {
         error(self.0, self.1)
     }
+
+    /// Log what caused this failure, which the client only sees as `self.1`.
+    #[must_use]
+    pub fn because(self, cause: impl std::fmt::Display) -> Self {
+        tracing::warn!(status = self.0, %cause, "{}", self.1);
+        self
+    }
 }
 
 #[derive(Serialize)]

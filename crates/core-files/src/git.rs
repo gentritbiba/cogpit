@@ -26,7 +26,17 @@ pub enum GitError {
     /// Non-zero exit, with stderr.
     Failed(String),
     /// Timed out, overflowed the output ceiling, or failed some other way.
-    Other,
+    Other(&'static str),
+}
+
+impl std::fmt::Display for GitError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::NotFound => f.write_str("git is not on PATH"),
+            Self::Failed(stderr) => write!(f, "git failed: {}", stderr.trim()),
+            Self::Other(reason) => write!(f, "git {reason}"),
+        }
+    }
 }
 
 /// Read and decode a whole stream, failing as soon as it passes
@@ -39,10 +49,10 @@ async fn read_capped(stream: impl AsyncRead + Unpin) -> Result<String, GitError>
         .take(limit)
         .read_to_end(&mut output)
         .await
-        .map_err(|_| GitError::Other)?;
+        .map_err(|_| GitError::Other("output could not be read"))?;
     let text = lossy(output);
     if text.len() > MAX_OUTPUT {
-        return Err(GitError::Other);
+        return Err(GitError::Other("output is over 8 MiB"));
     }
     Ok(text)
 }
@@ -88,6 +98,9 @@ fn git_command(program: &OsStr, cwd: &str, args: &[&str]) -> Command {
     command
         .args(args)
         .current_dir(cwd)
+        // Read-only commands like `status` otherwise refresh `.git/index`
+        // under `index.lock`, failing an agent's concurrent `git add`.
+        .env("GIT_OPTIONAL_LOCKS", "0")
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
@@ -116,13 +129,22 @@ async fn run(git: &OsStr, cwd: &str, args: &[&str]) -> Result<String, GitError> 
     };
     let mut child = spawned.map_err(|error| match error.kind() {
         io::ErrorKind::NotFound => GitError::NotFound,
-        _ => GitError::Other,
+        _ => GitError::Other("could not be started"),
     })?;
-    let stdout = child.stdout.take().ok_or(GitError::Other)?;
-    let stderr = child.stderr.take().ok_or(GitError::Other)?;
+    let stdout = child
+        .stdout
+        .take()
+        .ok_or(GitError::Other("has no stdout"))?;
+    let stderr = child
+        .stderr
+        .take()
+        .ok_or(GitError::Other("has no stderr"))?;
     let run = async {
         let (stdout, stderr) = tokio::try_join!(read_capped(stdout), read_capped(stderr))?;
-        let status = child.wait().await.map_err(|_| GitError::Other)?;
+        let status = child
+            .wait()
+            .await
+            .map_err(|_| GitError::Other("exit status could not be read"))?;
         if status.success() {
             Ok(stdout)
         } else {
@@ -131,7 +153,7 @@ async fn run(git: &OsStr, cwd: &str, args: &[&str]) -> Result<String, GitError> 
     };
     tokio::time::timeout(TIMEOUT, run)
         .await
-        .unwrap_or(Err(GitError::Other))
+        .unwrap_or(Err(GitError::Other("timed out")))
 }
 
 pub struct GitProject {
@@ -165,7 +187,10 @@ pub async fn resolve_git_project(cwd: &str) -> Result<GitProject, Failure> {
                 project_path,
                 root: Some(root),
             }),
-            _ => Err(Failure(500, "Unable to read the git repository")),
+            Some(Err(cause)) => {
+                Err(Failure(500, "Unable to read the git repository").because(cause))
+            }
+            None => Err(Failure(500, "Unable to read the git repository")),
         },
         Err(GitError::NotFound) => Err(Failure(
             503,
@@ -177,7 +202,7 @@ pub async fn resolve_git_project(cwd: &str) -> Result<GitProject, Failure> {
                 root: None,
             })
         }
-        Err(_) => Err(Failure(500, "Unable to read the git repository")),
+        Err(cause) => Err(Failure(500, "Unable to read the git repository").because(cause)),
     }
 }
 
