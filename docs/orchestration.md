@@ -114,7 +114,7 @@ records and native history are not subject to the terminal-payload cap.
 
 The npm launcher requires Node 22.16 or newer and checks it before importing the
 server. Both npm and Electron package the provider worker beside the host entry.
-Codex types and request schemas are generated from CLI 0.163.0; use
+Codex types and request schemas are generated from CLI 0.167.2; use
 `bun run generate:codex-protocol` to refresh the pin deliberately and
 `bun run check:codex-protocol` to detect schema/provenance drift.
 
