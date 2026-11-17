@@ -36,11 +36,13 @@ export async function findJsonlPath(sessionId: string): Promise<string | null> {
   const instanceId = splitInstanceSessionId(sessionId).instanceId
   if (instanceId !== "default") {
     const store = allStores().find((store) => store.instanceId === instanceId)
-    return store ? store.findSessionFile(sessionId) : null
+    return store && !await store.catalogLacksSession(sessionId) ? store.findSessionFile(sessionId) : null
   }
   for (const kind of SESSION_LOOKUP_ORDER) {
     try {
-      const filePath = await storeFor(kind).findSessionFile(sessionId)
+      const store = storeFor(kind)
+      if (await store.catalogLacksSession(sessionId)) continue
+      const filePath = await store.findSessionFile(sessionId)
       if (filePath) return filePath
     } catch {
       // A missing or unreadable root just means that agent has no history.

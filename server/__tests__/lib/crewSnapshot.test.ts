@@ -217,6 +217,29 @@ describe("readCrewSnapshot", () => {
     expect((await read("lead", { localOnly: true }))?.members.map((entry) => entry.sessionId)).not.toContain("remote")
   })
 
+  it("asks a device about its finished member every 30 s rather than every 3 s (2026-11-17, omarchy probes)", async () => {
+    mocks.parents.set("remote", { parentSessionId: "lead", createdAt: 60 })
+    mocks.origins.set("remote", { deviceId: "dev_1" })
+    mocks.deviceState.mockResolvedValue({ sessionId: "remote", outcome: "completed", live: false, running: false, waiting: [] })
+    vi.useFakeTimers({ toFake: ["Date"] })
+    try {
+      await read("lead")
+      expect(mocks.deviceState).toHaveBeenCalledTimes(1)
+      vi.advanceTimersByTime(29_000)
+      await read("lead")
+      expect(mocks.deviceState).toHaveBeenCalledTimes(1)
+      vi.advanceTimersByTime(2_000)
+      await read("lead")
+      expect(mocks.deviceState).toHaveBeenCalledTimes(2)
+      // A follow-up sent to it moves its task, so the device is asked again at once.
+      mocks.tasks = [{ id: "t-remote", parentSessionId: "lead", childSessionId: "remote", state: "running", createdAt: 1, updatedAt: 2 }]
+      await read("lead")
+      expect(mocks.deviceState).toHaveBeenCalledTimes(3)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
   it("re-arms the crew chat's pending deliveries on every read, in the reader's scope", async () => {
     const reader = req()
     await readCrewSnapshot(reader, "busy", { brief: true, localOnly: false })

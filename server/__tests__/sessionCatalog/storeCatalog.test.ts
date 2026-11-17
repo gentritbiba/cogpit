@@ -197,6 +197,28 @@ describe("session catalog reads", () => {
     }
   })
 
+  it("vouches for a missing session only while watching, and sees one written later", async () => {
+    const root = join(home, "root")
+    mkdirSync(join(root, "p"), { recursive: true })
+    writeFileSync(join(root, "p", "a.jsonl"), "x")
+    const { source } = countingSource(root)
+    const catalog = createStoreCatalog(source)
+    try {
+      expect(await catalog.lacksSession("b")).toBe(false)
+      await catalog.topLevelSessions()
+      await settle()
+      await vi.waitFor(async () => expect(await catalog.lacksSession("b")).toBe(true))
+      expect(await catalog.lacksSession("a")).toBe(false)
+      const change = nextChange()
+      writeFileSync(join(root, "p", "b.jsonl"), "x")
+      await change
+      expect(await catalog.lacksSession("b")).toBe(false)
+    } finally {
+      catalog.close()
+    }
+    expect(await catalog.lacksSession("b")).toBe(false)
+  })
+
   it("keeps a final identity across appends and reads a non-final one again", async () => {
     const root = join(home, "root")
     mkdirSync(join(root, "p"), { recursive: true })

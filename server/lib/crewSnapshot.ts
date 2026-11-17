@@ -34,12 +34,15 @@ import { readSessionSignals, readSessionState, sessionStateFrom, type SessionSig
 
 /** How long a member on a hub device answers from its last description. */
 const REMOTE_MEMO_MS = 3_000
+/** The same for one that had finished or was gone: only a follow-up changes it. */
+const SETTLED_REMOTE_MEMO_MS = 30_000
+const SETTLED_REMOTE_OUTCOMES = new Set(["completed", "error", "not_found"])
 /** The `brief=1` preview of a member's first prompt, enough for three lines of a card. */
 const PREVIEW_CHARS = 400
 
 interface SettledMember { key: string; described: DescribedSession }
 const settled = recencyCache<SettledMember>({ capacity: 2_000, inUseMs: 60_000, ceiling: 10_000 })
-const remote = new Map<string, { at: number; described: Promise<DescribedSession> }>()
+const remote = new Map<string, { until: number; task: number | null; described: Promise<DescribedSession> }>()
 
 export function resetCrewSnapshotForTest(): void {
   settled.clear()
@@ -104,18 +107,23 @@ async function describeListed(id: string, candidate: TopLevelSessionInfo, signal
   }
 }
 
-function describeRemote(id: string, device: NonNullable<ReturnType<typeof hostForOrigin>>): Promise<DescribedSession> {
+function describeRemote(id: string, device: NonNullable<ReturnType<typeof hostForOrigin>>, task: DelegatedTaskState | undefined): Promise<DescribedSession> {
   const now = Date.now()
   const known = remote.get(id)
-  if (known && now - known.at < REMOTE_MEMO_MS) return known.described
-  for (const [key, entry] of remote) if (now - entry.at >= REMOTE_MEMO_MS) remote.delete(key)
+  const taskAt = task?.updatedAt ?? null
+  if (known && now < known.until && known.task === taskAt) return known.described
+  for (const [key, entry] of remote) if (now >= entry.until) remote.delete(key)
   const described = Promise.all([device.state(id), device.address(id)]).then(([state, address]) => ({
     host: { remote: true, id: device.id, name: device.name },
     state,
     address,
   }))
-  remote.set(id, { at: now, described })
-  described.catch(() => { if (remote.get(id)?.described === described) remote.delete(id) })
+  const entry = { until: now + REMOTE_MEMO_MS, task: taskAt, described }
+  remote.set(id, entry)
+  described.then(
+    ({ state }) => { if (SETTLED_REMOTE_OUTCOMES.has(state.outcome)) entry.until = now + SETTLED_REMOTE_MEMO_MS },
+    () => { if (remote.get(id) === entry) remote.delete(id) },
+  )
   return described
 }
 
@@ -143,7 +151,7 @@ async function crewSources(req: IncomingMessage, sessionId: string, localOnly: b
     canView: (id) => (id === sessionId ? Promise.resolve(true) : canView(id)),
     describe: async (id, task) => {
       const device = localOnly ? null : hostForOrigin(await sessionOrigin(id))
-      if (device) return describeRemote(id, device)
+      if (device) return describeRemote(id, device, task)
       const candidate = listedById.get(id)
       const required = id === sessionId || id === rootId
       if (!required && (candidate ? archiveReason(archive, id, candidate.mtimeMs, now) : !runtimeForSession(id))) return null

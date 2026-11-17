@@ -12,6 +12,26 @@ export type { HostCreateInput, HostProject, SessionHost } from "./types"
 
 /** How long an unknown session may take to turn up on some device. */
 const LOCATE_TIMEOUT_MS = 5000
+/** How long a device that said it does not hold a session is not asked about it again. */
+const DENIAL_REMEMBER_MS = 60_000
+const DENIAL_CAPACITY = 2_000
+
+/** `deviceId \0 sessionId` → when the device may be asked again. */
+const denials = new Map<string, number>()
+const denialKey = (host: SessionHost, sessionId: string) => `${host.id}\0${sessionId}`
+
+function rememberDenial(host: SessionHost, sessionId: string): void {
+  const now = Date.now()
+  if (denials.size >= DENIAL_CAPACITY) {
+    for (const [key, until] of denials) if (until <= now) denials.delete(key)
+    if (denials.size >= DENIAL_CAPACITY) denials.delete(denials.keys().next().value!)
+  }
+  denials.set(denialKey(host, sessionId), now + DENIAL_REMEMBER_MS)
+}
+
+export function __resetSessionHostsForTest(): void {
+  denials.clear()
+}
 
 const remoteHosts = new Map<string, SessionHost>()
 
@@ -68,7 +88,9 @@ export function hostForOrigin(origin: SessionOrigin | null): SessionHost | null 
  * The machine a session runs on: the device recorded when the hub started it,
  * this machine, or whichever device turns out to hold it — found once, then
  * remembered. An unknown session resolves to this machine, which reports it
- * as not found.
+ * as not found. A device that answered it does not hold the session is not
+ * asked again for a minute, since pollers ask about the same missing sessions
+ * every second; one that failed to answer is asked every time.
  */
 export async function hostForSession(sessionId: string, options: { localOnly?: boolean } = {}): Promise<SessionHost> {
   if (options.localOnly) return localHost
@@ -76,11 +98,17 @@ export async function hostForSession(sessionId: string, options: { localOnly?: b
   if (recorded) return recorded
   if (await localHost.has(sessionId)) return localHost
 
+  const now = Date.now()
+  const askable = remoteHostsList().filter((host) => (denials.get(denialKey(host, sessionId)) ?? 0) <= now)
+  const probe = (host: SessionHost) => host.state(sessionId).then(
+    ({ outcome }) => {
+      if (outcome === "not_found") rememberDenial(host, sessionId)
+      return outcome === "not_found" || outcome === "unreachable" ? null : host
+    },
+    () => null,
+  )
   const timeout = new Promise<null>((resolve) => setTimeout(resolve, LOCATE_TIMEOUT_MS, null).unref?.())
-  const found = await Promise.race([
-    firstTrue(remoteHostsList().map((host) => host.has(sessionId).then((has) => (has ? host : null), () => null))),
-    timeout,
-  ])
+  const found = await Promise.race([firstTrue(askable.map(probe)), timeout])
   if (!found) return localHost
   await recordSessionOrigin(sessionId, { deviceId: found.id }).catch(() => {})
   return found

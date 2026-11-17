@@ -22,6 +22,7 @@ export function createInstanceStore(instance: ProviderInstance): AgentStore {
     async listTranscripts() { return (await store.listTranscripts()).map((file) => ({ ...file, sessionId: qualify(file.sessionId), parentSessionId: file.parentSessionId ? qualify(file.parentSessionId) : null })) },
     async listedSessionFiles() { return (await store.listedSessionFiles()).map((file) => ({ ...file, dirName: file.dirName ? dir(file.dirName) : null })) },
     knownSessionFile: (id) => { const parts = splitInstanceSessionId(id); return parts.instanceId === instance.id ? store.knownSessionFile(parts.nativeId) : null },
+    catalogLacksSession: (id) => { const parts = splitInstanceSessionId(id); return parts.instanceId === instance.id ? store.catalogLacksSession(parts.nativeId) : Promise.resolve(true) },
     resolveSessionFile: (name, file) => store.resolveSessionFile(splitInstanceDirName(name).nativeDirName, file),
     findSessionFile: (id) => { const parts = splitInstanceSessionId(id); return parts.instanceId === instance.id ? store.findSessionFile(parts.nativeId) : Promise.resolve(null) },
     async transcriptRoot(path) { const root = await store.transcriptRoot(path); return root ? { ...root, rootSessionId: qualify(root.rootSessionId) } : null },

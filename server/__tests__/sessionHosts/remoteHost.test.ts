@@ -18,7 +18,7 @@ vi.mock("../../sessionHosts/localHost", () => ({
 }))
 
 import { addDevice, initDeviceRegistry, removeDevice, listDevices } from "../../hub/registry"
-import { hostForSession, hostNamed, statesAcrossHosts, waitAcrossHosts } from "../../sessionHosts"
+import { __resetSessionHostsForTest, hostForSession, hostNamed, statesAcrossHosts, waitAcrossHosts } from "../../sessionHosts"
 import { createRemoteHost } from "../../sessionHosts/remoteHost"
 
 interface Seen {
@@ -69,6 +69,7 @@ beforeEach(async () => {
   registryDir = await mkdtemp(join(tmpdir(), "cogpit-remote-host-"))
   await initDeviceRegistry(registryDir)
   origins.clear()
+  __resetSessionHostsForTest()
 })
 
 afterEach(async () => {
@@ -195,6 +196,35 @@ describe("session host resolution", () => {
     holder.seen.length = 0
     expect((await hostForSession("s1")).id).toBe(holder.device.id)
     expect(holder.seen).toEqual([])
+  })
+
+  it("stops asking every device about a session none of them holds, for a minute (2026-11-17, omarchy probes)", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] })
+    try {
+      const empty = await fakeDevice((_req, res) => send(res, 404, { error: "Session not found" }))
+      expect((await hostForSession("gone")).remote).toBe(false)
+      const asked = empty.seen.length
+      expect(asked).toBeGreaterThan(0)
+
+      expect((await hostForSession("gone")).remote).toBe(false)
+      expect(empty.seen.length).toBe(asked)
+
+      vi.advanceTimersByTime(60_001)
+      await hostForSession("gone")
+      expect(empty.seen.length).toBeGreaterThan(asked)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it("keeps asking a device that fails to answer, but not one that said no", async () => {
+    const empty = await fakeDevice((_req, res) => send(res, 404, { error: "Session not found" }))
+    const failing = await fakeDevice((_req, res) => send(res, 530, { error: "Origin unreachable" }))
+    expect((await hostForSession("gone")).remote).toBe(false)
+    const asked = { empty: empty.seen.length, failing: failing.seen.length }
+    await hostForSession("gone")
+    expect(failing.seen.length).toBeGreaterThan(asked.failing)
+    expect(empty.seen.length).toBe(asked.empty)
   })
 
   it("names devices by id, name or host and lists the known ones when none matches", async () => {

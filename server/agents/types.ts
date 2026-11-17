@@ -155,6 +155,8 @@ export interface AgentStore {
   listedSessionFiles(): Promise<SessionFileInfo[]>
   /** The transcript the running session catalog knows for `sessionId`, without touching the disk. */
   knownSessionFile(sessionId: string): string | null
+  /** True when the running session catalog vouches that no transcript here carries `sessionId`, so a search can be skipped. */
+  catalogLacksSession(sessionId: string): Promise<boolean>
   /** Stop watching this store's files. */
   dispose(): void
   /** Untrusted `{dirName, fileName}` to a safe absolute path, or null. */

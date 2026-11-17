@@ -80,6 +80,8 @@ export interface StoreCatalog {
   projectSessionFiles(dirName: string): Promise<ProjectSessionFileInfo[]>
   /** O(1): the transcript whose name carries this id, if the running catalog knows one. */
   sessionFileFor(sessionId: string): string | null
+  /** True only while watching, once caught up with its watchers, the catalog lists no transcript named for this id. */
+  lacksSession(sessionId: string): Promise<boolean>
   close(): void
 }
 
@@ -284,6 +286,16 @@ class CatalogImpl implements StoreCatalog {
   sessionFileFor(sessionId: string): string | null {
     if (!this.started || !catalogsEnabled) return null
     return this.byId.get(sessionId) ?? null
+  }
+
+  async lacksSession(sessionId: string): Promise<boolean> {
+    if (!this.live || !this.started || !catalogsEnabled || !this.watching) return false
+    try {
+      await this.current()
+    } catch {
+      return false
+    }
+    return this.watching && !this.byId.has(sessionId)
   }
 
   /** The project cwd of a path-addressed session, read from its head once per file. */
@@ -748,6 +760,7 @@ export function catalogListings(catalog: StoreCatalog) {
     listTopLevelSessions: () => catalog.topLevelSessions(),
     listedSessionFiles: () => catalog.files(),
     knownSessionFile: (sessionId: string) => catalog.sessionFileFor(sessionId),
+    catalogLacksSession: (sessionId: string) => catalog.lacksSession(sessionId),
     dispose: () => catalog.close(),
   }
 }
