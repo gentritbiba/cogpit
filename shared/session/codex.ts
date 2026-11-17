@@ -691,6 +691,30 @@ export function isCodexSessionText(jsonlText: string): boolean {
   return false
 }
 
+const ITEM_COMPLETED = '"type":"event_msg","payload":{"type":"item_completed",'
+const ITEM_TYPE = '"item":{"type":"'
+/** How far into a line its payload's item type is looked for; Codex writes it near character 200. */
+const ITEM_TYPE_WINDOW = 512
+
+/**
+ * True for the `item_completed` events Codex writes beside the records that
+ * carry the same items, other than `SubAgentActivity`, which the parser reads. They are 40 to 70% of a rollout's bytes, and a generated image's
+ * base64 rides in one a second time.
+ *
+ * Quotes inside a JSON string are escaped, so the event and item keys only
+ * match as keys. A `{` before either, other than the line's own and the
+ * payload's, would mean a nested object, and the line is kept.
+ */
+export function isCodexNoiseLine(line: string): boolean {
+  const head = line.slice(0, ITEM_TYPE_WINDOW)
+  const at = head.indexOf(ITEM_COMPLETED)
+  if (at <= 0 || head.lastIndexOf("{", at) !== 0) return false
+  const payload = at + ITEM_COMPLETED.indexOf("{")
+  const item = head.indexOf(ITEM_TYPE, payload)
+  if (item < 0 || head.indexOf("{", payload + 1) !== item + ITEM_TYPE.indexOf("{")) return false
+  return !head.startsWith('SubAgentActivity"', item + ITEM_TYPE.length)
+}
+
 /** True when already-parsed raw records came from this CLI. */
 export function isCodexRawRecords(records: readonly { type?: unknown }[]): boolean {
   return isCodexRecord((records[0] ?? null) as CodexRecord | null)
