@@ -120,8 +120,7 @@ export class CommandDispatcher {
         return
       }
       const status = typeof error === "object" && error && "status" in error ? Number(error.status) : 0
-      const errorCode = status === 400 && typeof error === "object" && error && "code" in error && error.code === "MODEL_REJECTED" ? "MODEL_REJECTED" : undefined
-      this.store.finish(command, lease, [400, 403, 404].includes(status) ? "failed" : "unknown", { error: error instanceof Error ? error.message : "Agent delivery failed", errorCode })
+      this.store.finish(command, lease, [400, 403, 404].includes(status) ? "failed" : "unknown", { error: error instanceof Error ? error.message : "Agent delivery failed" })
     }
     void this.tick()
   }

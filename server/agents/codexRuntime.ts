@@ -30,7 +30,6 @@ import { resolveAgentCommand } from "../lib/binaryResolver"
 import { cogpitAgentEnv } from "../browser/agentEnv"
 import { NO_COGPIT_SESSION } from "../browser/paths"
 import {
-  codexSendError,
   getCodexThreadIdentity,
   isCodexAppServerUnavailable,
   continueCodexExecution,
@@ -918,7 +917,11 @@ export const codexRuntime: AgentRuntime = {
       return await continueThread(sessionId, options)
     } catch (error) {
       if (!isCodexAppServerUnavailable(error)) {
-        throw codexSendError(error)
+        throw new AgentRuntimeError(
+          500,
+          "INTERNAL_ERROR",
+          error instanceof Error ? error.message : "Codex failed to accept the message",
+        )
       }
     }
     if (req.onlyWhileRunning) return { delivery: "busy" }

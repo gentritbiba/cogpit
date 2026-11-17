@@ -45,7 +45,6 @@ vi.mock("../../agents/codexAppServer", async (importOriginal) => {
   return { ...actual, codexAppServer }
 })
 vi.mock("../../agents/codexExecution", () => ({
-  codexSendError: (error: Error) => error,
   continueCodexExecution: execution.continueCodexExecution,
   startCodexExecution: vi.fn(),
   getCodexThreadIdentity: vi.fn(() => null),

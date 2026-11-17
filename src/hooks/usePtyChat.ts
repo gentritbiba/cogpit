@@ -173,21 +173,16 @@ export function usePtyChat({ sessionSource, parsedSessionId, cwd, permissions, o
           settingsChange: settingsChange.length > 0 ? settingsChange : undefined,
         }
 
-        const { res, errorMessage, observingReceipt, receipt } = await fetchWithModelFallback(
+        const { res, errorMessage, receipt } = await fetchWithModelFallback(
           (modelOverride) => deliverCommand("/api/send-message", { ...requestBody, model: modelOverride }, abortController.signal),
           {
             model,
             agentKind,
             errorFallback: (r) => `Request failed (${r.status})`,
             onModelRejected,
-            signal: abortController.signal,
-            onReceiptSettled: () => deliveryControllers.current.delete(abortController),
-            onDeliveryError: (message) => {
-              if (activeAbortRef.current === abortController) { setError(message); setStatus("error") }
-            },
           },
         )
-        if (!observingReceipt) deliveryControllers.current.delete(abortController)
+        deliveryControllers.current.delete(abortController)
         // The timeline now shows the accepted command from the queue instead of the optimistic copy.
         if (receipt && admitReceipt(receipt)) {
           setPendingMessages(prev => {
