@@ -33,6 +33,7 @@ import {
   codexSendError,
   getCodexThreadIdentity,
   isCodexAppServerUnavailable,
+  isCodexModelRejection,
   continueCodexExecution,
   startCodexExecution,
   type CodexExecutionOptions,
@@ -134,6 +135,45 @@ const rememberedSettings = new Map<string, ThreadSettings>()
 function rememberThreadSettings(sessionId: string, options: CodexExecutionOptions): void {
   const { message: _message, images: _images, reloadContextWindow: _reload, deliveryIntent: _intent, commandId: _command, onlyWhileRunning: _onlyWhileRunning, ...settings } = options
   rememberedSettings.set(sessionId, settings)
+}
+
+type ModelOptions = Pick<ThreadSettings, "model" | "effort" | "fastMode">
+
+// A running turn keeps the model it started with and a steer carries input
+// only, so what a steered send picks waits here for the thread's next turn.
+const steeredModelOptions = new Map<string, ModelOptions>()
+
+function namedModelOptions(options: CodexExecutionOptions): ModelOptions {
+  return {
+    ...(options.model ? { model: options.model } : {}),
+    ...(options.effort ? { effort: options.effort } : {}),
+    ...(options.fastMode !== undefined ? { fastMode: options.fastMode } : {}),
+  }
+}
+
+/** Continue a thread, starting its next turn with what was picked while the last one ran. */
+async function continueThread(sessionId: string, requested: CodexExecutionOptions): Promise<SendOutcome> {
+  const waiting = steeredModelOptions.get(sessionId)
+  const named = namedModelOptions(requested)
+  let options = waiting ? { ...requested, ...waiting, ...named } : requested
+  let result
+  try {
+    result = await continueCodexExecution(codexAppServer, sessionId, options)
+  } catch (error) {
+    // Codex first checks a waiting model when a turn starts with it.
+    if (!waiting || !isCodexModelRejection(error)) throw error
+    steeredModelOptions.delete(sessionId)
+    if (!waiting.model || named.model) throw error
+    options = requested
+    result = await continueCodexExecution(codexAppServer, sessionId, options)
+  }
+  if (result.action === "started") {
+    rememberThreadSettings(sessionId, options)
+    steeredModelOptions.delete(sessionId)
+  } else if (result.action === "steered" && Object.keys(named).length > 0) {
+    steeredModelOptions.set(sessionId, { ...waiting, ...named })
+  }
+  return { delivery: result.action, turnId: result.turnId }
 }
 
 async function rolloutFor(sessionId: string): Promise<CodexIdentity | null> {
@@ -819,9 +859,7 @@ export const codexRuntime: AgentRuntime = {
       const previous = rememberedSettings.get(sessionId)
       options.reloadContextWindow = req.contextWindowTokens !== undefined
         && (!previous || req.contextWindowTokens !== previous.contextWindowTokens)
-      const result = await continueCodexExecution(codexAppServer, sessionId, options)
-      if (result.action === "started") rememberThreadSettings(sessionId, options)
-      return { delivery: result.action, turnId: result.turnId }
+      return await continueThread(sessionId, options)
     } catch (error) {
       if (!isCodexAppServerUnavailable(error)) {
         throw codexSendError(error)
@@ -870,6 +908,7 @@ export const codexRuntime: AgentRuntime = {
     terminateTrackedSession(sessionId)
     await unlink(filePath)
     rememberedSettings.delete(sessionId)
+    steeredModelOptions.delete(sessionId)
     codexQuestions.clear(sessionId)
   },
 
@@ -978,7 +1017,7 @@ export const codexRuntime: AgentRuntime = {
     }
 
     return {
-      message: { ...rememberedSettings.get(sessionId), message },
+      message: { ...rememberedSettings.get(sessionId), ...steeredModelOptions.get(sessionId), message },
       durableQuestion: { instanceId: process.env.COGPIT_AGENT_INSTANCE_ID ?? "default", sessionId, requestId: questionId },
       onDelivered: () => codexQuestions.resolve(sessionId, questionId, `legacy-answer-${questionId}`),
     }
@@ -1002,6 +1041,7 @@ export const codexRuntime: AgentRuntime = {
 
   shutdown() {
     rememberedSettings.clear()
+    steeredModelOptions.clear()
     return codexAppServer.shutdown()
   },
 }
