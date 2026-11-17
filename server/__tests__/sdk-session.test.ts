@@ -127,6 +127,8 @@ vi.mock("@anthropic-ai/claude-agent-sdk", () => {
           await new Promise<void>((resolve) => { releaseHeldQuery = resolve })
         }
         if (scriptedError) {
+          // Scripted messages come first, as a CLI that answers and then exits non-zero.
+          for (const m of scriptedMessages ?? []) yield m
           if (scriptedStderr) args.options.stderr?.(scriptedStderr)
           const err = scriptedError
           resolveCompleted()
@@ -884,6 +886,49 @@ describe("sdk-session silent turn failures", () => {
     await waitUntil(() => vi.mocked(streamBus.publishError).mock.calls.length > 0)
     expect(vi.mocked(streamBus.publishError).mock.calls[0][1]).toBe("The working directory /gone no longer exists.")
     expect(describeErrorResult({ subtype: "error_max_turns", errors: [] })).toBe("Claude returned an error (error_max_turns)")
+  })
+
+  it("names the config file and backup of a start refused over an invalid config file", async () => {
+    const { describeErrorResult } = await loadModule()
+    const cliText = "Configuration error in /Users/me/.claude.json: JSON Parse error: Property name must be a string literal"
+    const message = describeErrorResult({
+      type: "result",
+      subtype: "error_during_execution",
+      is_error: true,
+      errors: [cliText],
+      startup_failure_reason: "config_file_invalid",
+      invalid_config_file: { path: "/Users/me/.claude.json", is_global: true, backup_searched: true, backup_path: "/Users/me/.claude/backups/.claude.json.backup.1763400000000" },
+    })
+
+    expect(message).toBe([
+      "Claude Code can't start: a config file isn't valid JSON.",
+      "File: /Users/me/.claude.json",
+      "Backup: /Users/me/.claude/backups/.claude.json.backup.1763400000000",
+      cliText,
+    ].join("\n"))
+  })
+
+  it("reports the error result again, described, when the CLI exits after it", async () => {
+    const streamBus = await import("../lib/streamBus")
+    const { createSDKSession } = await loadModule()
+    const cliText = "Configuration error in /Users/me/.claude.json: JSON Parse error: Property name must be a string literal"
+    const startupFailure = {
+      type: "result",
+      subtype: "error_during_execution",
+      is_error: true,
+      errors: [cliText],
+      startup_failure_reason: "config_file_invalid",
+      invalid_config_file: { path: "/Users/me/.claude.json", is_global: true, backup_searched: true, backup_path: "/Users/me/.claude/backups/.claude.json.backup.1" },
+    }
+    scriptedMessages = [startupFailure]
+    // The SDK replaces the exit error with the result's text.
+    scriptedError = new Error(`Claude Code returned an error result: ${cliText}`)
+
+    createSDKSession({ sessionId: "result-then-exit", cwd: "/tmp", message: "hi" })
+
+    await waitUntil(() => vi.mocked(streamBus.publishError).mock.calls.length > 1)
+    const published = vi.mocked(streamBus.publishError).mock.calls.map(([, message]) => String(message))
+    expect(published.every((message) => message.startsWith("Claude Code can't start: a config file isn't valid JSON.\nFile: /Users/me/.claude.json\n"))).toBe(true)
   })
 
   it("reports a thrown query error over the stream bus when nothing is listening", async () => {

@@ -349,6 +349,14 @@ describe("context command", () => {
         },
         { type: "queue-operation", operation: "enqueue", content: "Include tests", timestamp: "2026-07-22T10:00:04Z" },
         {
+          type: "system",
+          subtype: "informational",
+          content: "Opus 5.5's safeguards stopped the response above · continuing once with that noted",
+          level: "notice",
+          isMeta: false,
+          timestamp: "2026-07-22T10:00:04.500Z",
+        },
+        {
           type: "progress",
           timestamp: "2026-07-22T10:00:05Z",
           data: { type: "hook_progress", hook_event_name: "PostToolUse", tool_use_id: "enter", duration_ms: 4 },
@@ -384,8 +392,15 @@ describe("context command", () => {
         "recap",
         "plan_mode",
         "queued_prompt",
+        "notice",
         "hook_event",
       ])
+      expect(detail.contentBlocks[3]).toEqual({
+        kind: "notice",
+        level: "notice",
+        content: "Opus 5.5's safeguards stopped the response above · continuing once with that noted",
+        timestamp: "2026-07-22T10:00:04.500Z",
+      })
     })
   })
 

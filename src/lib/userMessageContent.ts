@@ -25,6 +25,7 @@ export const SYSTEM_TAG_NAMES = [
   "fast_mode_info",
   "gitStatus",
   "user-prompt-submit-hook",
+  "fork-boilerplate",
   VOICE_MODE_TAG,
 ] as const
 

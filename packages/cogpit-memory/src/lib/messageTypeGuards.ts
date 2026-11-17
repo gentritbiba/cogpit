@@ -16,6 +16,7 @@ import type {
   SummaryMessage,
   QueueOperationMessage,
   AttachmentMessage,
+  ForkContextRefMessage,
 } from "./types"
 
 export function isUserMessage(msg: RawMessage): msg is UserMessage {
@@ -44,6 +45,10 @@ export function isQueueOperationMessage(msg: RawMessage): msg is QueueOperationM
 
 export function isAttachmentMessage(msg: RawMessage): msg is AttachmentMessage {
   return msg.type === "attachment"
+}
+
+export function isForkContextRef(msg: RawMessage): msg is ForkContextRefMessage {
+  return msg.type === "fork-context-ref"
 }
 
 /**

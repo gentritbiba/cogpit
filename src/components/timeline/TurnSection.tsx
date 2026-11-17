@@ -9,6 +9,7 @@ import { PlanModeBlock } from "./PlanModeBlock"
 import { RecapBanner } from "./RecapBanner"
 import { TaskNotificationBlock } from "./TaskNotificationCard"
 import { LocalCommandBlock } from "./LocalCommandOutput"
+import { NoticeLine } from "./NoticeLine"
 import { CollapsibleToolCalls } from "./CollapsibleToolCalls"
 import { DelegatedAttentionRow, DelegatedResultRow } from "./DelegatedResultRow"
 import { clockLabel } from "./SessionRow"
@@ -792,6 +793,9 @@ function contentItems(blocks: TurnContentBlock[], keyFor: KeyFor, {
             />
           </div>
         ))
+        break
+      case "notice":
+        push(key, block, block, () => <div data-scroll-anchor=""><NoticeLine content={block.content} level={block.level} /></div>)
         break
     }
   }

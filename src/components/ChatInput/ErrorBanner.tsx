@@ -1,5 +1,5 @@
 import { useState } from "react"
-import { Copy, Check, AlertCircle, ExternalLink } from "lucide-react"
+import { Copy, Check, AlertCircle, ExternalLink, SquareTerminal } from "lucide-react"
 import {
   Dialog,
   DialogContent,
@@ -9,7 +9,11 @@ import {
 } from "@/components/ui/dialog"
 import { Button } from "@/components/ui/button"
 import { descriptorFor, type AgentKind } from "@/lib/agents"
-import { agentNotInstalledIn, agentSignedOutTitle, classifyAgentFailure } from "../../../shared/session/agentFailures"
+import { useCapability } from "@/hooks/useCapability"
+import { isRemoteDeviceActive } from "@/lib/device"
+import { openProjectTerminal, type TerminalTarget } from "@/lib/openTerminal"
+import { agentConfigInvalidIn, agentNotInstalledIn, agentSignedOutTitle, agentTerminalCommandIn, classifyAgentFailure } from "../../../shared/session/agentFailures"
+import { RestoreConfigAction } from "./RestoreConfigAction"
 
 /**
  * Inline send error shown under the composer. The preview is a single
@@ -17,9 +21,15 @@ import { agentNotInstalledIn, agentSignedOutTitle, classifyAgentFailure } from "
  * CLI's captured stderr) in a copyable dialog so failures can actually be
  * diagnosed instead of just reading "Claude Code process exited with code 1".
  */
-export function ErrorBanner({ error, agentKind }: { error: string; agentKind: AgentKind }) {
+export function ErrorBanner({ error, agentKind, terminalAt }: {
+  error: string
+  agentKind: AgentKind
+  /** Where a failure that has to go on in the agent's own terminal opens one. */
+  terminalAt?: Omit<TerminalTarget, "command">
+}) {
   const [open, setOpen] = useState(false)
   const [copied, setCopied] = useState(false)
+  const terminalAllowed = useCapability("terminal")
 
   // A missing login reads the same for every agent, whatever words its CLI used.
   const signedOut = classifyAgentFailure(error).reason === "not_signed_in"
@@ -27,6 +37,9 @@ export function ErrorBanner({ error, agentKind }: { error: string; agentKind: Ag
   const hasMore = error.includes("\n") || error !== firstLine
   const missing = agentNotInstalledIn(error)
   const installPage = missing ? descriptorFor(missing).cli.install?.page : null
+  const invalidConfig = agentConfigInvalidIn(error)
+  const terminalCommand = agentTerminalCommandIn(error)
+  const canOpenTerminal = terminalCommand !== null && terminalAllowed && !isRemoteDeviceActive() && Boolean(terminalAt?.path || terminalAt?.dirName)
 
   const handleCopy = async () => {
     try {
@@ -62,6 +75,13 @@ export function ErrorBanner({ error, agentKind }: { error: string; agentKind: Ag
         >
           <ExternalLink data-icon="inline-start" />
           How to install
+        </Button>
+      )}
+      {invalidConfig?.backupPath && <RestoreConfigAction path={invalidConfig.path} backupPath={invalidConfig.backupPath} />}
+      {canOpenTerminal && (
+        <Button variant="outline" size="xs" className="ml-2" onClick={() => openProjectTerminal({ ...terminalAt, command: terminalCommand })}>
+          <SquareTerminal data-icon="inline-start" />
+          Open in terminal
         </Button>
       )}
 

@@ -13,6 +13,7 @@
 
 import { describe, it, expect, beforeEach } from "vitest"
 import { parseSession, parseSessionAppend } from "../../../shared/session/parser"
+import { claudeTurnBoundaries } from "../../../shared/session/claude"
 import {
   resetFixtureCounter,
   userMsg,
@@ -23,8 +24,9 @@ import {
   toJsonl,
   peerAttachment,
   peerEnqueueMsg,
+  agentProgressMsg,
 } from "@/__tests__/fixtures"
-import type { ProgressMessage, SystemMessage, TurnContentBlock } from "../../../shared/session/types"
+import type { ForkContextRefMessage, ProgressMessage, RawMessage, SystemMessage, TurnContentBlock } from "../../../shared/session/types"
 
 beforeEach(() => {
   resetFixtureCounter()
@@ -961,6 +963,84 @@ describe("local command output", () => {
   })
 })
 
+describe("CLI notices", () => {
+  // Shapes as Claude Code 2.1.296–2.1.318 wrote them, ids shortened.
+  const informational = (content: string, level: string, timestamp: string): SystemMessage => ({
+    parentUuid: "9ed3a709",
+    isSidechain: false,
+    type: "system",
+    subtype: "informational",
+    content,
+    isMeta: false,
+    timestamp,
+    uuid: `informational-${level}-${timestamp}`,
+    level,
+    sessionId: "test-session-1",
+    version: "2.1.318",
+  })
+  const safeguards = informational(
+    "Opus 5.5's safeguards stopped the response above · continuing once with that noted",
+    "notice",
+    "2026-11-04T23:59:25.736Z",
+  )
+  const otherOrganization = informational(
+    "Claude can't use thinking from another organization\nClaude's earlier thinking was written while you were signed in to another organization, so Claude can't use it now.",
+    "warning",
+    "2026-10-13T10:33:34.908Z",
+  )
+
+  it("files the line under the turn in flight, where the CLI showed it", () => {
+    const session = parseSession(toJsonl([
+      userMsg("Edit the PTY server"),
+      toolUseAssistant("Edit", { file_path: "server/pty.ts" }, "toolu_1"),
+      toolResultMsg("toolu_1", "ok"),
+      safeguards,
+      // The CLI tells the model about the stop in a meta prompt, which is not the reader's.
+      userMsg("Your response above was stopped by a safety classifier.", { isMeta: true }),
+      textAssistant("Continuing with the PTY server edit:"),
+    ]))
+
+    expect(session.turns).toHaveLength(1)
+    expect(session.turns[0].contentBlocks.map((block) => block.kind)).toEqual(["tool_calls", "notice", "text"])
+    expect(session.turns[0].contentBlocks[1]).toEqual({
+      kind: "notice",
+      level: "notice",
+      content: safeguards.content,
+      timestamp: "2026-11-04T23:59:25.736Z",
+    })
+  })
+
+  it("keeps the CLI's level and the whole text", () => {
+    const session = parseSession(toJsonl([userMsg("contninue on a ll"), otherOrganization, textAssistant("On it.")]))
+
+    expect(session.turns[0].contentBlocks[0]).toEqual({
+      kind: "notice",
+      level: "warning",
+      content: otherOrganization.content,
+      timestamp: "2026-10-13T10:33:34.908Z",
+    })
+  })
+
+  it("leaves out info lines, which the CLI shows only in its transcript view", () => {
+    const session = parseSession(toJsonl([
+      userMsg("Go"),
+      informational("Loaded 3 skills", "info", "2026-11-04T23:59:25.736Z"),
+      textAssistant("Done."),
+    ]))
+
+    expect(session.turns[0].contentBlocks.map((block) => block.kind)).toEqual(["text"])
+  })
+
+  it("never opens a turn", () => {
+    const records = [safeguards, userMsg("Next prompt"), textAssistant("Sure!"), otherOrganization, userMsg("Again"), textAssistant("Yes.")]
+    const session = parseSession(toJsonl(records))
+
+    expect(session.turns).toHaveLength(2)
+    expect(session.turns[0].contentBlocks.map((block) => block.kind)).toEqual(["text", "notice"])
+    expect(session.turns[1].contentBlocks.map((block) => block.kind)).toEqual(["text"])
+  })
+})
+
 describe("recap / away_summary parsing", () => {
   it("produces a recap content block from a system message with subtype 'away_summary'", () => {
     const jsonl = toJsonl([
@@ -1736,5 +1816,62 @@ describe("structured tool results", () => {
       ),
     ]))
     expect(session.turns[0].toolCalls[0].unansweredQuestions).toEqual({ "Pick a color?": "skipped", "Pick a size?": "replied_in_chat" })
+  })
+})
+
+describe("forked subagents", () => {
+  // Shapes from a Claude Code 2.1.325 fork transcript, text shortened.
+  const SPAWN_ID = "toolu_01Fgi7Wqmn4pwmgvk11d3NPi"
+  const forkContextRef: ForkContextRefMessage = { type: "fork-context-ref", agentId: "a956c90fe0e8d8de4", parentSessionId: "b5a1b984", parentLastUuid: "d19de15a", contextLength: 109 }
+  const spawnCall = toolUseAssistant("Agent", { description: "Diagnose React #185 on scroll up", subagent_type: "fork", prompt: "Fix the scroll-up loop" }, SPAWN_ID, { isSidechain: true, agentId: "a956c90fe0e8d8de4" })
+  const directive = "<fork-boilerplate>\nYou are a worker fork. Execute ONE directive, then stop.\n</fork-boilerplate>\n\nYour directive: Fix the scroll-up loop"
+  const forkStarted = userMsg([
+    { type: "tool_result", tool_use_id: SPAWN_ID, content: [{ type: "text", text: "Fork started \u2014 that fork is you." }] },
+    { type: "text", text: directive },
+  ], { isSidechain: true })
+
+  it("opens the fork's view with its directive, not the parent's call that started it", () => {
+    const records: RawMessage[] = [
+      forkContextRef,
+      spawnCall,
+      forkStarted,
+      textAssistant("Task: find and fix the React #185 loop."),
+      toolUseAssistant("Bash", { command: "rg virtua" }, "toolu_bash"),
+      toolResultMsg("toolu_bash", "src/components/timeline/TimelineList.tsx"),
+      textAssistant("Fixed."),
+    ]
+    const session = parseSession(toJsonl(records))
+
+    expect(session.turns).toHaveLength(1)
+    expect(session.turns[0].userMessage).toEqual([{ type: "text", text: directive }])
+    expect(session.turns[0].toolCalls.map((call) => call.name)).toEqual(["Bash"])
+    expect(session.turns[0].contentBlocks.map((block) => block.kind)).toEqual(["text", "tool_calls", "text"])
+    // The turn still starts where it did, so page cuts and undo see the same boundary.
+    expect(claudeTurnBoundaries(records)).toEqual([1])
+  })
+
+  it("keeps the Agent calls of a later page, which follow a prompt rather than the marker", () => {
+    const session = parseSession(toJsonl([
+      forkContextRef,
+      userMsg("Now check mobile too"),
+      toolUseAssistant("Agent", { description: "mobile", prompt: "check" }, "toolu_later"),
+      toolResultMsg("toolu_later", "done"),
+    ]))
+
+    expect(session.turns[0].toolCalls.map((call) => call.id)).toEqual(["toolu_later"])
+  })
+
+  it("leaves the fork's own call and answer out of the parent's sub-agent activity", () => {
+    const session = parseSession(toJsonl([
+      userMsg("Fork three agents"),
+      toolUseAssistant("Agent", { description: "Diagnose React #185 on scroll up", subagent_type: "fork", prompt: "Fix it" }, SPAWN_ID),
+      agentProgressMsg("a956c90fe0e8d8de4", SPAWN_ID, "assistant", [{ type: "tool_use", id: SPAWN_ID, name: "Agent", input: { description: "Diagnose React #185 on scroll up" } }]),
+      agentProgressMsg("a956c90fe0e8d8de4", SPAWN_ID, "user", forkStarted.message.content),
+      agentProgressMsg("a956c90fe0e8d8de4", SPAWN_ID, "assistant", [{ type: "text", text: "Task: find and fix the React #185 loop." }]),
+    ]))
+
+    const activity = session.turns[0].subAgentActivity
+    expect(activity.map((message) => message.text)).toEqual([["Task: find and fix the React #185 loop."]])
+    expect(activity.flatMap((message) => message.toolCalls)).toEqual([])
   })
 })

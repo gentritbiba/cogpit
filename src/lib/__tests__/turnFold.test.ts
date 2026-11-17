@@ -91,6 +91,16 @@ describe("planTurnFold", () => {
     expect(planTurnFold(blocks).foldedIndices).toEqual([0])
   })
 
+  it("never folds away a notice from the CLI", () => {
+    const blocks: TurnContentBlock[] = [
+      tools("Read"),
+      { kind: "notice", level: "warning", content: "Goal cleared after an unrecoverable error (context limit reached)" },
+      text("Done."),
+    ]
+
+    expect(planTurnFold(blocks).foldedIndices).toEqual([0])
+  })
+
   it("never folds away the task notification that resumed the turn", () => {
     const blocks: TurnContentBlock[] = [
       tools("Read"),

@@ -19,6 +19,7 @@ import type {
   UserMessage,
   MessageAttribution,
   CompactionMeta,
+  NoticeLevel,
   UserContent,
 } from "./types"
 import {
@@ -31,6 +32,7 @@ import {
   isCompactSummaryMessage,
   isQueueOperationMessage,
   isAttachmentMessage,
+  isForkContextRef,
 } from "./messageTypeGuards"
 import { parseAgentEnvelope } from "./agentEnvelope"
 import { mergeTokenUsage } from "./sessionStats"
@@ -92,9 +94,33 @@ function isTaskNotificationRecord(msg: UserMessage): boolean {
   return text.replace(TASK_NOTIFICATION_BLOCK_RE, "").replace(ANY_TAG_RE, "").trim() === ""
 }
 
+/**
+ * The block level of an `informational` record, or null for `info`, which the
+ * CLI shows only in its transcript view. A record without a level reads as a
+ * plain notice.
+ */
+function noticeLevel(level: string | undefined): NoticeLevel | null {
+  if (level === "info") return null
+  return level === "suggestion" || level === "warning" ? level : "notice"
+}
+
 /** "Task" is the pre-v2.1.63 name of the Agent tool, kept for old sessions. */
 function isTaskToolName(name: string): boolean {
   return name === "Task" || name === "Agent"
+}
+
+/** Ids of the Agent calls an assistant record makes, or none when it carries anything else. */
+function agentCallIdsOnly(msg: AssistantMessage): string[] {
+  const content = msg.message.content
+  const ids = content.flatMap((block) => (block.type === "tool_use" && isTaskToolName(block.name) ? [block.id] : []))
+  return ids.length === content.length ? ids : []
+}
+
+/** Whether a record's content calls, or answers, the tool call `id`. */
+function touchesCall(content: unknown, id: string): boolean {
+  return Array.isArray(content) && (content as ContentBlock[]).some((block) => (
+    (block.type === "tool_use" && block.id === id) || (block.type === "tool_result" && block.tool_use_id === id)
+  ))
 }
 
 interface TaskMeta { name: string | null; subagentType: string | null; effort: string | null }
@@ -332,6 +358,7 @@ function groupPlanModeBlocks(blocks: TurnContentBlock[]): TurnContentBlock[] {
               || next.kind === "text"
               || next.kind === "queued_prompt"
               || next.kind === "agent_message"
+              || next.kind === "notice"
             ) {
               // Passthrough presentation blocks don't break the scan.
               // Collect them for re-emission in chronological position after the plan block.
@@ -515,6 +542,13 @@ export function buildTurnsWithStarts(messages: RawMessage[]): BuiltTurns {
   // Track away_summary / recap to prepend as a recap content block on the next turn
   let pendingRecap: { content: string; timestamp?: string } | null = null
 
+  // A forked subagent's transcript opens with a `fork-context-ref` marker, the
+  // parent's own Agent call that started the fork, and a "Fork started" answer
+  // that carries the fork's directive. That call is the parent's history: it
+  // opens the turn but shows nothing, and the directive becomes the prompt.
+  let awaitingForkSpawn = false
+  const forkSpawnIds = new Set<string>()
+
   // Map from tool_use id -> index in current turn's toolCalls
   const pendingToolUses = new Map<string, { turn: Turn; index: number }>()
 
@@ -657,6 +691,22 @@ export function buildTurnsWithStarts(messages: RawMessage[]): BuiltTurns {
 
   for (recordIndex = 0; recordIndex < messages.length; recordIndex++) {
     const msg = messages[recordIndex]
+    if (isForkContextRef(msg)) {
+      awaitingForkSpawn = true
+      continue
+    }
+    if (awaitingForkSpawn && isAssistantMessage(msg)) {
+      const spawnIds = agentCallIdsOnly(msg)
+      if (spawnIds.length > 0) {
+        for (const id of spawnIds) forkSpawnIds.add(id)
+        if (!current) {
+          pendingTurnStart = recordIndex
+          current = createTurn(msg, null)
+        }
+        continue
+      }
+    }
+    if (isUserMessage(msg) || isAssistantMessage(msg)) awaitingForkSpawn = false
     // Legacy summary record — carries a one-line title, no body
     if (isSummaryMessage(msg)) {
       finalizeTurn()
@@ -764,6 +814,24 @@ export function buildTurnsWithStarts(messages: RawMessage[]): BuiltTurns {
         }
       }
       flushPendingQueuedPrompts()
+    }
+
+    // A line the CLI showed the user. Like a local command's answer it joins
+    // the turn in flight and never opens one.
+    if (isSystemMessage(msg) && msg.subtype === "informational") {
+      const level = noticeLevel(msg.level)
+      if (current && level && msg.content?.trim()) {
+        current.contentBlocks.push({ kind: "notice", content: msg.content, level, timestamp: msg.timestamp })
+      }
+      continue
+    }
+
+    const forkStarted = forkSpawnIds.size > 0 && isUserMessage(msg) ? msg.message.content : null
+    if (Array.isArray(forkStarted) && [...forkSpawnIds].some((id) => touchesCall(forkStarted, id))) {
+      const directive = forkStarted.filter((block) => block.type !== "tool_result")
+      if (current && current.userMessage === null && directive.length > 0) current.userMessage = directive
+      forkSpawnIds.clear()
+      continue
     }
 
     // User messages start a new turn (skip meta / tool-result-only messages)
@@ -1003,6 +1071,8 @@ export function buildTurnsWithStarts(messages: RawMessage[]): BuiltTurns {
       // `data.toolUseId`; records written before nesting carry only the key.
       const parentId = msg.parentToolUseID ?? ""
       const ownToolUseId = data.toolUseId ?? parentId
+      // A fork's transcript repeats the call that started it, and its answer.
+      if (ownToolUseId && touchesCall(data.message.message.content, ownToolUseId)) continue
 
       // Extract token usage from sub-agent assistant messages (deduplicated by message ID)
       let subAgentUsage: TokenUsage | null = null

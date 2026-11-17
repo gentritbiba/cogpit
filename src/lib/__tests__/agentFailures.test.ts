@@ -1,8 +1,12 @@
 import { describe, expect, it } from "vitest"
 import {
+  agentConfigInvalidIn,
+  agentConfigInvalidMessage,
   agentFailureTitle,
   agentNotInstalledIn,
   agentNotInstalledMessage,
+  agentTerminalCommandIn,
+  agentTerminalOnlyMessage,
   classifyAgentFailure,
 } from "../../../shared/session/agentFailures"
 import { deriveSessionStatus } from "../../../shared/session/sessionStatus"
@@ -73,6 +77,33 @@ describe("what the user is told", () => {
   it("finds the agent a not-installed message is about", () => {
     expect(agentNotInstalledIn(agentNotInstalledMessage("codex", "linux"))).toBe("codex")
     expect(agentNotInstalledIn("Something else broke")).toBeNull()
+  })
+
+  it("names a config file the agent would not start with, and reads it back with its backup", () => {
+    const detail = "Configuration error in /Users/me/.claude.json: JSON Parse error: Property name must be a string literal"
+    const message = agentConfigInvalidMessage("claude", { path: "/Users/me/.claude.json", backupPath: "/Users/me/.claude/backups/.claude.json.backup.1763400000000" }, detail)
+
+    expect(message).toBe([
+      "Claude Code can't start: a config file isn't valid JSON.",
+      "File: /Users/me/.claude.json",
+      "Backup: /Users/me/.claude/backups/.claude.json.backup.1763400000000",
+      detail,
+    ].join("\n"))
+    expect(agentConfigInvalidIn(message)).toEqual({ kind: "claude", path: "/Users/me/.claude.json", backupPath: "/Users/me/.claude/backups/.claude.json.backup.1763400000000" })
+    expect(classifyAgentFailure(message)).toEqual({ reason: "config_invalid", message })
+    expect(agentFailureTitle("claude", classifyAgentFailure(message))).toBe("Claude Code can't start: a config file isn't valid JSON.")
+  })
+
+  it("reads back the command a failure that must go on in a terminal names", () => {
+    const message = agentTerminalOnlyMessage("Started in Code Mode.", "CLAUDE_CODE_EXPERIMENTAL_CODE_MODE=1 claude --resume s1", "Failed to resume session")
+    expect(agentTerminalCommandIn(message)).toBe("CLAUDE_CODE_EXPERIMENTAL_CODE_MODE=1 claude --resume s1")
+    expect(agentTerminalCommandIn("Failed to resume session\nResume it in the terminal: claude --resume s1")).toBeNull()
+  })
+
+  it("reads a config failure without a backup, and nothing from other messages", () => {
+    const message = agentConfigInvalidMessage("claude", { path: "/Users/me/.claude.json", backupPath: null }, "Configuration error")
+    expect(agentConfigInvalidIn(message)).toEqual({ kind: "claude", path: "/Users/me/.claude.json", backupPath: null })
+    expect(agentConfigInvalidIn("Configuration error in /Users/me/.claude.json")).toBeNull()
   })
 })
 
