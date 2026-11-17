@@ -69,6 +69,12 @@ async function quiet(calls: object): Promise<void> {
   }
 }
 
+/** Claude Code's archive mark, as the SDK's `archiveSession` writes it. */
+function writeArchiveMark(project: string, sessionId: string, archived: boolean, at: string): void {
+  mkdirSync(join(project, sessionId), { recursive: true })
+  writeFileSync(join(project, sessionId, "archived.json"), JSON.stringify({ archived, at, by: "sdk" }))
+}
+
 function claudeStore(): { store: AgentStore; root: string } {
   const root = join(home, "projects")
   mkdirSync(join(root, "-work-app"), { recursive: true })
@@ -134,6 +140,43 @@ describe("session catalog over a path-addressed store", () => {
     writeFileSync(join(project, `${ID_A}.jsonl`), claudeLine(ID_A, "/work/my-app"))
     const [project1] = await store.listProjects()
     expect(project1).toMatchObject({ dirName: "-work-app", path: "/work/my-app", sessionCount: 1 })
+  })
+
+  it("reads the archive mark Claude Code keeps beside a session, leaving a malformed one out", async () => {
+    const { store, root } = claudeStore()
+    const project = join(root, "-work-app")
+    writeFileSync(join(project, `${ID_A}.jsonl`), claudeLine(ID_A, "/work/app"))
+    writeFileSync(join(project, `${ID_B}.jsonl`), claudeLine(ID_B, "/work/app"))
+    writeFileSync(join(project, `${ID_C}.jsonl`), claudeLine(ID_C, "/work/app"))
+    writeArchiveMark(project, ID_A, true, "2026-11-17T18:00:00.000Z")
+    mkdirSync(join(project, ID_B))
+    writeFileSync(join(project, ID_B, "archived.json"), "{not json")
+
+    const listed = new Map((await store.listTopLevelSessions()).map((session) => [session.fileName, session]))
+    expect(listed.get(`${ID_A}.jsonl`)?.archiveMark).toEqual({ archived: true, atMs: Date.parse("2026-11-17T18:00:00.000Z") })
+    expect(listed.get(`${ID_B}.jsonl`)).not.toHaveProperty("archiveMark")
+    expect(listed.get(`${ID_C}.jsonl`)).not.toHaveProperty("archiveMark")
+  })
+
+  it("follows a mark written after the first listing", async () => {
+    const { store, root } = claudeStore()
+    const project = join(root, "-work-app")
+    writeFileSync(join(project, `${ID_A}.jsonl`), claudeLine(ID_A, "/work/app"))
+    expect((await store.listTopLevelSessions())[0]).not.toHaveProperty("archiveMark")
+    await settle()
+
+    let change = nextChange()
+    writeArchiveMark(project, ID_A, true, "2026-11-17T18:00:00.000Z")
+    expect((await change)?.kind).toBe("visible")
+    expect((await store.listTopLevelSessions())[0]?.archiveMark).toEqual({ archived: true, atMs: Date.parse("2026-11-17T18:00:00.000Z") })
+
+    // Linux watches only the project directories, so there a mark rewritten
+    // inside an existing session directory waits for the next rescan.
+    if (process.platform === "linux") return
+    change = nextChange()
+    writeArchiveMark(project, ID_A, false, "2026-11-17T19:00:00.000Z")
+    expect((await change)?.kind).toBe("visible")
+    expect((await store.listTopLevelSessions())[0]?.archiveMark).toEqual({ archived: false, atMs: Date.parse("2026-11-17T19:00:00.000Z") })
   })
 
   it("lists one project's files from the catalog without reading the directory again", async () => {

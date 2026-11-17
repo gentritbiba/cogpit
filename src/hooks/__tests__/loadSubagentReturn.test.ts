@@ -23,7 +23,7 @@ vi.mock("../../../server/agents", async (importOriginal) => ({
 }))
 vi.mock("../../../server/lib/sessionArchive", () => ({
   archiveReason: () => null,
-  readArchive: async () => ({ archived: new Map(), kept: new Set() }),
+  readArchive: async () => ({ archived: new Map(), kept: new Map() }),
   setSessionsArchived: vi.fn().mockResolvedValue([]),
 }))
 // The client's requests go to the real page and tool-result routes.

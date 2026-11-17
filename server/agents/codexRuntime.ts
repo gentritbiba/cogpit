@@ -30,7 +30,6 @@ import { resolveAgentCommand } from "../lib/binaryResolver"
 import { cogpitAgentEnv } from "../browser/agentEnv"
 import { NO_COGPIT_SESSION } from "../browser/paths"
 import {
-  codexSendError,
   getCodexThreadIdentity,
   isCodexAppServerUnavailable,
   continueCodexExecution,
@@ -198,12 +197,16 @@ function withoutWaitingPick(requested: CodexExecutionOptions, waiting: ModelOpti
 function watchTurn(sessionId: string, turnId: string, ran: CodexTurnModel, fallback?: CodexExecutionOptions): void {
   const completion = codexAppServer.waitForCompletion(sessionId, turnId).then(async (result): Promise<TurnResult> => {
     if (result.failure?.reason !== "model_unavailable") {
-      acceptedModelOptions.set(sessionId, ran)
+      // An interrupted or failed turn may never have reached the provider.
+      if (!result.isError) acceptedModelOptions.set(sessionId, ran)
       return result
     }
     refusedModelThreads.add(sessionId)
     if (!fallback) return result
-    const answered = await continueThread(sessionId, fallback).catch(() => null)
+    const answered = await continueThread(sessionId, fallback).catch((error: unknown) => {
+      console.warn(`[codex] session=${sessionId} turn=${turnId}: the turn answering the message Codex refused the model for did not start:`, error)
+      return null
+    })
     return answered?.turnId ? waitForTurn(sessionId, answered.turnId) : result
   })
   completion.catch(() => {})
@@ -918,7 +921,11 @@ export const codexRuntime: AgentRuntime = {
       return await continueThread(sessionId, options)
     } catch (error) {
       if (!isCodexAppServerUnavailable(error)) {
-        throw codexSendError(error)
+        throw new AgentRuntimeError(
+          500,
+          "INTERNAL_ERROR",
+          error instanceof Error ? error.message : "Codex failed to accept the message",
+        )
       }
     }
     if (req.onlyWhileRunning) return { delivery: "busy" }

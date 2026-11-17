@@ -1,11 +1,12 @@
 import { watch, type FSWatcher } from "node:fs"
 import { stat } from "node:fs/promises"
-import { dirname, join, relative, sep } from "node:path"
+import { basename, dirname, join, relative, sep } from "node:path"
 import type { AgentDescriptor } from "../../shared/session/agent-descriptors"
 import { statContainedFile } from "../agents/containment"
 import { readTranscriptHead } from "../agents/transcriptHead"
 import type {
   AgentProjectEntry,
+  ArchiveMark,
   ProjectSessionFileInfo,
   SessionFileInfo,
   SessionIdentity,
@@ -61,6 +62,13 @@ export interface StoreCatalogSource {
   identitySidecars?(filePath: string): string[]
   /** The cwd recorded at the head of a transcript whose path names its project. */
   readProjectPath?(filePath: string): Promise<{ path: string | null; final: boolean }>
+  /** Where the agent CLI keeps its own archive mark beside a transcript, for a CLI that keeps one. */
+  archiveMarks?: {
+    pathFor(filePath: string): string | null
+    /** The transcript a mark belongs to, or null for a path that is no mark. */
+    transcriptOf(markPath: string): string | null
+    read(markPath: string): Promise<ArchiveMark | null>
+  }
 }
 
 export interface CatalogEntry {
@@ -158,6 +166,8 @@ interface Entry extends CatalogEntry {
   top: TopLevelSessionInfo | null
   /** Size and mtime of the identity's side files when it was placed. */
   sidecars?: string
+  /** Size and mtime of the archive mark when it was placed. */
+  markStamp?: string
 }
 
 /** Size and mtime of each side file, "-" for one that is missing. */
@@ -495,7 +505,14 @@ class CatalogImpl implements StoreCatalog {
     }
     const path = join(this.root, name)
     const dir = dirname(path)
-    if (this.dirStates.has(dir)) this.markDirty(dir, path.slice(dir.length + 1), event)
+    if (this.dirStates.has(dir)) {
+      this.markDirty(dir, path.slice(dir.length + 1), event)
+      return
+    }
+    // A mark sits in a directory the catalog does not list. Where only listed
+    // directories are watched, the next rescan reads a changed mark instead.
+    const marked = this.source.archiveMarks?.transcriptOf(path)
+    if (marked && this.entriesByPath.has(marked)) this.markDirty(dirname(marked), basename(marked), "change")
   }
 
   private onEvent(dir: string, event: string, name: string | null): void {
@@ -547,9 +564,7 @@ class CatalogImpl implements StoreCatalog {
           await this.relistDir(root, dir, state.depth, changes, generation)
           break
         }
-        if (stats.mtimeMs !== entry.file.mtimeMs || stats.size !== entry.file.size) {
-          await this.place({ ...entry.file, ...stats }, dir, changes, generation)
-        }
+        await this.placeIfChanged({ ...entry.file, ...stats }, dir, changes, generation)
       }
     }
     if (generation === this.generation) changes.publish()
@@ -643,12 +658,14 @@ class CatalogImpl implements StoreCatalog {
     if (entry.top) changes.visible = true
   }
 
-  /** Place a listed file unless it, and the side files its identity came from, are unchanged. */
+  /** Place a listed file unless it, the side files its identity came from and its archive mark are unchanged. */
   private async placeIfChanged(file: SessionFileInfo, dir: string, changes: Changes, generation: number): Promise<void> {
     const entry = this.entriesByPath.get(file.filePath)
     if (entry && entry.file.mtimeMs === file.mtimeMs && entry.file.size === file.size) {
       const sidecars = file.dirName === null ? this.source.identitySidecars?.(file.filePath) : undefined
-      if (!sidecars || await sidecarStamp(sidecars) === entry.sidecars) return
+      const markPath = this.source.archiveMarks?.pathFor(file.filePath)
+      const sidecarsKept = !sidecars || await sidecarStamp(sidecars) === entry.sidecars
+      if (sidecarsKept && (!markPath || await sidecarStamp([markPath]) === entry.markStamp)) return
     }
     if (generation === this.generation) await this.place(file, dir, changes, generation)
   }
@@ -657,9 +674,12 @@ class CatalogImpl implements StoreCatalog {
   private async place(file: SessionFileInfo, dir: string, changes: Changes, generation: number): Promise<void> {
     const previous = this.entriesByPath.get(file.filePath)
     const placed = file.dirName === null ? await this.identityOf(file) : null
+    const marked = await this.archiveMarkOf(file.filePath)
     if (generation !== this.generation) return
     const identity = placed?.identity ?? null
-    const entry: Entry = { file, dir, identity, top: this.topLevel(file, identity), sidecars: placed?.sidecars }
+    const top = this.topLevel(file, identity)
+    if (top && marked?.mark) top.archiveMark = marked.mark
+    const entry: Entry = { file, dir, identity, top, sidecars: placed?.sidecars, markStamp: marked?.stamp }
     this.entriesByPath.set(file.filePath, entry)
     const id = this.source.sessionIdOf(file.fileName)
     if (id) {
@@ -674,6 +694,15 @@ class CatalogImpl implements StoreCatalog {
     if (!sameTop(previous.top, entry.top)) changes.visible = true
     else if (entry.top) changes.touched.push(entry.top)
     else changes.touchedOther = true
+  }
+
+  /** The agent CLI's archive mark beside a transcript, with the size and mtime it was read at. */
+  private async archiveMarkOf(filePath: string): Promise<{ stamp: string; mark: ArchiveMark | null } | null> {
+    const marks = this.source.archiveMarks
+    const markPath = marks?.pathFor(filePath)
+    if (!marks || !markPath) return null
+    const stamp = await sidecarStamp([markPath])
+    return { stamp, mark: stamp === "-" ? null : await marks.read(markPath).catch(() => null) }
   }
 
   private topLevel(file: SessionFileInfo, identity: SessionIdentity | null): TopLevelSessionInfo | null {
@@ -722,6 +751,7 @@ class CatalogImpl implements StoreCatalog {
 function sameTop(a: TopLevelSessionInfo | null, b: TopLevelSessionInfo | null): boolean {
   if (!a || !b) return a === b
   return a.dirName === b.dirName && a.sessionId === b.sessionId && a.projectPath === b.projectPath
+    && a.archiveMark?.archived === b.archiveMark?.archived && a.archiveMark?.atMs === b.archiveMark?.atMs
 }
 
 /** What one update changed, published as a single version bump. */

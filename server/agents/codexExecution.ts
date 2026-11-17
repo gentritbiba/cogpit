@@ -13,7 +13,6 @@ import { descriptorFor, type PermissionsConfig } from "../../shared/session/agen
 import { storeFor } from "."
 import { codexSessionConfig } from "./codexSessionConfig"
 import { pluginSkillContext } from "../plugins/skillContext"
-import { AgentRuntimeError } from "./runtimeTypes"
 import { uncompressedTranscriptName } from "./transcriptFile"
 
 export interface CodexExecutionClient {
@@ -339,13 +338,4 @@ export function isCodexAppServerUnavailable(error: unknown): boolean {
   if (typeof error !== "object" || error === null) return false
   const code = "code" in error ? String(error.code) : ""
   return code === "ENOENT"
-}
-
-export function isCodexModelRejection(error: unknown): boolean {
-  if (!(error instanceof CodexAppServerRpcError) || !["thread/resume", "turn/start"].includes(error.method)) return false
-  return /issue with the selected model|selected model.*may not exist or you may not have access|run --model to pick a different model|model.*(?:not found|does not exist|not available|not supported|not authorized)/i.test(error.message)
-}
-
-export function codexSendError(error: unknown): AgentRuntimeError {
-  return new AgentRuntimeError(isCodexModelRejection(error) ? 400 : 500, isCodexModelRejection(error) ? "MODEL_REJECTED" : "INTERNAL_ERROR", error instanceof Error ? error.message : "Codex failed to accept the message")
 }

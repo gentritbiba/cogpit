@@ -40,7 +40,6 @@ vi.mock("../../agents/codexAppServer", () => ({
   CODEX_CLIENT_CAPABILITIES: { experimentalApi: false },
 }))
 vi.mock("../../agents/codexExecution", () => ({
-  codexSendError: (error: Error) => error,
   continueCodexExecution: execution.continueCodexExecution,
   startCodexExecution: vi.fn(),
   getCodexThreadIdentity: vi.fn(() => null),

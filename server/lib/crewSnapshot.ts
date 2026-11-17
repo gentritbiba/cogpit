@@ -154,7 +154,7 @@ async function crewSources(req: IncomingMessage, sessionId: string, localOnly: b
       if (device) return describeRemote(id, device, task)
       const candidate = listedById.get(id)
       const required = id === sessionId || id === rootId
-      if (!required && (candidate ? archiveReason(archive, id, candidate.mtimeMs, now) : !runtimeForSession(id))) return null
+      if (!required && (candidate ? archiveReason(archive, id, candidate.mtimeMs, now, candidate.archiveMark) : !runtimeForSession(id))) return null
       if (!candidate) {
         const [state, address] = await Promise.all([readSessionState(id), localHost.address(id)])
         return { host: { remote: false, id: localHost.id, name: localHost.name }, state, address }
