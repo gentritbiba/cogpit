@@ -38,6 +38,9 @@ const targets: AuditTarget[] = [
       ["glob:1244013", "moderate"],
       // minimatch is fixed only in 11.0.1; electron-builder, typescript-eslint and filelist pin ^3, ^5, ^9 and ^10.
       ["minimatch:1244623", "moderate"],
+      // picomatch has no patched release (<= 4.0.7). Only build and dev tools reach it (vite, vitest,
+      // typescript-eslint, electron-builder) and sucrase's CLI; Cogpit imports only sucrase's transform.
+      ["picomatch:1247710", "high"],
     ]),
   },
   {
