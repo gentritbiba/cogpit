@@ -207,6 +207,7 @@ export function registerShareGuestRoutes(use: UseFn) {
       sessionId: share.sessionId,
       toolUseId: optionalString(body, "toolUseId"),
       answers: body.answers,
+      unanswered: body.unanswered,
     },
   }))
 }

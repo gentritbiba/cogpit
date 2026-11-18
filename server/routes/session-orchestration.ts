@@ -4,6 +4,7 @@ import type { IncomingMessage, ServerResponse } from "node:http"
 import { isAbsolute } from "node:path"
 import type { PendingInputResponse } from "../agents/pendingInput"
 import type { UserQuestionAnswers } from "../agents/runtimes"
+import { isQuestionUnanswered } from "../agents/runtimeTypes"
 import { sessionChildren } from "../lib/sessionOrigins"
 import { sessionBoard } from "../lib/sessionBoards"
 import { parseWaitSeconds } from "../lib/sessionWait"
@@ -252,7 +253,7 @@ export function registerSessionOrchestrationRoutes(use: UseFn) {
 }
 
 export function pendingInputResponseFrom(body: Record<string, unknown>): PendingInputResponse | null {
-  const { decision, answers, approved, action, feedback } = body
+  const { decision, answers, unanswered, approved, action, feedback } = body
   if (decision === "allow" || decision === "allow_always" || decision === "deny") return { decision }
   if (typeof approved === "boolean") {
     return {
@@ -267,7 +268,8 @@ export function pendingInputResponseFrom(body: Record<string, unknown>): Pending
     || (typeof answers === "object" && answers !== null && !Array.isArray(answers)
       && Object.values(answers).every((answer) => typeof answer === "string"))
   ) {
-    return { answers: answers as UserQuestionAnswers }
+    if (unanswered === undefined) return { answers: answers as UserQuestionAnswers }
+    return isQuestionUnanswered(unanswered) ? { answers: answers as UserQuestionAnswers, unanswered } : null
   }
   return null
 }

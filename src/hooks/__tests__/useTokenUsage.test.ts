@@ -36,8 +36,16 @@ function jsonResponse(data: Record<string, unknown>): Response {
 
 describe("mapCodexRuntimeResponse", () => {
   it.each([
-    ["promax", "Pro (Max)"],
-    ["prolite", "Pro"],
+    ["promax", "Pro 500"],
+    ["prolite", "Pro 100"],
+    ["team", "Business"],
+    ["business", "Enterprise"],
+    ["self_serve_business_prolite", "Business Premium"],
+    ["self_serve_business_usage_based", "Business"],
+    ["enterprise_cbp_automation", "Enterprise (Automation)"],
+    ["enterprise_cbp_usage_based", "Enterprise"],
+    ["sci", "Academic Researchers"],
+    ["sci_plus", "Academic Researchers Plus"],
     ["some_future_plan", "some_future_plan"],
   ])("names the %s plan the way Codex does", (planType, name) => {
     const usage = mapCodexRuntimeResponse({
@@ -48,6 +56,14 @@ describe("mapCodexRuntimeResponse", () => {
     expect(usage?.subscriptionType).toBe(name)
   })
 
+  it("names the ChatGPT workspace the account is signed in to", () => {
+    const rateLimits = { rateLimits: { planType: "self_serve_business_usage_based", primary: { usedPercent: 1, windowDurationMins: 300 } } }
+    const signedIn = (account: Record<string, unknown>) => mapCodexRuntimeResponse({ available: true, account: { account, requiresOpenaiAuth: true }, rateLimits })
+
+    expect(signedIn({ type: "chatgpt", email: "a@example.com", planType: "self_serve_business_usage_based", workspaceName: "Acme Research" })?.workspaceName).toBe("Acme Research")
+    expect(signedIn({ type: "chatgpt", email: "a@example.com", planType: "plus", workspaceName: null })?.workspaceName).toBeUndefined()
+    expect(signedIn({ type: "apiKey" })?.workspaceName).toBeUndefined()
+  })
 
   it("maps native rate-limit windows, plan, credits, and token history", () => {
     const usage = mapCodexRuntimeResponse({

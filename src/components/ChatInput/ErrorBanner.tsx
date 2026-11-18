@@ -9,7 +9,8 @@ import {
 } from "@/components/ui/dialog"
 import { Button } from "@/components/ui/button"
 import { descriptorFor, type AgentKind } from "@/lib/agents"
-import { agentNotInstalledIn, agentSignedOutTitle, classifyAgentFailure } from "../../../shared/session/agentFailures"
+import { agentConfigInvalidIn, agentNotInstalledIn, agentSignedOutTitle, agentTerminalCommandIn, classifyAgentFailure } from "../../../shared/session/agentFailures"
+import { RestoreConfigAction } from "./RestoreConfigAction"
 
 /**
  * Inline send error shown under the composer. The preview is a single
@@ -17,9 +18,14 @@ import { agentNotInstalledIn, agentSignedOutTitle, classifyAgentFailure } from "
  * CLI's captured stderr) in a copyable dialog so failures can actually be
  * diagnosed instead of just reading "Claude Code process exited with code 1".
  */
-export function ErrorBanner({ error, agentKind }: { error: string; agentKind: AgentKind }) {
+export function ErrorBanner({ error, agentKind, instanceId = null }: {
+  error: string
+  agentKind: AgentKind
+  /** The account instance the session runs under; null for the default account, the only one whose config file a restore reaches. */
+  instanceId?: string | null
+}) {
   const [open, setOpen] = useState(false)
-  const [copied, setCopied] = useState(false)
+  const [copied, setCopied] = useState<"error" | "command" | null>(null)
 
   // A missing login reads the same for every agent, whatever words its CLI used.
   const signedOut = classifyAgentFailure(error).reason === "not_signed_in"
@@ -27,12 +33,14 @@ export function ErrorBanner({ error, agentKind }: { error: string; agentKind: Ag
   const hasMore = error.includes("\n") || error !== firstLine
   const missing = agentNotInstalledIn(error)
   const installPage = missing ? descriptorFor(missing).cli.install?.page : null
+  const invalidConfig = agentConfigInvalidIn(error)
+  const terminalCommand = agentTerminalCommandIn(error)
 
-  const handleCopy = async () => {
+  const copy = async (what: "error" | "command", text: string) => {
     try {
-      await navigator.clipboard.writeText(error)
-      setCopied(true)
-      setTimeout(() => setCopied(false), 1500)
+      await navigator.clipboard.writeText(text)
+      setCopied(what)
+      setTimeout(() => setCopied(null), 1500)
     } catch {
       // clipboard unavailable — ignore
     }
@@ -64,6 +72,13 @@ export function ErrorBanner({ error, agentKind }: { error: string; agentKind: Ag
           How to install
         </Button>
       )}
+      {invalidConfig?.backupPath && instanceId === null && <RestoreConfigAction path={invalidConfig.path} backupPath={invalidConfig.backupPath} />}
+      {terminalCommand !== null && (
+        <Button variant="outline" size="xs" className="ml-2" onClick={() => copy("command", terminalCommand)}>
+          {copied === "command" ? <Check data-icon="inline-start" /> : <Copy data-icon="inline-start" />}
+          {copied === "command" ? "Copied" : "Copy command"}
+        </Button>
+      )}
 
       <Dialog open={open} onOpenChange={setOpen}>
         <DialogContent className="max-w-2xl">
@@ -87,10 +102,10 @@ export function ErrorBanner({ error, agentKind }: { error: string; agentKind: Ag
               type="button"
               variant="outline"
               size="sm"
-              onClick={handleCopy}
+              onClick={() => copy("error", error)}
             >
-              {copied ? <Check data-icon="inline-start" /> : <Copy data-icon="inline-start" />}
-              {copied ? "Copied" : "Copy"}
+              {copied === "error" ? <Check data-icon="inline-start" /> : <Copy data-icon="inline-start" />}
+              {copied === "error" ? "Copied" : "Copy"}
             </Button>
           </div>
         </DialogContent>

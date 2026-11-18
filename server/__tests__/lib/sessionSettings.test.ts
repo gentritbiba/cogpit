@@ -12,6 +12,9 @@ import { readSessionConfig, sessionConfigKey, updateSessionConfig } from "../../
 import { heldLiveUpdate, settleTurnSettings, storeAppliedSettings, storeStartedSettings, withSessionSettings, writeSessionConfig } from "../../lib/sessionSettings"
 import { installFakeEdition } from "../edition/fakeEdition"
 
+const streamBus = vi.hoisted(() => ({ publishSessionConfig: vi.fn() }))
+vi.mock("../../lib/streamBus", () => streamBus)
+
 const SESSION = "5e000000-0000-4000-8000-0000000005e7"
 const KEY = sessionConfigKey(SESSION)
 const REQ = {} as IncomingMessage
@@ -28,6 +31,7 @@ beforeEach(async () => {
 })
 
 afterEach(async () => {
+  vi.clearAllMocks()
   dirs.SESSION_CONFIG_DIR = previousConfigDir
   __resetEditionForTest()
   await rm(root, { recursive: true, force: true })
@@ -50,6 +54,11 @@ describe("the session config store", () => {
       config: { model: "opus", mcpServers: ["docs", "web"] },
       changed: ["effort", "mcpServers"],
     })
+  })
+
+  it("leaves the file alone when a write moves no field", async () => {
+    expect(await updateSessionConfig(KEY, () => ({ effort: null }))).toEqual({ before: {}, config: {}, changed: [] })
+    await expect(readdir(dirs.SESSION_CONFIG_DIR)).rejects.toMatchObject({ code: "ENOENT" })
   })
 })
 
@@ -140,6 +149,19 @@ describe("an edition's session settings", () => {
     await writeSessionConfig(REQ, "-Users-me-proj", null, { model: "haiku" })
     expect(hooks.onConfigWrite).toHaveBeenCalledOnce()
   })
+
+  it("fills only the fields nothing is stored for, and tells the edition of those alone", async () => {
+    const hooks = install()
+    await updateSessionConfig(KEY, () => ({ permissionMode: "bypassPermissions" }))
+
+    expect(await writeSessionConfig(REQ, KEY, SESSION, { permissionMode: "default", model: "opus" }, { fill: true }))
+      .toEqual({ permissionMode: "bypassPermissions", model: "opus" })
+    expect(hooks.onConfigWrite).toHaveBeenCalledWith(REQ, SESSION, {
+      before: { permissionMode: "bypassPermissions" },
+      config: { permissionMode: "bypassPermissions", model: "opus" },
+      changed: ["model"],
+    })
+  })
 })
 
 describe("sends from outside the composer", () => {
@@ -157,5 +179,13 @@ describe("sends from outside the composer", () => {
     await updateSessionConfig(KEY, () => ({ permissionMode: "plan", effort: "low" }))
     await storeStartedSettings(SESSION, { mode: "bypassPermissions", effort: "xhigh" })
     expect(await readSessionConfig(KEY)).toEqual({ permissionMode: "plan", effort: "low" })
+  })
+
+  it("have whoever watches a session read its config again once its start settings are stored, and only then", async () => {
+    await storeStartedSettings(SESSION, { mode: "bypassPermissions" })
+    expect(streamBus.publishSessionConfig).toHaveBeenCalledExactlyOnceWith(SESSION)
+
+    await storeStartedSettings(SESSION, { mode: "default" })
+    expect(streamBus.publishSessionConfig).toHaveBeenCalledOnce()
   })
 })

@@ -70,6 +70,8 @@ export interface SessionContextValue {
   promptSuggestion: string | null
   /** The runtime refused the turn on a spent allowance (null while it is serving) */
   rateLimit: RateLimitBlock | null
+  /** When the agent's sign-in ends, while that is near (null otherwise) */
+  signInEndsAt: string | null
   /** Undo/redo system */
   undoRedo: UseUndoRedoResult
   /** Pending interaction detected in the session */

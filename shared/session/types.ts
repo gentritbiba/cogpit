@@ -46,7 +46,7 @@ export interface SessionStatusInfo {
   backgroundAgents?: BackgroundAgent[]
 }
 
-export type AgentFailureReason = "not_installed" | "not_signed_in" | "http_status" | "other"
+export type AgentFailureReason = "not_installed" | "not_signed_in" | "config_invalid" | "model_unavailable" | "http_status" | "other"
 
 /** A failure sorted into what the user can do about it; see `agentFailures.ts`. */
 export interface AgentFailure {
@@ -189,7 +189,7 @@ export interface UserMessage extends BaseMessage {
   origin?: { kind?: string } | null
   permissionMode?: string
   thinkingMetadata?: { maxThinkingTokens: number }
-  toolUseResult?: Partial<AgentToolUseResult> & { staged?: boolean; bashEditDiff?: unknown }
+  toolUseResult?: Partial<AgentToolUseResult> & { staged?: boolean; bashEditDiff?: unknown; annotations?: unknown }
   sourceToolAssistantUUID?: string
 }
 
@@ -361,6 +361,8 @@ export interface ProgressMessage extends BaseMessage {
 export interface SystemMessage extends BaseMessage {
   type: "system"
   subtype?: string
+  /** Emphasis the CLI gives the record: `info`, `notice`, `suggestion`, `warning` or `error`. */
+  level?: string
   durationMs?: number
   isMeta?: boolean
   content?: string
@@ -393,6 +395,14 @@ export interface SummaryMessage extends BaseMessage {
   type: "summary"
   leafUuid?: string
   summary?: string
+}
+
+/** The first record of a forked subagent's transcript (Claude Code 2.1.325+): where its parent's history ends. */
+export interface ForkContextRefMessage extends BaseMessage {
+  type: "fork-context-ref"
+  parentSessionId?: string
+  parentLastUuid?: string
+  contextLength?: number
 }
 
 /** Claude Code persists prompts submitted during an active turn as queue operations. */
@@ -470,6 +480,7 @@ export type RawMessage =
   | SummaryMessage
   | QueueOperationMessage
   | AttachmentMessage
+  | ForkContextRefMessage
 
 // ── Parsed Structures ───────────────────────────────────────────────────────
 
@@ -491,6 +502,9 @@ export interface ElidedResult {
   /** The transcript address the body is served under, as the reader opened it. */
   source: { dirName: string; fileName: string }
 }
+
+/** How Claude Code records a question that went unanswered. */
+export type QuestionUnansweredKind = "skipped" | "replied_in_chat" | "dismissed"
 
 export interface ToolCall {
   id: string
@@ -519,6 +533,8 @@ export interface ToolCall {
   asyncQuestion?: boolean
   /** The reader's reply to an async question, once the transcript holds one. */
   asyncAnswer?: string
+  /** Questions of an AskUserQuestion call the user skipped, dismissed or set aside with a chat message, by question text. */
+  unansweredQuestions?: Record<string, QuestionUnansweredKind>
   /** Set by parser when a PostToolUse hook replaced this tool's output */
   outputReplacedByHook?: boolean
   /** Total duration of PostToolUse hooks attached to this call, summed in ms */
@@ -607,6 +623,15 @@ export type TurnContentBlock =
       contextUsage?: LocalCommandContextUsage
       usageReport?: LocalCommandUsageReport
     }
+  /**
+   * A line the CLI showed the user mid-session, recorded as an `informational`
+   * system record: a safety stop it continued past, a goal it cleared, earlier
+   * thinking it could not reuse. The first line of `content` is the headline.
+   */
+  | { kind: "notice"; content: string; level: NoticeLevel; timestamp?: string }
+
+/** The CLI's emphasis for a notice. Its `info` level is transcript-only there and never becomes a block. */
+export type NoticeLevel = "notice" | "suggestion" | "warning"
 
 /** One `/context` category row. Classify on `kind`, never on the display name. */
 export interface ContextUsageCategory {

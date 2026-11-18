@@ -44,6 +44,7 @@ export function classifyAgentFailure(message: string, httpStatus?: number): Agen
   const status = httpStatus ?? statusIn(message)
   const withStatus = status === undefined ? {} : { httpStatus: status }
   if (NOT_INSTALLED.some((pattern) => pattern.test(message))) return { reason: "not_installed", message }
+  if (agentConfigInvalidIn(message)) return { reason: "config_invalid", message }
   if (status === 401 || NOT_SIGNED_IN.some((pattern) => pattern.test(message))) {
     return { reason: "not_signed_in", message, ...withStatus }
   }
@@ -65,6 +66,10 @@ export function agentSignedOutTitle(kind: AgentKind): string {
   return `${descriptorFor(kind).displayName} isn't signed in.`
 }
 
+export function agentModelUnavailableTitle(kind: AgentKind): string {
+  return `${descriptorFor(kind).displayName} can't use that model. Pick another model.`
+}
+
 /**
  * The whole not-installed message for a machine running `platform`: what is
  * wrong on the first line, how to fix it on the second.
@@ -83,11 +88,61 @@ export function agentNotInstalledIn(message: string): AgentKind | null {
   return AGENT_KINDS.find((kind) => message.startsWith(agentNotInstalledTitle(kind))) ?? null
 }
 
+/** A config file an agent would not start with, and the backup the agent named for it. */
+export interface InvalidAgentConfig {
+  path: string
+  backupPath: string | null
+}
+
+const CONFIG_FILE_PREFIX = "File: "
+const CONFIG_BACKUP_PREFIX = "Backup: "
+
+export function agentConfigInvalidTitle(kind: AgentKind): string {
+  return `${descriptorFor(kind).displayName} can't start: a config file isn't valid JSON.`
+}
+
+/** What is wrong, the file and its backup on a line each, then the agent's own words. */
+export function agentConfigInvalidMessage(kind: AgentKind, file: InvalidAgentConfig, detail: string): string {
+  return [
+    agentConfigInvalidTitle(kind),
+    `${CONFIG_FILE_PREFIX}${file.path}`,
+    ...(file.backupPath ? [`${CONFIG_BACKUP_PREFIX}${file.backupPath}`] : []),
+    detail,
+  ].join("\n")
+}
+
+/** The agent and file a message from `agentConfigInvalidMessage` names, or null for any other message. */
+export function agentConfigInvalidIn(message: string): (InvalidAgentConfig & { kind: AgentKind }) | null {
+  const [title, fileLine, backupLine] = message.split("\n")
+  const kind = AGENT_KINDS.find((candidate) => title === agentConfigInvalidTitle(candidate))
+  if (!kind || !fileLine?.startsWith(CONFIG_FILE_PREFIX)) return null
+  return {
+    kind,
+    path: fileLine.slice(CONFIG_FILE_PREFIX.length),
+    backupPath: backupLine?.startsWith(CONFIG_BACKUP_PREFIX) ? backupLine.slice(CONFIG_BACKUP_PREFIX.length) : null,
+  }
+}
+
+const TERMINAL_PREFIX = "Continue it in a terminal: "
+
+/** A failure whose fix is to carry on in the agent's own terminal: what happened, the command, then the agent's own words. */
+export function agentTerminalOnlyMessage(title: string, command: string, detail: string): string {
+  return [title, `${TERMINAL_PREFIX}${command}`, detail].join("\n")
+}
+
+/** The command a message from `agentTerminalOnlyMessage` hands to a terminal, or null for any other message. */
+export function agentTerminalCommandIn(message: string): string | null {
+  const line = message.split("\n")[1]
+  return line?.startsWith(TERMINAL_PREFIX) ? line.slice(TERMINAL_PREFIX.length) : null
+}
+
 /** One line for a status label, in the same plain words the card uses. */
 export function agentFailureTitle(kind: AgentKind, failure: AgentFailure): string {
   switch (failure.reason) {
     case "not_installed": return agentNotInstalledTitle(kind)
     case "not_signed_in": return agentSignedOutTitle(kind)
+    case "config_invalid": return agentConfigInvalidTitle(kind)
+    case "model_unavailable": return agentModelUnavailableTitle(kind)
     default: return `${descriptorFor(kind).displayName} stopped with an error.`
   }
 }

@@ -60,6 +60,8 @@ export type StreamBusEvent =
   | { type: "prompt_suggestion"; suggestion: string }
   | { type: "compacting"; active: boolean }
   | { type: "rate_limit"; block: RateLimitBlock | null }
+  | { type: "session_config" }
+  | { type: "sign_in_end"; endsAt: string | null }
 
 /**
  * Minimal structural type for the Anthropic raw stream events we consume —
@@ -524,6 +526,28 @@ export function publishPromptSuggestion(sessionId: string, suggestion: string): 
   const state = sessions.get(sessionId)
   if (!state) return
   emit(state, { type: "prompt_suggestion", suggestion })
+}
+
+/**
+ * The session's stored config changed without a client writing it, as when
+ * the runtime reports a permission mode other than the one asked for. Viewers
+ * read it again.
+ */
+export function publishSessionConfig(sessionId: string): void {
+  const state = sessions.get(sessionId)
+  if (!state) return
+  emit(state, { type: "session_config" })
+}
+
+/**
+ * When the agent's sign-in ends for good, while that is near, or null once it
+ * is not. Sent with every turn result, so a late subscriber learns it at the
+ * next one.
+ */
+export function publishSignInEnd(sessionId: string, endsAt: string | null): void {
+  const state = sessions.get(sessionId)
+  if (!state) return
+  emit(state, { type: "sign_in_end", endsAt })
 }
 
 /** Current in-flight messages for a late subscriber (mid-turn page load). */

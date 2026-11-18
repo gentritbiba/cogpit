@@ -15,7 +15,7 @@ vi.mock("../../agents", async (importOriginal) => ({
 }))
 vi.mock("../../lib/sessionArchive", () => ({
   archiveReason: () => null,
-  readArchive: async () => ({ archived: new Map(), kept: new Set() }),
+  readArchive: async () => ({ archived: new Map(), kept: new Map() }),
   setSessionsArchived: vi.fn().mockResolvedValue([]),
 }))
 

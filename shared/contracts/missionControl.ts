@@ -103,6 +103,8 @@ export interface MissionControlQuestion {
   toolUseId: string
   askedAt: number
   questions: MissionControlQuestionItem[]
+  /** The agent takes a skip for it. */
+  skippable?: boolean
 }
 
 /** Response body of GET /api/user-questions. */

@@ -3,7 +3,7 @@ import { afterEach, describe, expect, it, vi } from "vitest"
 const mocks = vi.hoisted(() => ({ authFetch: vi.fn(), jsonFetch: vi.fn() }))
 vi.mock("@/lib/auth", () => ({ authFetch: mocks.authFetch, jsonFetch: mocks.jsonFetch }))
 
-import { fetchSessionConfig, flushSessionConfig, getSessionConfigKey, saveSessionConfig } from "../sessionConfig"
+import { fetchSessionConfig, flushSessionConfig, getSessionConfigKey, saveSessionConfig, seedSessionConfig } from "../sessionConfig"
 
 describe("getSessionConfigKey", () => {
   it("preserves the historical Claude session key", () => {
@@ -104,6 +104,27 @@ describe("saveSessionConfig", () => {
 
     await expect(refused).resolves.toBe(false)
     await expect(lost).resolves.toBe(false)
+  })
+})
+
+describe("seedSessionConfig", () => {
+  afterEach(() => {
+    mocks.jsonFetch.mockReset()
+  })
+
+  it("asks the server to fill only empty fields, and answers with the config it holds", async () => {
+    mocks.jsonFetch.mockResolvedValueOnce(new Response(JSON.stringify({ permissionMode: "bypassPermissions", effort: "high" })))
+
+    await expect(seedSessionConfig("a.jsonl", { permissionMode: "default", effort: "high" }))
+      .resolves.toEqual({ permissionMode: "bypassPermissions", effort: "high" })
+    expect(mocks.jsonFetch).toHaveBeenCalledWith("/api/session-config/a.jsonl?fill", { permissionMode: "default", effort: "high" }, { method: "PUT" })
+  })
+
+  it("answers null for a seed the server refused or never got", async () => {
+    mocks.jsonFetch.mockResolvedValueOnce(new Response("{}", { status: 403 })).mockRejectedValueOnce(new Error("offline"))
+
+    await expect(seedSessionConfig("a.jsonl", { effort: "high" })).resolves.toBeNull()
+    await expect(seedSessionConfig("a.jsonl", { effort: "high" })).resolves.toBeNull()
   })
 })
 

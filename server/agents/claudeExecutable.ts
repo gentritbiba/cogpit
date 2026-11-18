@@ -13,6 +13,7 @@ import { execFileSync } from "node:child_process"
 import { readFileSync, statSync } from "node:fs"
 import { posix, win32 } from "node:path"
 
+import type { Options } from "@anthropic-ai/claude-agent-sdk"
 import type {
   ActiveExecutable,
   DetectedExecutableSource,
@@ -223,7 +224,32 @@ function configuredChoice(): ExecutableChoice {
   return getConfig()?.agentExecutable ?? DEFAULT_EXECUTABLE_CHOICE
 }
 
-let memo: { key: string; resolved: ResolvedClaudeExecutable | undefined } | undefined
+/**
+ * The resolved binary for a choice, with its version: null once it would not
+ * say, undefined until it is asked.
+ */
+interface Resolution {
+  key: string
+  resolved: ResolvedClaudeExecutable | undefined
+  version?: number[] | null
+}
+
+let memo: Resolution | undefined
+
+function currentResolution(): Resolution {
+  const choice = configuredChoice()
+  const key = JSON.stringify(choice)
+  if (memo?.key !== key || !memo.resolved) {
+    const versions = new Map<string, number[] | undefined>()
+    const readVersion: VersionReader = (path) => {
+      if (!versions.has(path)) versions.set(path, readCliVersionSync(path))
+      return versions.get(path)
+    }
+    const resolved = chooseClaudeExecutable(choice, discoverClaudeExecutables(resolveModule), readVersion)
+    memo = { key, resolved, ...(resolved && versions.has(resolved.path) && { version: versions.get(resolved.path) ?? null }) }
+  }
+  return memo
+}
 
 /**
  * The Claude CLI the configured choice resolves to right now. Memoized per
@@ -232,15 +258,30 @@ let memo: { key: string; resolved: ResolvedClaudeExecutable | undefined } | unde
  * installed while Cogpit runs is picked up by the next session.
  */
 export function resolveClaudeExecutable(): ResolvedClaudeExecutable | undefined {
-  const choice = configuredChoice()
-  const key = JSON.stringify(choice)
-  if (memo?.key !== key || !memo.resolved) {
-    memo = {
-      key,
-      resolved: chooseClaudeExecutable(choice, discoverClaudeExecutables(resolveModule), readCliVersionSync),
-    }
-  }
-  return memo.resolved
+  return currentResolution().resolved
+}
+
+/**
+ * The first Claude Code that reads MCP servers from the initialize request:
+ * the release this Agent SDK bundles (its `claudeCodeVersion`). An older one
+ * exits at startup or has its session ended when asked to.
+ */
+export const INITIALIZE_MCP_DELIVERY_VERSION = [2, 1, 326]
+
+/**
+ * How the SDK starts Claude Code: which binary, and how MCP servers reach it.
+ * Servers sent in the initialize request keep their env and headers off the
+ * command line, where other users of the machine can read them, so that is the
+ * choice whenever the binary is new enough. With nothing resolved the SDK runs
+ * its own bundled copy, which always is.
+ */
+export function claudeLaunchOptions(): Pick<Options, "pathToClaudeCodeExecutable" | "mcpServersDelivery"> {
+  const resolution = currentResolution()
+  const { resolved } = resolution
+  if (resolved && resolution.version === undefined) resolution.version = readCliVersionSync(resolved.path) ?? null
+  const version = resolution.version
+  const initialize = !resolved || (version != null && isAtLeast(version, INITIALIZE_MCP_DELIVERY_VERSION))
+  return { pathToClaudeCodeExecutable: resolved?.path, mcpServersDelivery: initialize ? "initialize" : "argv" }
 }
 
 /**
@@ -265,7 +306,9 @@ export async function refreshClaudeExecutable(): Promise<{
   ))
   const resolved = chooseClaudeExecutable(choice, found, (path) => versions.get(path))
   // A setting saved while the probes ran makes this answer stale; the memo resolves that one itself.
-  if (JSON.stringify(configuredChoice()) === key) memo = { key, resolved }
+  if (JSON.stringify(configuredChoice()) === key) {
+    memo = { key, resolved, ...(resolved && versions.has(resolved.path) && { version: versions.get(resolved.path) ?? null }) }
+  }
   return { choice, resolved }
 }
 

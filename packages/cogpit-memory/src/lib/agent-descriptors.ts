@@ -117,6 +117,11 @@ export interface AgentCapabilities {
   readonly nativeFork: boolean
   /** A title can be given to a session when it is created. */
   readonly namedSessions: boolean
+  /**
+   * A question the agent asked can be skipped, or set aside by a chat message,
+   * and the agent is told which.
+   */
+  readonly skipQuestions: boolean
 }
 
 // ── Descriptor ──────────────────────────────────────────────────────────────
@@ -635,7 +640,8 @@ const claude: AgentDescriptor = {
   },
   launchArgs: {
     permissions: (permissions) => {
-      // A missing mode is NOT a bypass: it falls back to the safe default.
+      // As flags, a missing mode starts the CLI asking first. A session the SDK
+      // runtime starts without one runs in bypass instead (server/sdk-session.ts).
       if (!permissions?.mode) return ["--permission-mode", "default"]
       if (permissions.mode === "bypassPermissions") return ["--dangerously-skip-permissions"]
       return [
@@ -765,6 +771,7 @@ const claude: AgentDescriptor = {
     tokenStreaming: true,
     nativeFork: false,
     namedSessions: true,
+    skipQuestions: true,
   },
 }
 
@@ -940,6 +947,7 @@ const codex: AgentDescriptor = {
     nativeFork: false,
     // Codex derives its own thread name.
     namedSessions: false,
+    skipQuestions: false,
   },
 }
 
@@ -1086,6 +1094,7 @@ const copilot: AgentDescriptor = {
     tokenStreaming: false,
     nativeFork: true,
     namedSessions: true,
+    skipQuestions: false,
   },
 }
 

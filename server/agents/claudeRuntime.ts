@@ -25,6 +25,7 @@ import {
   isSDKQueryLive,
   listUserQuestionSessionIds,
   observeSDKResult,
+  offersAlwaysAllow,
   resolveAllPermissions,
   resolvePermission,
   resolveUserQuestion,
@@ -152,7 +153,7 @@ function startInteractive(req: StartSessionRequest): Promise<StartedSession> {
       } catch {
         // The client polls for it; an unreadable file is not a failed spawn.
       }
-      resolve({ sessionId, dirName, cwd: state.cwd, fileName, filePath, initialContent })
+      resolve({ sessionId, dirName, cwd: state.cwd, fileName, filePath, permissionMode: state.permissionMode, initialContent })
     }
     const fail = (message: string) => {
       if (settled) return
@@ -374,9 +375,9 @@ export const claudeRuntime: AgentRuntime = {
     return ids.flatMap((id) => getSDKPermissions(id).map((request) => ({
       ...request,
       sessionId: id,
-      availableDecisions: (request.suppressAlwaysAllowRule
-        ? ["allow", "deny"]
-        : ["allow", "allow_always", "deny"]) as ApprovalDecision[],
+      availableDecisions: (offersAlwaysAllow(request)
+        ? ["allow", "allow_always", "deny"]
+        : ["allow", "deny"]) as ApprovalDecision[],
     })))
   },
 
@@ -392,11 +393,11 @@ export const claudeRuntime: AgentRuntime = {
 
   listPendingQuestions(sessionId): PendingQuestion[] {
     const ids = sessionId === undefined ? listUserQuestionSessionIds() : [sessionId]
-    return ids.flatMap((id) => getSDKUserQuestions(id))
+    return ids.flatMap((id) => getSDKUserQuestions(id).map((question) => ({ ...question, skippable: descriptor.capabilities.skipQuestions })))
   },
 
-  async answerQuestion(sessionId, questionId, answers: UserQuestionAnswers) {
-    return resolveUserQuestion(sessionId, questionId, answers).found ? { message: null } : null
+  async answerQuestion(sessionId, questionId, answers: UserQuestionAnswers, unanswered) {
+    return resolveUserQuestion(sessionId, questionId, answers, unanswered).found ? { message: null } : null
   },
 
   listModels: fetchClaudeModels,

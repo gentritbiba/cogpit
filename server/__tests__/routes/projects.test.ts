@@ -29,7 +29,7 @@ const mocks = vi.hoisted(() => {
     peekSessionPullRequests: vi.fn(),
     archived: new Map<string, number>(),
     sessionParents: vi.fn(),
-    kept: new Set<string>(),
+    kept: new Map<string, number>(),
     setSessionsArchived: vi.fn(),
   }
 })
@@ -1227,7 +1227,7 @@ describe("project routes", () => {
           firstUserMessage: "hello", lastUserMessage: "bye", timestamp: "", turnCount: 1, lineCount: 2,
         }))
         mockedProjectDirToReadableName.mockReturnValue({ path: "/proj/a", shortName: "a" })
-        mocks.kept.add("restored")
+        mocks.kept.set("restored", 0)
         const handler = getRouteHandler(handlers, "/api/active-sessions")
         const { req, res, next } = createMockReqRes("GET", "?archived=include")
 
@@ -1241,6 +1241,33 @@ describe("project routes", () => {
         ])
         expect(res._getHeaders()["X-Cogpit-Archived-Count"]).toBe("1")
         expect(mocks.setSessionsArchived).not.toHaveBeenCalled()
+      })
+
+      it("archives a session the CLI marked archived unless the user restored it in Cogpit since", async () => {
+        mocks.listTopLevelSessions.claude.mockResolvedValue([
+          claudeFile("proj-a", "kept.jsonl", NOW, 500),
+          { ...claudeFile("proj-a", "archived.jsonl", NOW - 60_000, 500), archiveMark: { archived: true, atMs: NOW - 30_000 } },
+          { ...claudeFile("proj-a", "restored.jsonl", NOW - 60_000, 500), archiveMark: { archived: true, atMs: NOW - 30_000 } },
+        ])
+        mockedGetSessionMeta.mockImplementation(async (filePath: string) => makeSessionMeta({
+          sessionId: filePath.split("/").at(-1)!.replace(".jsonl", ""),
+          version: "", gitBranch: "main", model: "claude", slug: "", cwd: "/code",
+          firstUserMessage: "hello", lastUserMessage: "bye", timestamp: "", turnCount: 1, lineCount: 2,
+        }))
+        mockedProjectDirToReadableName.mockReturnValue({ path: "/proj/a", shortName: "a" })
+        mocks.kept.set("restored", NOW - 10_000)
+        const handler = getRouteHandler(handlers, "/api/active-sessions")
+        const { req, res, next } = createMockReqRes("GET", "?archived=include")
+
+        await handler(req, res, next)
+
+        const response = JSON.parse(res._getData())
+        expect(response.map((s: { sessionId: string; archivedReason?: string }) => [s.sessionId, s.archivedReason])).toEqual([
+          ["kept", undefined],
+          ["restored", undefined],
+          ["archived", "manual"],
+        ])
+        expect(res._getHeaders()["X-Cogpit-Archived-Count"]).toBe("1")
       })
 
       it("keeps archived rows from taking a listed session's place under the cap", async () => {

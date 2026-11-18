@@ -6,6 +6,9 @@ import { makeProviderUpdateInfo } from "@/__tests__/fixtures"
 const mocks = vi.hoisted(() => ({
   sendMessage: vi.fn(),
   turnError: null as string | null,
+  signInEndsAt: null as string | null,
+  pendingInteraction: null as unknown,
+  submitUserQuestionAnswers: vi.fn(),
   startAgentSignIn: vi.fn(),
   fetchProviderUpdates: vi.fn(),
 }))
@@ -16,7 +19,7 @@ vi.mock("@/contexts/SessionContext", async () => (await import("@/__tests__/sess
   useSessionContext: () => ({
     isLive: false,
     actions: { handleEditConfig: vi.fn() },
-    pendingInteraction: null,
+    pendingInteraction: mocks.pendingInteraction,
     permissionRequests: [],
     permissionResponding: new Set(),
     respondPermission: vi.fn(),
@@ -25,6 +28,7 @@ vi.mock("@/contexts/SessionContext", async () => (await import("@/__tests__/sess
     slashSuggestionsLoading: false,
     turnError: mocks.turnError,
     promptSuggestion: null,
+    signInEndsAt: mocks.signInEndsAt,
   }),
   useSessionChatContext: () => ({
     chat: { status: "idle", error: null, isConnected: false, sendMessage: mocks.sendMessage, interrupt: vi.fn() },
@@ -39,6 +43,7 @@ vi.mock("@/lib/agents/signIn", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@/lib/agents/signIn")>()),
   startAgentSignIn: mocks.startAgentSignIn,
 }))
+vi.mock("@/lib/askUserApi", () => ({ submitUserQuestionAnswers: mocks.submitUserQuestionAnswers }))
 vi.mock("@/lib/providerUpdates", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@/lib/providerUpdates")>()),
   fetchProviderUpdates: mocks.fetchProviderUpdates,
@@ -62,6 +67,8 @@ beforeEach(() => {
   _resetAgentAvailabilityForTests()
   vi.clearAllMocks()
   mocks.turnError = null
+  mocks.signInEndsAt = null
+  mocks.pendingInteraction = null
   mocks.fetchProviderUpdates.mockResolvedValue([makeProviderUpdateInfo()])
 })
 
@@ -104,6 +111,33 @@ describe("ChatInput agent setup", () => {
     mocks.turnError = "Invalid API key · Fix external API key"
     render(<ChatInput agentKind="claude" />)
     expect(screen.getByRole("button", { name: "Claude Code isn't signed in.(details)" })).toBeInTheDocument()
+  })
+
+  it("warns quietly before the sign-in ends, offers to sign in again, and can be dismissed", () => {
+    mocks.signInEndsAt = "2026-12-11T00:25:04.187Z"
+    mocks.startAgentSignIn.mockReturnValue(true)
+    render(<ChatInput agentKind="claude" />)
+    const notice = screen.getByText(/Claude Code's sign-in ends around/)
+    expect(notice).toHaveTextContent("Sign in again to keep sessions running.")
+    fireEvent.click(screen.getByRole("button", { name: "Dismiss" }))
+    expect(screen.queryByText(/sign-in ends around/)).not.toBeInTheDocument()
+  })
+
+  it("answers a waiting question with a message typed in the composer as a chat reply", async () => {
+    mocks.pendingInteraction = { type: "question", toolUseId: "toolu_1", questions: [{ question: "Pick a color?", options: [] }] }
+    mocks.submitUserQuestionAnswers.mockResolvedValue({ ok: true, gone: false })
+    render(<ChatInput agentKind="claude" />)
+    send("make it teal")
+    await waitFor(() => expect(mocks.submitUserQuestionAnswers).toHaveBeenCalledWith("s1", "toolu_1", "make it teal", "replied_in_chat"))
+    expect(mocks.sendMessage).not.toHaveBeenCalled()
+  })
+
+  it("answers the first question with the typed text for an agent that cannot take a chat reply", async () => {
+    mocks.pendingInteraction = { type: "question", toolUseId: "q-1", questions: [{ question: "Pick a color?", options: [] }] }
+    mocks.submitUserQuestionAnswers.mockResolvedValue({ ok: true, gone: false })
+    render(<ChatInput agentKind="codex" />)
+    send("Blue")
+    await waitFor(() => expect(mocks.submitUserQuestionAnswers).toHaveBeenCalledWith("s1", "q-1", { "Pick a color?": "Blue" }))
   })
 
   it("explains a missing agent before anything is sent", async () => {

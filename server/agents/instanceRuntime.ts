@@ -178,8 +178,8 @@ export function createInstanceRuntime(instance: ProviderInstance, dataRoot: stri
       if (instance.agent === "codex") return orchestrationStore().questions(instance.id, id ? native(id) : undefined).map((q) => { const question = q.data as CodexAsyncQuestion; return { sessionId: qualified(question.threadId), toolUseId: question.itemId, askedAt: question.askedAt, questions: question.questions } })
       return questions.filter((q) => !id || q.sessionId === native(id)).map((q) => ({ ...q, sessionId: qualified(q.sessionId) }))
     },
-    async answerQuestion(id, requestId, answer) {
-      const accepted = await rpc<Awaited<ReturnType<AgentRuntime["answerQuestion"]>>>("answerQuestion", [native(id), requestId, answer])
+    async answerQuestion(id, requestId, answer, unanswered) {
+      const accepted = await rpc<Awaited<ReturnType<AgentRuntime["answerQuestion"]>>>("answerQuestion", [native(id), requestId, answer, unanswered])
       return accepted ? { ...accepted, onDelivered: () => { void rpc("commitAnswer", [native(id), requestId]).catch(() => {}) } } : null
     },
     describeRuntime: (force) => rpc("describeRuntime", [force]), listModels: () => rpc("listModels", []),

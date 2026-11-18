@@ -8,7 +8,7 @@ const state = vi.hoisted(() => ({ filePath: "" }))
 
 vi.mock("../../lib/sessionArchive", () => ({
   archiveReason: () => null,
-  readArchive: async () => ({ archived: new Map(), kept: new Set() }),
+  readArchive: async () => ({ archived: new Map(), kept: new Map() }),
   setSessionsArchived: vi.fn().mockResolvedValue([]),
 }))
 vi.mock("../../sessionPaths", async (importOriginal) => ({
@@ -241,6 +241,17 @@ describe("turn pages", () => {
     const turns = pages.flatMap((page) => parsePage(format, page))
     expect(turns.find((turn) => turn.compactionSummary?.includes("summary 5"))).toBeDefined()
     expect(turns.some((turn) => turn.contentBlocks.some((block) => block.kind === "recap"))).toBe(true)
+  })
+
+  it("keep a notice written after a turn's work on that turn's page", async () => {
+    const format = formatFor("claude")
+    const lines = claudeTranscript(8, () => 1_000)
+    await writeTranscript(lines)
+    const pages = await pageToHead(CLAUDE_DIR, "1&maxBytes=16384")
+    const notices = pages.map((page) => parsePage(format, page).flatMap((turn) => (
+      turn.contentBlocks.flatMap((block) => (block.kind === "notice" ? [block.content.split("\n")[0]] : []))
+    )))
+    expect(notices.filter((page) => page.length > 0)).toEqual([["safeguards stopped the response above 1", "Goal cleared 1"]])
   })
 
   it("put what comes before the first turn on the first turn's page, past a header that stops short of it", async () => {

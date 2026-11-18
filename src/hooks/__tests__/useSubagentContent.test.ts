@@ -178,6 +178,41 @@ describe("parseSubagentJsonl", () => {
     expect(messages[0].text).toEqual(["Hello"])
   })
 
+  it("starts a fork's messages after the parent's call that started it", () => {
+    const spawnId = "toolu_01Fgi7Wqmn4pwmgvk11d3NPi"
+    const jsonl = buildSubagentJsonl([
+      { type: "fork-context-ref", agentId: "a956c90fe0e8d8de4", parentSessionId: "b5a1b984", parentLastUuid: "d19de15a", contextLength: 109 },
+      {
+        type: "assistant",
+        isSidechain: true,
+        agentId: "a956c90fe0e8d8de4",
+        message: { role: "assistant", id: "msg_parent", content: [{ type: "tool_use", id: spawnId, name: "Agent", input: { description: "Diagnose", subagent_type: "fork", prompt: "Fix it" } }] },
+        timestamp: "2026-11-17T12:17:00Z",
+      },
+      {
+        type: "user",
+        isSidechain: true,
+        agentId: "a956c90fe0e8d8de4",
+        message: { role: "user", content: [
+          { type: "tool_result", tool_use_id: spawnId, content: [{ type: "text", text: "Fork started \u2014 that fork is you." }] },
+          { type: "text", text: "<fork-boilerplate>\nYou are a worker fork.\n</fork-boilerplate>\n\nYour directive: Fix it" },
+        ] },
+        timestamp: "2026-11-17T12:17:01Z",
+      },
+      {
+        type: "assistant",
+        isSidechain: true,
+        agentId: "a956c90fe0e8d8de4",
+        message: { role: "assistant", id: "msg_fork", content: [{ type: "text", text: "Task: fix the scroll-up loop." }] },
+        timestamp: "2026-11-17T12:17:02Z",
+      },
+    ])
+
+    const messages = parseSubagentJsonl(jsonl, "a956c90fe0e8d8de4")
+    expect(messages.map((message) => message.text)).toEqual([["Task: fix the scroll-up loop."]])
+    expect(messages.flatMap((message) => message.toolCalls)).toEqual([])
+  })
+
   it("should handle malformed lines gracefully", () => {
     const jsonl = "not valid json\n" + JSON.stringify({
       type: "assistant",

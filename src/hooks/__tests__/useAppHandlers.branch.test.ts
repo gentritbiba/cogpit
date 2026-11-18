@@ -53,6 +53,7 @@ function handlerDeps(dispatch: (action: SessionAction) => void): Parameters<type
     isMobile: false,
     handleJumpToTurn: vi.fn(),
     markPermissionsApplied: vi.fn(),
+    setPermissionMode: vi.fn(),
     hasPermsPendingChanges: false,
     permissionsConfig: { mode: "default" } as PermissionsConfig,
     settingsChange: [],

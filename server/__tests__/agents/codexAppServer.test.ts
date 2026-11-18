@@ -440,6 +440,29 @@ describe("CodexAppServer threads and goals", () => {
     expect(notifications).toHaveBeenCalledWith(completed)
   })
 
+  it.each([
+    ["0.165+", "The 'gpt-does-not-exist-9' model is not supported when using Codex with a ChatGPT account.", "modelNotFound"],
+    ["0.164 and earlier", "{\"type\":\"error\",\"status\":400,\"error\":{\"type\":\"invalid_request_error\",\"message\":\"The 'gpt-does-not-exist-9' model is not supported when using Codex with a ChatGPT account.\",\"code\":\"model_not_found\"}}", "other"],
+  ])("accepts a model Codex %s cannot find, then fails the turn with that reason", async (_version, message, codexErrorInfo) => {
+    const harness = createHarness()
+    const child = await initialize(harness)
+    const start = harness.server.startTurn("thread-1", "hi", { model: "gpt-does-not-exist-9" })
+    child.send({ id: requestFor(child, "turn/start").id, result: { turn: { id: "turn-1", items: [], itemsView: "notLoaded", status: "inProgress", error: null } } })
+    await start
+    const completion = harness.server.waitForCompletion("thread-1", "turn-1")
+
+    child.send({
+      method: "turn/completed",
+      params: {
+        threadId: "thread-1",
+        turn: { id: "turn-1", rootTurnId: "turn-1", items: [], itemsView: "notLoaded", status: "failed", error: { message, codexErrorInfo, additionalDetails: null, misalignment: null }, startedAt: 1794940675, completedAt: 1794940678, durationMs: 3083 },
+      },
+    })
+
+    const notFound = "The 'gpt-does-not-exist-9' model is not supported when using Codex with a ChatGPT account."
+    await expect(completion).resolves.toEqual({ isError: true, message: notFound, failure: { reason: "model_unavailable", message: notFound } })
+  })
+
   it("lists active parent and subagent turns reported by the transport", async () => {
     const harness = createHarness()
     const child = await initialize(harness)

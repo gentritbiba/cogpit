@@ -13,7 +13,6 @@ import { descriptorFor, type PermissionsConfig } from "../../shared/session/agen
 import { storeFor } from "."
 import { codexSessionConfig } from "./codexSessionConfig"
 import { pluginSkillContext } from "../plugins/skillContext"
-import { AgentRuntimeError } from "./runtimeTypes"
 import { uncompressedTranscriptName } from "./transcriptFile"
 
 export interface CodexExecutionClient {
@@ -58,7 +57,17 @@ export interface CodexThreadIdentity {
   filePath: string
 }
 
-export type CodexContinuationResult = { action: "started" | "steered"; threadId: string; turnId: string } | { action: "busy"; threadId: string; turnId?: string }
+/** The model, effort and speed a turn started with: what the send named, else what the thread reported. */
+export interface CodexTurnModel {
+  model?: string
+  effort?: string
+  fastMode?: boolean
+}
+
+export type CodexContinuationResult =
+  | { action: "started"; threadId: string; turnId: string; turnModel: CodexTurnModel }
+  | { action: "steered"; threadId: string; turnId: string }
+  | { action: "busy"; threadId: string; turnId?: string }
 
 type ApprovalPolicy = "on-request" | "never"
 type SandboxMode = "workspace-write" | "read-only" | "danger-full-access"
@@ -159,6 +168,18 @@ async function threadSettings(client: CodexExecutionClient, options: CodexExecut
   return settings
 }
 
+function startedTurnModel(options: CodexExecutionOptions, thread: ThreadResponse): CodexTurnModel {
+  const model = nonEmpty(options.model) ?? nonEmpty(thread.model)
+  const effort = nonEmpty(options.effort) ?? nonEmpty(thread.reasoningEffort)
+  const tier = thread.serviceTier
+  const fastMode = options.fastMode ?? (typeof tier === "string" ? tier === serviceTier(true) : tier === null ? false : undefined)
+  return {
+    ...(model ? { model } : {}),
+    ...(effort ? { effort } : {}),
+    ...(fastMode !== undefined ? { fastMode } : {}),
+  }
+}
+
 function turnSettings(options: CodexExecutionOptions, isResume = false): JsonObject {
   const settings: JsonObject = { cwd: options.cwd }
   if (!isResume || options.permissions) {
@@ -217,7 +238,7 @@ export async function startCodexExecution(
   client: CodexExecutionClient,
   options: CodexExecutionOptions,
   onThreadStarted?: (threadId: string) => void,
-): Promise<{ thread: CodexThread; turnId: string }> {
+): Promise<{ thread: CodexThread; turnId: string; turnModel: CodexTurnModel }> {
   await ensureCodexAppServer(client)
   const input = buildCodexUserInput(options.message, options.images)
   const response = await client.startThread(await threadSettings(client, options))
@@ -229,7 +250,7 @@ export async function startCodexExecution(
     ...(options.commandId ? { clientUserMessageId: options.commandId } : {}),
     ...turnSettings(options),
   })
-  return { thread: response.thread, turnId: turn.turn.id }
+  return { thread: response.thread, turnId: turn.turn.id, turnModel: startedTurnModel(options, response) }
 }
 
 export async function continueCodexExecution(
@@ -279,6 +300,7 @@ export async function continueCodexExecution(
     action: "started",
     threadId: resumedThreadId,
     turnId: turn.turn.id,
+    turnModel: startedTurnModel(options, resumed),
   }
 }
 
@@ -316,13 +338,4 @@ export function isCodexAppServerUnavailable(error: unknown): boolean {
   if (typeof error !== "object" || error === null) return false
   const code = "code" in error ? String(error.code) : ""
   return code === "ENOENT"
-}
-
-export function isCodexModelRejection(error: unknown): boolean {
-  if (!(error instanceof CodexAppServerRpcError) || !["thread/resume", "turn/start"].includes(error.method)) return false
-  return /issue with the selected model|selected model.*may not exist or you may not have access|run --model to pick a different model|model.*(?:not found|does not exist|not available|not supported|not authorized)/i.test(error.message)
-}
-
-export function codexSendError(error: unknown): AgentRuntimeError {
-  return new AgentRuntimeError(isCodexModelRejection(error) ? 400 : 500, isCodexModelRejection(error) ? "MODEL_REJECTED" : "INTERNAL_ERROR", error instanceof Error ? error.message : "Codex failed to accept the message")
 }

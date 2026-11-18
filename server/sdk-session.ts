@@ -3,10 +3,12 @@ import { query } from "@anthropic-ai/claude-agent-sdk"
 import type {
   Options,
   SDKMessage,
+  SDKSessionWritesLostMessage,
   SDKUserMessage,
   CanUseTool,
   ElicitationRequest,
   ElicitationResult,
+  McpServerConfig,
   OnElicitation,
   OnUserDialog,
   PermissionResult,
@@ -18,18 +20,21 @@ import type {
 } from "@anthropic-ai/claude-agent-sdk"
 import type { MessageParam } from "@anthropic-ai/sdk/resources"
 import type { PermissionRequest } from "../shared/contracts/permissions"
+import type { QuestionUnanswered } from "../shared/contracts/pendingInput"
 import { presentTurnError } from "../shared/session/agent-errors"
 import { watchSubagents, type SubagentTask, type SubagentWatcher } from "./subagentWatcher"
-import { claudeCliPath } from "./agents/claudeExecutable"
+import { claudeLaunchOptions } from "./agents/claudeExecutable"
 import { appendToSystemPrompt, withControlQuery } from "./agents/sdk"
 import { pluginSkillContext } from "./plugins/skillContext"
 import { readSdkRateLimit } from "./agents/rateLimit"
 import { logAgentFailure } from "./agents/failureLog"
+import { describeStartupFailure } from "./agents/startupFailures"
 import type { UserQuestionAnswers } from "./agents/runtimeTypes"
 import { BROWSER_CONTEXT_APPEND, BROWSER_HOOK_TOOL, browserPreToolUseHook } from "./browser/agentContext"
 import { MEDIA_CONTEXT_APPEND } from "./agents/replyContext"
 import { cogpitAgentEnv, browserShimInstalled } from "./browser/agentEnv"
 import * as streamBus from "./lib/streamBus"
+import { sessionConfigKey, updateSessionConfig } from "./lib/sessionConfigStore"
 import { projectElicitationSchema } from "./lib/elicitationSchema"
 import { asRecord } from "../shared/objects"
 import type {
@@ -66,7 +71,14 @@ export interface PermissionRequestData extends Omit<PermissionRequest, "suggesti
 }
 
 interface PendingPermission extends PermissionRequestData {
+  /** The user's own ask rule that forced this ask: a person answers it, never a mode switch. */
+  matchedAskRule?: Parameters<CanUseTool>[2]["matchedAskRule"]
   resolve: (result: PermissionResult) => void
+}
+
+/** A pending ask as the dashboard sees it. */
+function permissionRequestOf({ resolve: _, matchedAskRule: _rule, ...request }: PendingPermission): PermissionRequestData {
+  return request
 }
 
 interface PendingUserQuestion {
@@ -105,8 +117,6 @@ export interface SDKSessionState {
   pendingElicitations: Map<string, PendingElicitation>
   /** CLI dialogs awaiting a choice, keyed by control-request id. */
   pendingUserDialogs: Map<string, PendingUserDialog>
-  /** Tools the user approved "always for this session" — canUseTool auto-allows these */
-  sessionAllowedTools: Set<string>
   running: boolean
   /**
    * Background agents and workflows the CLI process reports live, by task id.
@@ -129,7 +139,19 @@ export interface SDKSessionState {
   subagentTasks: Map<string, SubagentTask>
   /** Watches sub-agent JSONL files and synthesizes progress into parent JSONL */
   subagentWatcher: SubagentWatcher | null
+  /**
+   * The mode the CLI runs in, as far as it has said (system/init and
+   * system/status), or the one the next process starts with.
+   */
   permissionMode: string
+  /** Protocol capabilities the running CLI listed in system/init. */
+  capabilities: ReadonlySet<string>
+  /**
+   * Servers the running process got in its `mcpServers` launch option that no
+   * setMcpServers call has named yet. The CLI keeps such a server connected
+   * when a later call leaves it out.
+   */
+  launchMcpServers: Record<string, McpServerConfig> | null
   allowedTools: string[]
   disallowedTools: string[]
   model?: string
@@ -150,6 +172,7 @@ export interface SDKSessionState {
 export const sdkSessions = new Map<string, SDKSessionState>()
 
 const NO_BACKGROUND_AGENTS: ReadonlySet<string> = new Set()
+const NO_CAPABILITIES: ReadonlySet<string> = new Set()
 
 /**
  * Task types that are agents working for the session. Shells, monitors and MCP
@@ -238,19 +261,9 @@ function makeCanUseTool(state: SDKSessionState): CanUseTool {
       })
     }
 
-    // In bypassPermissions mode the CLI normally never consults canUseTool for
-    // regular tools — the callback is registered only so AskUserQuestion (above)
-    // has somewhere to route its answers. If the CLI ever does call it, auto-
-    // allow instead of queuing an invisible permission request.
-    const requiresExplicitChoice = options.defaultToNo || options.suppressAlwaysAllowRule
-    if (state.permissionMode === "bypassPermissions" && !requiresExplicitChoice) {
-      return Promise.resolve<PermissionResult>({ behavior: "allow", updatedInput: input })
-    }
-
-    if (state.sessionAllowedTools.has(toolName) && !requiresExplicitChoice) {
-      return Promise.resolve<PermissionResult>({ behavior: "allow", updatedInput: input })
-    }
-
+    // The CLI asks only when it wants a person, whatever the mode: even under
+    // bypassPermissions some calls ask, and the MCP sign-in confirmation always
+    // does. Every ask reaches the approval bar.
     const requestId = options.toolUseID
 
     return new Promise<PermissionResult>((resolve) => {
@@ -267,6 +280,7 @@ function makeCanUseTool(state: SDKSessionState): CanUseTool {
         suggestions: options.suggestions,
         defaultToNo: options.defaultToNo,
         suppressAlwaysAllowRule: options.suppressAlwaysAllowRule,
+        matchedAskRule: options.matchedAskRule,
         timestamp: Date.now(),
         resolve,
       }
@@ -388,14 +402,28 @@ function makeOnUserDialog(state: SDKSessionState): OnUserDialog {
 
 // ── Build SDK query options ──────────────────────────────────────────
 
+/** The servers an MCP selection names, or null when it names none or is not valid JSON. */
+function parseMcpServers(mcpConfig: string | null | undefined): Record<string, McpServerConfig> | null {
+  if (!mcpConfig) return null
+  try {
+    const parsed = asRecord(JSON.parse(mcpConfig))
+    return parsed && Object.keys(parsed).length > 0 ? parsed as Record<string, McpServerConfig> : null
+  } catch {
+    return null
+  }
+}
+
+/** The CLI refuses to start able to skip permissions as root, outside a sandbox. */
+function canSkipPermissions(): boolean {
+  return process.getuid?.() !== 0 || Boolean(process.env.IS_SANDBOX)
+}
+
 function buildQueryOptions(state: SDKSessionState, opts: {
   isResume?: boolean
   name?: string
   worktreeName?: string
   mcpConfig?: string | null
 }): Options {
-  const isBypass = state.permissionMode === "bypassPermissions"
-
   const queryOpts: Options = {
     abortController: state.abort!,
     cwd: state.cwd,
@@ -406,8 +434,7 @@ function buildQueryOptions(state: SDKSessionState, opts: {
     // Always registered, even in bypassPermissions: AskUserQuestion can only
     // deliver answers through this callback. Without it the CLI errors the
     // tool instantly ("Answer questions?") and the dashboard shows a dead
-    // question bar that swallows input. Regular tools still auto-allow in
-    // bypass mode (see makeCanUseTool).
+    // question bar that swallows input.
     canUseTool: makeCanUseTool(state),
     // Without this the SDK declines every MCP elicitation automatically, so a
     // server asking for a token or a browser login fails with no trace.
@@ -417,7 +444,7 @@ function buildQueryOptions(state: SDKSessionState, opts: {
     effort: state.effort as Options["effort"],
     enableFileCheckpointing: true,
     persistSession: true,
-    pathToClaudeCodeExecutable: claudeCliPath(),
+    ...claudeLaunchOptions(),
     // Token-level streaming: raw Anthropic stream events are forwarded to
     // the stream bus so the UI can render text as it is generated.
     includePartialMessages: streamingEnabled(),
@@ -433,9 +460,8 @@ function buildQueryOptions(state: SDKSessionState, opts: {
     promptSuggestions: true,
   }
 
-  if (isBypass) {
-    queryOpts.allowDangerouslySkipPermissions = true
-  }
+  // Every session can be switched to bypass later, not only one that starts there.
+  if (canSkipPermissions()) queryOpts.allowDangerouslySkipPermissions = true
 
   if (opts.isResume) {
     queryOpts.resume = state.sessionId
@@ -448,11 +474,8 @@ function buildQueryOptions(state: SDKSessionState, opts: {
   if (opts.worktreeName) extraArgs.worktree = opts.worktreeName
   if (Object.keys(extraArgs).length > 0) queryOpts.extraArgs = extraArgs
 
-  if (opts.mcpConfig) {
-    try {
-      queryOpts.mcpServers = JSON.parse(opts.mcpConfig)
-    } catch { /* ignore invalid JSON */ }
-  }
+  const mcpServers = parseMcpServers(opts.mcpConfig)
+  if (mcpServers) queryOpts.mcpServers = mcpServers
 
   // The `settings` layer (the --settings equivalent) outranks the user's own
   // settings. A full session refuses every message, including the ones agents
@@ -503,9 +526,51 @@ export function describeErrorResult(result: Record<string, unknown>): string {
   const errors = Array.isArray(result.errors)
     ? result.errors.filter((error): error is string => typeof error === "string" && error.trim() !== "")
     : []
-  if (errors.length > 0) return presentTurnError(errors.join("\n"))
+  if (errors.length > 0) {
+    const detail = presentTurnError(errors.join("\n"))
+    return describeStartupFailure(result, detail) ?? detail
+  }
   const subtype = result.subtype
   return `Claude returned an error${subtype ? ` (${String(subtype)})` : ""}`
+}
+
+/**
+ * Follow the mode the CLI says it runs in, which can differ from the one asked
+ * for: a session started without one runs in bypassPermissions, auto mode
+ * starts in Manual where it is unavailable, and approving a plan moves a
+ * session on. The stored config follows, whatever a client stored there
+ * before, and every client showing the session reads it again.
+ */
+function adoptPermissionMode(state: SDKSessionState, mode: string | undefined): void {
+  if (!mode) return
+  state.permissionMode = mode
+  const { sessionId } = state
+  void updateSessionConfig(sessionConfigKey(sessionId), () => ({ permissionMode: mode }))
+    .then(({ changed }) => { if (changed.length > 0) streamBus.publishSessionConfig(sessionId) }, () => {})
+}
+
+/** How long before a sign-in ends its sessions warn about it. The CLI's date can be up to 3 days late. */
+export const SIGN_IN_WARNING_MS = 7 * 24 * 60 * 60 * 1000
+
+/**
+ * Tell the session's viewers, with each turn's result, when its sign-in ends
+ * soon, or that it does not. A credential without a known end says nothing.
+ */
+function reportSignInEnd(sessionId: string, expiresAt: string | undefined): void {
+  const end = expiresAt ? Date.parse(expiresAt) : Number.NaN
+  if (!Number.isFinite(end)) return
+  streamBus.publishSignInEnd(sessionId, end - Date.now() < SIGN_IN_WARNING_MS ? new Date(end).toISOString() : null)
+}
+
+/** What a full disk cost the session, from the CLI's `session_writes_lost` notice. */
+export function describeWritesLost(msg: Pick<SDKSessionWritesLostMessage, "error_code" | "lost">): string {
+  const cause = msg.error_code === "EDQUOT" ? "The disk quota is used up" : "The disk is full"
+  const lost = [
+    msg.lost.includes("transcript") && "part of this session's transcript",
+    msg.lost.includes("global_config") && "changes to the CLI's global settings file",
+  ].filter(Boolean).join(" and ")
+  const consequence = msg.lost.includes("transcript") ? " Resuming the session may miss part of the conversation." : ""
+  return `${cause}, so ${lost || "some of what the session wrote"} could not be saved.${consequence} Free some space before you continue.`
 }
 
 function processSDKEvent(state: SDKSessionState, msg: SDKMessage): void {
@@ -522,6 +587,8 @@ function processSDKEvent(state: SDKSessionState, msg: SDKMessage): void {
   if (!state.running && (msg.type === "assistant" || msg.type === "stream_event") && msg.parent_tool_use_id === null) state.running = true
   if (msg.type === "system" && msg.subtype === "init") {
     state.cwd = msg.cwd
+    state.capabilities = new Set(msg.capabilities ?? [])
+    adoptPermissionMode(state, msg.permissionMode)
     const onInit = state.onInit
     state.onInit = null
     onInit?.()
@@ -533,6 +600,7 @@ function processSDKEvent(state: SDKSessionState, msg: SDKMessage): void {
     // still holds queued runs as the next turn straight away.
     state.running = (msg.queued_turn_count ?? 0) > 0
     streamBus.clear(state.sessionId)
+    reportSignInEnd(state.sessionId, msg.credential_expires_at)
     const result = msg as unknown as Record<string, unknown>
     if (result.is_error) logTurnFailure(state, result)
     notifyResultObservers(state, result)
@@ -560,8 +628,12 @@ function processSDKEvent(state: SDKSessionState, msg: SDKMessage): void {
   if (msg.type === "system" && msg.subtype === "status") {
     // The CLI reports `compacting` when it starts summarising and clears the
     // status (with a compact_result) when it is done.
-    const status = (msg as unknown as { status?: string | null }).status
-    streamBus.publishCompacting(state.sessionId, status === "compacting")
+    streamBus.publishCompacting(state.sessionId, msg.status === "compacting")
+    adoptPermissionMode(state, msg.permissionMode)
+  }
+
+  if (msg.type === "system" && msg.subtype === "session_writes_lost") {
+    streamBus.publishError(state.sessionId, describeWritesLost(msg))
   }
 
   if (msg.type === "rate_limit_event") {
@@ -736,7 +808,9 @@ function runQuery(state: SDKSessionState, prompt: string, opts: {
   state.backgroundAgents = NO_BACKGROUND_AGENTS
   state.stderr = ""
 
+  state.capabilities = NO_CAPABILITIES
   const queryOpts = buildQueryOptions(state, opts)
+  state.launchMcpServers = queryOpts.mcpServers ?? null
   if (pluginInstructions) queryOpts.systemPrompt = appendToSystemPrompt(queryOpts.systemPrompt, pluginInstructions)
   const messageStream = new SDKMessageStream()
   const first = buildUserMessage(prompt, opts.images)
@@ -779,12 +853,17 @@ function runQuery(state: SDKSessionState, prompt: string, opts: {
 
   ;(async () => {
     let failureLogged = false
+    // The SDK rethrows the last error result's text when the CLI exits after
+    // it. A later turn's output means the CLI went on past that result.
+    let lastErrorResult: Record<string, unknown> | null = null
     try {
       for await (const msg of q) {
+        if (msg.type === "result") lastErrorResult = msg.is_error ? msg as unknown as Record<string, unknown> : null
+        else if (msg.type === "assistant" || msg.type === "user" || msg.type === "stream_event" || (msg.type === "system" && msg.subtype === "init")) lastErrorResult = null
         processSDKEvent(state, msg)
       }
     } catch (err) {
-      const base = String(err)
+      const base = lastErrorResult ? describeErrorResult(lastErrorResult) : String(err)
       const detail = state.stderr?.trim()
       // Append captured stderr so the surfaced error is verbose enough to
       // diagnose (the SDK's own message is just "exited with code 1").
@@ -923,7 +1002,6 @@ function initSDKSessionState(opts: SDKSessionInitOpts): SDKSessionState {
     pendingUserQuestions: new Map(),
     pendingElicitations: new Map(),
     pendingUserDialogs: new Map(),
-    sessionAllowedTools: new Set(),
     running: false,
     backgroundAgents: NO_BACKGROUND_AGENTS,
     abort: null,
@@ -934,7 +1012,9 @@ function initSDKSessionState(opts: SDKSessionInitOpts): SDKSessionState {
     jsonlPath: null,
     subagentTasks: new Map(),
     subagentWatcher: null,
-    permissionMode: opts.permissionMode || "default",
+    permissionMode: opts.permissionMode || (canSkipPermissions() ? "bypassPermissions" : "default"),
+    capabilities: NO_CAPABILITIES,
+    launchMcpServers: null,
     allowedTools: opts.allowedTools ? [...opts.allowedTools] : [],
     disallowedTools: opts.disallowedTools ? [...opts.disallowedTools] : [],
     model: opts.model,
@@ -988,6 +1068,10 @@ interface AppliedSessionUpdates {
   fastModeChanged: boolean
   ultracodeChanged: boolean
   permissionModeChanged: boolean
+  /** The mode this update asked for; the session's own can move while the update is pushed. */
+  requestedPermissionMode: string
+  /** The mode before the update, which a refused switch keeps. */
+  previousPermissionMode: string
   permissionsChanged: boolean
   mcpConfigChanged: boolean
   nextEffort?: string
@@ -998,6 +1082,7 @@ function applySessionUpdates(
   updates?: SDKSessionUpdates,
 ): AppliedSessionUpdates {
   const previousEffort = state.effort
+  const previousPermissionMode = state.permissionMode
   const modelChanged = updates?.model !== undefined && updates.model !== state.model
   const fastModeChanged = updates?.fastMode !== undefined && updates.fastMode !== state.fastMode
   const ultracodeChanged = updates?.ultracode !== undefined && updates.ultracode !== state.ultracode
@@ -1025,27 +1110,70 @@ function applySessionUpdates(
     fastModeChanged,
     ultracodeChanged,
     permissionModeChanged,
+    requestedPermissionMode: updates?.permissionMode ?? previousPermissionMode,
+    previousPermissionMode,
     permissionsChanged,
     mcpConfigChanged,
     nextEffort,
   }
 }
 
+/** What a live update got through to the running process, recorded as it goes. */
+interface PushedUpdates {
+  applied: string[]
+  /** Pending requests the new permission mode approved. */
+  autoApproved: AutoApprovedRequest[]
+}
+
+/**
+ * Ask the running CLI to switch modes; false when it refused and kept its mode.
+ * A process that exits meanwhile fails the request too, which throws: the
+ * requested mode then waits for the next resume.
+ */
+async function switchPermissionMode(state: SDKSessionState, queryHandle: Query, requested: string, previous: string): Promise<boolean> {
+  try {
+    await queryHandle.setPermissionMode(requested as PermissionMode)
+    return true
+  } catch (error) {
+    // The SDK fails the request just before the ended query reaches runQuery.
+    await new Promise((resolve) => setImmediate(resolve))
+    if (state.activeQuery !== queryHandle || !isSDKQueryLive(state)) throw error
+    // The CLI keeps its mode: bypassPermissions in a process launched
+    // without it, auto mode where it is unavailable.
+    if (state.permissionMode === requested) state.permissionMode = previous
+    streamBus.publishError(state.sessionId, `The session kept its permission mode. ${error instanceof Error ? error.message : String(error)}`)
+    return false
+  }
+}
+
+/**
+ * Send the changes to the running process, recording each one it took in
+ * `pushed` — a failure part-way keeps the record of what went before it.
+ */
 async function pushSessionUpdates(
   state: SDKSessionState,
   changes: AppliedSessionUpdates,
-): Promise<string[]> {
+  pushed: PushedUpdates = { applied: [], autoApproved: [] },
+): Promise<void> {
   const queryHandle = state.activeQuery
-  if (!queryHandle) return []
+  if (!queryHandle) return
+  const { applied } = pushed
 
-  const applied: string[] = []
   if (changes.modelChanged) {
     await queryHandle.setModel(state.model || undefined)
     applied.push("model")
   }
   if (changes.permissionModeChanged) {
-    await queryHandle.setPermissionMode(state.permissionMode as PermissionMode)
-    applied.push("permissionMode")
+    const requested = changes.requestedPermissionMode
+    // Asks raised before the switch was sent are the old mode's to answer;
+    // one raised after it may be one the CLI asks even in the new mode.
+    const askedBefore = [...state.pendingPermissions.keys()]
+    if (await switchPermissionMode(state, queryHandle, requested, changes.previousPermissionMode)) {
+      // A status report from before the switch may have moved the mode back.
+      adoptPermissionMode(state, requested)
+      applied.push("permissionMode")
+      pushed.autoApproved.push(...autoResolvePendingForMode(state, askedBefore))
+    }
   }
 
   const flagSettings: Record<string, unknown> = {}
@@ -1078,23 +1206,27 @@ async function pushSessionUpdates(
 
   if (changes.mcpConfigChanged) {
     try {
-      const parsed = state.mcpConfig
-        ? JSON.parse(state.mcpConfig) as Record<string, unknown>
+      const servers = state.mcpConfig
+        ? JSON.parse(state.mcpConfig) as Record<string, McpServerConfig>
         : {}
-      await queryHandle.setMcpServers(parsed as Parameters<Query["setMcpServers"]>[0])
+      // A server from the launch option disconnects only once a call has
+      // named it, so the first change hands those over before it applies.
+      if (state.launchMcpServers) {
+        await queryHandle.setMcpServers(state.launchMcpServers)
+        state.launchMcpServers = null
+      }
+      await queryHandle.setMcpServers(servers)
       applied.push("mcpConfig")
     } catch {
       // Invalid or provider-managed MCP configuration remains staged for the
       // next query, where the normal SDK option validation will report it.
     }
   }
-  return applied
 }
 
-// Switching permission mode mid-turn must take effect immediately: approvals
-// the user is currently being asked for are re-evaluated under the new mode so
-// the turn continues without further clicks. bypassPermissions allows
-// everything pending; acceptEdits allows pending file edits.
+// Switching permission mode mid-turn must take effect immediately: once the
+// CLI runs in the new mode, approvals the user is currently being asked for are
+// re-evaluated under it so the turn continues without further clicks.
 const EDIT_TOOL_NAMES = new Set(["Edit", "Write", "MultiEdit", "NotebookEdit"])
 
 /** A pending tool request that a permission mode change approved without asking. */
@@ -1103,16 +1235,25 @@ export interface AutoApprovedRequest {
   toolName: string
 }
 
-function autoResolvePendingForMode(state: SDKSessionState, changes: AppliedSessionUpdates): AutoApprovedRequest[] {
-  if (!changes.permissionModeChanged) return []
-  const allowAll = state.permissionMode === "bypassPermissions"
-  const allowEdits = state.permissionMode === "acceptEdits"
-  if (!allowAll && !allowEdits) return []
+/**
+ * Whether a switch to `mode` answers a pending ask: bypassPermissions any,
+ * acceptEdits a file edit inside the workspace (outside it the CLI still
+ * asks). Never one the CLI or the user's own ask rule wants a person for.
+ */
+function modeApproves(mode: string, pending: PendingPermission): boolean {
+  if (pending.defaultToNo || pending.suppressAlwaysAllowRule || pending.matchedAskRule) return false
+  if (mode === "bypassPermissions") return true
+  return mode === "acceptEdits" && EDIT_TOOL_NAMES.has(pending.toolName) && !pending.blockedPath
+}
+
+/** Approve those of the asks `requestIds` names that are still pending and the session's new mode answers. */
+function autoResolvePendingForMode(state: SDKSessionState, requestIds: readonly string[]): AutoApprovedRequest[] {
   const approved: AutoApprovedRequest[] = []
-  for (const [requestId, pending] of [...state.pendingPermissions]) {
-    if (!allowAll && !EDIT_TOOL_NAMES.has(pending.toolName)) continue
+  for (const requestId of requestIds) {
+    const pending = state.pendingPermissions.get(requestId)
+    if (!pending || !modeApproves(state.permissionMode, pending)) continue
     state.pendingPermissions.delete(requestId)
-    applyDecision(state, pending, "allow")
+    applyDecision(pending, "allow")
     approved.push({ requestId, toolName: pending.toolName })
   }
   return approved
@@ -1132,6 +1273,8 @@ export interface SDKSessionUpdateResult {
   staged: string[]
   /** Null when the update left the permission mode and tool rules as they were. */
   permissionChange: PermissionSettingsChange | null
+  /** The mode the session runs in afterwards, which a refused switch leaves as it was. */
+  permissionMode?: string
 }
 
 function permissionSettingsOf(state: SDKSessionState): Omit<PermissionSettingsChange, "autoApproved"> {
@@ -1150,22 +1293,24 @@ export async function updateSDKSession(
   if (!state) return { found: false, appliedLive: [], staged: Object.keys(updates), permissionChange: null }
   const permissionsBefore = JSON.stringify(permissionSettingsOf(state))
   const changes = applySessionUpdates(state, updates)
-  const autoApproved = autoResolvePendingForMode(state, changes)
-  const permissionsAfter = permissionSettingsOf(state)
-  let appliedLive: string[] = []
+  const pushed: PushedUpdates = { applied: [], autoApproved: [] }
   try {
-    appliedLive = await pushSessionUpdates(state, changes)
+    await pushSessionUpdates(state, changes, pushed)
   } catch {
     // The query may finish between checking `running` and sending a control
     // request. State is still updated, so the next resume applies the values.
   }
+  const { applied, autoApproved } = pushed
+  const permissionsAfter = permissionSettingsOf(state)
+  const refused = changes.permissionModeChanged && state.permissionMode === changes.previousPermissionMode
   return {
     found: true,
-    appliedLive,
-    staged: Object.keys(updates).filter((key) => !appliedLive.includes(key)),
+    appliedLive: applied,
+    staged: Object.keys(updates).filter((key) => !applied.includes(key) && !(refused && key === "permissionMode")),
     permissionChange: JSON.stringify(permissionsAfter) === permissionsBefore
       ? null
       : { ...permissionsAfter, autoApproved },
+    permissionMode: state.permissionMode,
   }
 }
 
@@ -1194,24 +1339,26 @@ export function isSDKQueryLive(
  * resume omits the flag: the session keeps what it runs. Only a settings
  * change (`updateSDKSession`) picks the provider default with an empty value.
  */
-function sendOverrides(updates?: SDKSessionUpdates): SDKSessionUpdates | undefined {
+function sendOverrides(updates?: SDKSendUpdates): SDKSendUpdates | undefined {
   if (!updates) return undefined
   const { model, effort, ...rest } = updates
   return { ...rest, ...(model ? { model } : {}), ...(effort ? { effort } : {}) }
 }
 
+/** Settings a send carries; the permission mode and tool rules change only through updateSDKSession. */
+export type SDKSendUpdates = Omit<SDKSessionUpdates, "permissionMode" | "allowedTools" | "disallowedTools">
+
 export function sendSDKMessage(
   sessionId: string,
   message: string,
   images?: ImageAttachment[],
-  updates?: SDKSessionUpdates,
+  updates?: SDKSendUpdates,
   { startsTurn = true }: { startsTurn?: boolean } = {},
 ): SDKSessionState | null {
   const state = sdkSessions.get(sessionId)
   if (!state) return null
 
   const changes = applySessionUpdates(state, sendOverrides(updates))
-  autoResolvePendingForMode(state, changes)
 
   if (isSDKQueryLive(state)) {
     const input = buildUserMessage(message, images, startsTurn)
@@ -1235,17 +1382,11 @@ export function sendSDKMessage(
 
 export function resumeSDKSession(opts: SDKSessionInitOpts): SDKSessionState {
   // A resume supersedes whatever query held this id. Tear the old one down
-  // first so its CLI process can't keep appending to the same transcript, and
-  // carry over the session-scoped "always allow" grants — otherwise the new
-  // process re-prompts for tools the user already approved, and an unanswered
-  // prompt blocks the turn indefinitely.
+  // first so its CLI process can't keep appending to the same transcript.
   const previous = sdkSessions.get(opts.sessionId)
   if (previous) teardownState(previous)
 
   const state = initSDKSessionState(opts)
-  if (previous) {
-    for (const tool of previous.sessionAllowedTools) state.sessionAllowedTools.add(tool)
-  }
   sdkSessions.set(opts.sessionId, state)
   runQuery(state, opts.message, { isResume: true, mcpConfig: opts.mcpConfig, images: opts.images })
   return state
@@ -1253,27 +1394,24 @@ export function resumeSDKSession(opts: SDKSessionInitOpts): SDKSessionState {
 
 // ── Resolve a single permission request ──────────────────────────────
 
-function applyDecision(
-  state: SDKSessionState,
-  pending: PendingPermission,
-  behavior: PermissionDecision,
-): void {
+/**
+ * Whether "always allow" can be offered: it saves the rule the CLI suggested
+ * for this ask, and an ask without one, or one the CLI will save nothing for,
+ * is answered once.
+ */
+export function offersAlwaysAllow(request: Pick<PermissionRequestData, "suggestions" | "suppressAlwaysAllowRule">): boolean {
+  return !request.suppressAlwaysAllowRule && (request.suggestions?.length ?? 0) > 0
+}
+
+function applyDecision(pending: PendingPermission, behavior: PermissionDecision): void {
   if (behavior === "deny") {
     pending.resolve({ behavior: "deny", message: "User declined tool execution." })
     return
   }
-  const remember = behavior === "allow_always" && !pending.suppressAlwaysAllowRule
-  if (remember) {
-    if (!pending.suggestions?.length) {
-      state.sessionAllowedTools.add(pending.toolName)
-    }
-  }
   pending.resolve({
     behavior: "allow",
     updatedInput: pending.input,
-    ...(remember && pending.suggestions?.length
-      ? { updatedPermissions: pending.suggestions }
-      : {}),
+    ...(behavior === "allow_always" && offersAlwaysAllow(pending) ? { updatedPermissions: pending.suggestions } : {}),
   })
 }
 
@@ -1287,7 +1425,7 @@ export function resolvePermission(
   if (!state || !pending) return { found: false }
 
   state.pendingPermissions.delete(requestId)
-  applyDecision(state, pending, behavior)
+  applyDecision(pending, behavior)
 
   return { found: true, toolName: pending.toolName }
 }
@@ -1319,24 +1457,56 @@ function normalizeUserQuestionAnswers(
   return Object.keys(normalized).length > 0 ? normalized : null
 }
 
-/** Resolve the blocked AskUserQuestion tool with the SDK's expected input shape. */
+/** The CLI capability that lets an answer say a question went unanswered, and how. */
+export const UNANSWERED_QUESTIONS_CAPABILITY = "ask_user_question_unanswered_v1"
+
+/** What the agent reads for a skipped question. */
+export const SKIPPED_QUESTION_ANSWER = "The user skipped this question."
+
+/**
+ * One answer for every question of the call: the skip notice, or the chat
+ * message the user sent instead of answering.
+ */
+function unansweredAnswers(
+  input: Record<string, unknown>,
+  answers: UserQuestionAnswers,
+  unanswered: QuestionUnanswered,
+): Record<string, string> | null {
+  const reply = typeof answers === "string" ? answers : (Array.isArray(answers) ? answers : Object.values(answers)).join("\n")
+  const text = unanswered === "skipped" ? SKIPPED_QUESTION_ANSWER : reply.trim()
+  const questions = projectQuestions(input).map(({ question }) => question)
+  return text && questions.length > 0 ? Object.fromEntries(questions.map((question) => [question, text])) : null
+}
+
+/**
+ * Resolve the blocked AskUserQuestion tool with the SDK's expected input shape.
+ * An `unanswered` reply answers every question alike, and is recorded as such
+ * in the transcript where the CLI supports it.
+ */
 export function resolveUserQuestion(
   sessionId: string,
   toolUseId: string,
   answers: UserQuestionAnswers,
+  unanswered?: QuestionUnanswered,
 ): { found: boolean } {
   const state = sdkSessions.get(sessionId)
   if (!state) return { found: false }
 
   const pending = state.pendingUserQuestions.get(toolUseId)
   if (!pending) return { found: false }
-  const normalized = normalizeUserQuestionAnswers(pending.input, answers)
+  const normalized = unanswered
+    ? unansweredAnswers(pending.input, answers, unanswered)
+    : normalizeUserQuestionAnswers(pending.input, answers)
   if (!normalized) return { found: false }
+  // An older CLI refuses the whole answer over a key it does not know.
+  const annotations = unanswered && state.capabilities.has(UNANSWERED_QUESTIONS_CAPABILITY)
+    ? Object.fromEntries(Object.keys(normalized).map((question) => [question, { unanswered }]))
+    : null
 
   state.pendingUserQuestions.delete(toolUseId)
   pending.resolve({
     behavior: "allow",
-    updatedInput: { ...pending.input, answers: normalized },
+    updatedInput: { ...pending.input, answers: normalized, ...(annotations ? { annotations } : {}) },
   })
   return { found: true }
 }
@@ -1456,8 +1626,8 @@ export function resolveAllPermissions(
   const state = sdkSessions.get(sessionId)
   if (!state) return []
 
-  const resolved = Array.from(state.pendingPermissions.values(), ({ resolve: _, ...request }) => request)
-  for (const pending of state.pendingPermissions.values()) applyDecision(state, pending, behavior)
+  const resolved = Array.from(state.pendingPermissions.values(), permissionRequestOf)
+  for (const pending of state.pendingPermissions.values()) applyDecision(pending, behavior)
   state.pendingPermissions.clear()
   return resolved
 }
@@ -1467,7 +1637,7 @@ export function resolveAllPermissions(
 export function getSDKPermissions(sessionId: string): PermissionRequestData[] {
   const state = sdkSessions.get(sessionId)
   if (!state) return []
-  return Array.from(state.pendingPermissions.values(), ({ resolve: _, ...rest }) => rest)
+  return Array.from(state.pendingPermissions.values(), permissionRequestOf)
 }
 
 // ── Get pending AskUserQuestion calls ────────────────────────────────

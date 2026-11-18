@@ -62,9 +62,12 @@ export function QuestionOptionBody({
 export function AskUserAnswerForm({
   toolCall,
   sessionId,
+  canSkip = false,
 }: {
   toolCall: ToolCall
   sessionId: string
+  /** Offer Skip, which tells the agent the questions were skipped instead of ending its turn. */
+  canSkip?: boolean
 }): React.ReactElement | null {
   const questions = (toolCall.input.questions as AskUserQuestion[] | undefined) ?? []
   // A half-typed answer and a sent one both outlive the row: scrolling away
@@ -99,16 +102,19 @@ export function AskUserAnswerForm({
     setSubmitted(true)
   }
 
-  const handleSubmit = async (event: React.FormEvent) => {
-    event.preventDefault()
+  const deliver = async (skip: boolean) => {
     setSubmitting(true)
     setDeliveryError(null)
     try {
-      const result = await submitUserQuestionAnswers(sessionId, toolCall.id, answers)
+      const result = skip
+        ? await submitUserQuestionAnswers(sessionId, toolCall.id, [], "skipped")
+        : await submitUserQuestionAnswers(sessionId, toolCall.id, answers)
       if (result.ok) {
         setSubmitted(true)
-      } else if (result.gone) {
+      } else if (result.gone && !skip) {
         deliverAsMessage()
+      } else if (result.gone) {
+        setDeliveryError("This question is no longer waiting for an answer.")
       } else {
         setDeliveryError("Answer delivery could not be confirmed. Check the message queue before trying again.")
       }
@@ -118,9 +124,14 @@ export function AskUserAnswerForm({
     setSubmitting(false)
   }
 
+  const handleSubmit = (event: React.FormEvent) => {
+    event.preventDefault()
+    void deliver(false)
+  }
+
   return (
     <form
-      onSubmit={(event) => { void handleSubmit(event) }}
+      onSubmit={handleSubmit}
       className={cn("flex flex-col gap-3", submitted && "pointer-events-none opacity-50")}
     >
       {deliveryError && <p role="alert">{deliveryError}</p>}
@@ -206,13 +217,27 @@ export function AskUserAnswerForm({
           </FieldSet>
         )
       })}
-      <Button
-        type="submit"
-        size="sm"
-        disabled={submitting || submitted}
-      >
-        {submitted ? "Sent" : submitting ? "Sending..." : "Send answer"}
-      </Button>
+      <div className="flex items-center gap-2">
+        <Button
+          type="submit"
+          size="sm"
+          disabled={submitting || submitted}
+        >
+          {submitted ? "Sent" : submitting ? "Sending..." : "Send answer"}
+        </Button>
+        {canSkip && !submitted && (
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            disabled={submitting}
+            onClick={() => { void deliver(true) }}
+            title="Let the agent continue without an answer"
+          >
+            Skip
+          </Button>
+        )}
+      </div>
     </form>
   )
 }

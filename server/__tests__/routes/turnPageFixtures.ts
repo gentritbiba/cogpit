@@ -75,9 +75,12 @@ export function claudeTranscript(turnCount: number, sizeOf: (index: number) => n
           noise(),
           toolResult(tool, body),
           attachment("hook_success", { hookName: "PostToolUse" }),
+          // A line the CLI showed mid-turn, then one after the turn's work.
+          system("informational", { content: `safeguards stopped the response above ${turn}`, level: "notice", isMeta: false }),
           text(`read ${turn}`),
           system("turn_duration", { durationMs: 2000 }),
           system("stop_hook_summary", { hookCount: 1 }),
+          system("informational", { content: `Goal cleared ${turn}\nRun /goal again to continue.`, level: "warning", isMeta: false }),
         )
         break
       case 2:

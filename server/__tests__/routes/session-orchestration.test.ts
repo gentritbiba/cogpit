@@ -153,6 +153,12 @@ describe("pendingInputResponseFrom", () => {
     expect(pendingInputResponseFrom({ answers: { q: "a" } })).toEqual({ answers: { q: "a" } })
     expect(pendingInputResponseFrom({ answers: [1] })).toBeNull()
   })
+
+  it("reads how a question went unanswered, and refuses a kind it does not know", () => {
+    expect(pendingInputResponseFrom({ answers: [], unanswered: "skipped" })).toEqual({ answers: [], unanswered: "skipped" })
+    expect(pendingInputResponseFrom({ answers: "teal", unanswered: "replied_in_chat" })).toEqual({ answers: "teal", unanswered: "replied_in_chat" })
+    expect(pendingInputResponseFrom({ answers: [], unanswered: "dismissed" })).toBeNull()
+  })
 })
 
 describe("/api/session-children", () => {

@@ -3,6 +3,7 @@ import {
   fetchSessionConfig,
   flushSessionConfig,
   saveSessionConfig,
+  seedSessionConfig,
   type SessionConfig,
 } from "@/lib/sessionConfig"
 import { onSessionConfigChanged } from "@/lib/sessionConfigEvents"
@@ -86,7 +87,8 @@ export interface SessionConfigSync {
  * the user changed that the server has not been sent yet. While the user may
  * write, each change they make is saved back, field by field. A session with
  * nothing stored yet is seeded with the current values once it is writable;
- * the permission mode only by its owner.
+ * the permission mode only by its owner. A seed fills only the fields the
+ * server still holds nothing for, and what it holds instead is read back.
  */
 export function useSessionConfigSync({
   sessionKey,
@@ -143,7 +145,10 @@ export function useSessionConfigSync({
         const seeded = accessRef.current === "own"
           ? SESSION_SETTING_FIELDS
           : SESSION_SETTING_FIELDS.filter((field) => field !== "permissionMode")
-        saveSessionConfig(key, fieldsOf(current, seeded))
+        void seedSessionConfig(key, fieldsOf(current, seeded)).then((stored) => {
+          // What the server stored first, as the mode a session runs in, is read back.
+          if (stored && reading === readsRef.current && changedFields(current, storedValues(stored, current)).length > 0) read(key)
+        })
         return
       }
       const stored = storedValues(config, saved ?? current)

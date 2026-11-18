@@ -55,6 +55,7 @@ const {
     hasActiveDescendantTurn: vi.fn(() => false),
     listApprovalThreadIds: vi.fn(() => []),
     call: vi.fn(),
+    waitForCompletion: vi.fn(() => new Promise(() => {})),
     shutdown: vi.fn(async () => {}),
   },
   mockCopilotRuntime: {

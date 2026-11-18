@@ -21,6 +21,19 @@ describe("toolResultMetadata", () => {
     expect(formatToolFileDiff(result.fileDiffs![0])).toBe("@@ -15,1 +15,1 @@\n-old\n+new")
   })
 
+  it("reads how AskUserQuestion answers went unanswered from the annotations the CLI echoes", () => {
+    // The toolUseResult Claude Code 2.1.326 wrote for a skip and a chat reply.
+    const result = {
+      questions: [{ question: "Pick a color?" }, { question: "Pick a size?" }, { question: "Pick a shape?" }],
+      answers: { "Pick a color?": "The user skipped this question.", "Pick a size?": "make it teal", "Pick a shape?": "Round" },
+      annotations: { "Pick a color?": { unanswered: "skipped" }, "Pick a size?": { unanswered: "replied_in_chat" }, "Pick a shape?": { notes: "fine", unanswered: "later" } },
+    }
+    expect(toolResultMetadata("AskUserQuestion", result)).toEqual({
+      unansweredQuestions: { "Pick a color?": "skipped", "Pick a size?": "replied_in_chat" },
+    })
+    expect(toolResultMetadata("AskUserQuestion", { answers: { "Pick a color?": "Red" } })).toEqual({})
+  })
+
   it.each([null, undefined, "text", [], { bashEditDiff: null }])("accepts older or absent metadata: %j", (value) => {
     expect(toolResultMetadata("Bash", value)).toEqual({})
   })

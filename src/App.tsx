@@ -358,7 +358,7 @@ export default function App() {
     dispatch({ type: "UPDATE_SESSION", session, loadId })
   }, [dispatch])
   const {
-    isLive, sseState, isCompacting, streamingOverlayStore, sessionShown, turnError, agentProgress, promptSuggestion, rateLimit,
+    isLive, sseState, isCompacting, streamingOverlayStore, sessionShown, turnError, agentProgress, promptSuggestion, rateLimit, signInEndsAt,
   } = useLiveSession(
     state.sessionSource,
     handleLiveUpdate,
@@ -661,6 +661,7 @@ export default function App() {
     isMobile,
     handleJumpToTurn: actions.handleJumpToTurn,
     markPermissionsApplied: perms.markApplied,
+    setPermissionMode: permsSetMode,
     hasPermsPendingChanges: perms.hasPendingChanges,
     permissionsConfig: pickedPermissions,
     settingsChange: sessionConfig.picked,
@@ -866,6 +867,7 @@ export default function App() {
     turnError,
     promptSuggestion,
     rateLimit,
+    signInEndsAt,
     undoRedo,
     pendingInteraction,
     permissionRequests: permReqs.requests,
@@ -891,7 +893,7 @@ export default function App() {
     },
   }), [
     state.sessionSource,
-    isLive, sseState, isCompacting, turnError, promptSuggestion, rateLimit,
+    isLive, sseState, isCompacting, turnError, promptSuggestion, rateLimit, signInEndsAt,
     undoRedo, pendingInteraction, isSubAgentView, sessionPermissions,
     permReqs.requests, permReqs.responding, permReqs.respond, permReqs.respondAll,
     slashSuggestions.suggestions, slashSuggestions.loading,

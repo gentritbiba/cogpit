@@ -227,6 +227,8 @@ function mapContentBlock(block: TurnContentBlock) {
         ...(block.contextUsage ? { contextUsage: block.contextUsage } : {}),
         ...(block.usageReport ? { usageReport: block.usageReport } : {}),
       }
+    case "notice":
+      return { kind: "notice" as const, level: block.level, content: block.content, timestamp: block.timestamp ?? null }
     default: {
       // Exhaustiveness guard: a new TurnContentBlock kind must fail typecheck here
       // rather than silently serializing as undefined and vanishing from the response.

@@ -98,11 +98,13 @@ A child blocked on a question or approval notifies you once per request with
 | 3 | Still running or timed out; keep waiting |
 | 1 | Error, missing session or unreachable device; inspect the response |
 
-A turn the agent could not run, such as an API error or a CLI that is not
-installed or signed in, settles as outcome `error`. Its `failure.reason` is
-`not_installed`, `not_signed_in`, `http_status` (with `httpStatus`) or `other`,
-and `error` gives the plain explanation followed by the agent's own words. A
-person has to install or sign in to the CLI before a resend can work.
+A turn the agent could not run, such as an API error, a model it cannot use or
+a CLI that is not installed or signed in, settles as outcome `error`. Its
+`failure.reason` is `not_installed`, `not_signed_in`, `model_unavailable`,
+`http_status` (with `httpStatus`) or `other`, and `error` gives the plain
+explanation followed by the agent's own words. A person has to install or sign
+in to the CLI before a resend can work. After `model_unavailable`, a plain
+`send` runs on the model the session last used, or the agent's recommended one.
 
 ## Status board
 
@@ -164,12 +166,15 @@ cogpit-session board get "$CHILD"
 cogpit-session approve "$ID" --request "$REQUEST"
 cogpit-session deny "$ID" --request "$REQUEST" --feedback "Use the smaller change"
 cogpit-session answer "$ID" "Blue" --request "$REQUEST"
+cogpit-session answer "$ID" --skip --request "$REQUEST"   # Claude: continue without an answer
 cogpit-session interrupt "$ID"   # stop the turn, retain the session
 cogpit-session stop "$ID"        # stop the session and cancel its queued messages
 cogpit-session discard "$ID"     # fetch remote work once more, then remove its worktree
 ```
 
-Omit `--request` when exactly one matching request is pending. After answering,
-wait again. Stop only children you own. `stop` keeps a transferred worktree;
+Omit `--request` when exactly one matching request is pending. `--skip` tells
+a Claude session its questions were skipped, so it carries on with its own
+judgment instead of ending the turn; `next` lists it for questions that take
+it. After answering, wait again. Stop only children you own. `stop` keeps a transferred worktree;
 `discard` removes it after preserving its work. For full transcript drill-down,
 use `cogpit-memory` ([memory.md](memory.md)).

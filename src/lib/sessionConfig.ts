@@ -46,6 +46,23 @@ export async function fetchSessionConfig(key: string): Promise<SessionConfig | n
   }
 }
 
+/**
+ * Give a session with nothing stored this client's values, only where the
+ * server still holds none: a mode it stored meanwhile, as the one the session
+ * runs in, stays. Resolves to the config the server then holds, or null when
+ * the write failed.
+ */
+export async function seedSessionConfig(key: string, patch: SessionConfig): Promise<SessionConfig | null> {
+  try {
+    const res = await jsonFetch(`/api/session-config/${encodeURIComponent(key)}?fill`, patch, { method: "PUT" })
+    if (!res.ok) return null
+    const data: unknown = await res.json()
+    return data && typeof data === "object" ? data as SessionConfig : null
+  } catch {
+    return null
+  }
+}
+
 const SAVE_DEBOUNCE_MS = 300
 
 interface PendingSave {

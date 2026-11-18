@@ -33,6 +33,14 @@ describe("submitUserQuestionAnswers", () => {
     })
   })
 
+  it("says how a question went unanswered, on either route", async () => {
+    await submitUserQuestionAnswers("sess-1", "tu-1", [], "skipped")
+    expect(JSON.parse(lastCall()[1].body as string)).toMatchObject({ toolUseId: "tu-1", answers: [], unanswered: "skipped" })
+    history.pushState({}, "", "/shared/sess-1")
+    await submitUserQuestionAnswers("sess-1", "tu-1", "teal", "replied_in_chat")
+    expect(JSON.parse(lastCall()[1].body as string)).toEqual({ toolUseId: "tu-1", answers: "teal", unanswered: "replied_in_chat" })
+  })
+
   it("uses the token-scoped route and names no session when the page is a share", async () => {
     history.pushState({}, "", "/shared/sess-1")
     await submitUserQuestionAnswers("sess-1", "tu-1", { "Pick one": "a" })

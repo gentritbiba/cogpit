@@ -427,6 +427,31 @@ describe("TurnSection prompts", () => {
     expect(queued).toHaveTextContent("Also check mobile")
   })
 
+  it("shows a notice from the CLI in place, its headline above the detail", () => {
+    const noticeTurn: Turn = {
+      ...turn,
+      id: "turn-notice",
+      contentBlocks: [
+        { kind: "text", text: ["Working on it"] },
+        {
+          kind: "notice",
+          level: "warning",
+          content: "Claude can't use thinking from another organization\nClaude's earlier thinking was written while you were signed in to another organization.",
+          timestamp: "2026-08-19T12:00:01.000Z",
+        },
+        { kind: "text", text: ["Final response"] },
+      ],
+      toolCalls: [],
+    }
+
+    render(<TurnSection turn={noticeTurn} index={0} turnKey="turn" isLast={true} />, { wrapper })
+
+    const notice = screen.getByRole("note")
+    expect(notice).toHaveAttribute("data-level", "warning")
+    expect(notice.querySelectorAll("p")[0]).toHaveTextContent(/^Claude can't use thinking from another organization$/)
+    expect(notice.querySelectorAll("p")[1]).toHaveTextContent(/^Claude's earlier thinking was written/)
+  })
+
   it("shows a crew chat post that arrived mid-turn as what happened, not as the reader's bubble", () => {
     const post = formatCrewChatDelivery(
       { sequence: 3, id: "m3", rootId: "root", author: { kind: "agent", name: "ring-deploy" }, text: "One correction on (B)", mentions: [], createdAt: 0 },

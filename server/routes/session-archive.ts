@@ -1,12 +1,17 @@
 import type { IncomingMessage, ServerResponse } from "node:http"
+import { storeForPath } from "../agents"
 import { authorizeSession, reportSessionEvent } from "../edition"
 import { sendJson } from "../helpers"
 import { HttpBodyError, readJsonBody, type UseFn } from "../http"
+import { mapWithConcurrency } from "../lib/mapWithConcurrency"
 import { RouteError, sendError, ErrorCodes } from "../lib/routeError"
 import { setSessionsArchived } from "../lib/sessionArchive"
+import { findJsonlPath } from "../sessionPaths"
 
 const MAX_IDS_PER_REQUEST = 500
 const MAX_ID_LENGTH = 512
+/** Agent archives are marked a few sessions at a time, after the answer. */
+const MARK_CONCURRENCY = 4
 
 interface ArchiveRequest {
   sessionIds: string[]
@@ -63,6 +68,23 @@ async function authorizeAll(
 }
 
 /**
+ * Repeat the user's choice where the session's agent CLI keeps an archive of
+ * its own, so other clients of that CLI agree. Best effort: a failure is
+ * logged, and Cogpit's own record already outranks the stale mark.
+ */
+async function markAgentArchives(sessionIds: readonly string[], archived: boolean): Promise<void> {
+  await mapWithConcurrency(sessionIds, MARK_CONCURRENCY, async (sessionId) => {
+    try {
+      const filePath = await findJsonlPath(sessionId)
+      const store = filePath ? storeForPath(filePath) : null
+      if (filePath && store?.setArchiveMark) await store.setArchiveMark(filePath, archived)
+    } catch (error) {
+      console.warn(`[archive] ${sessionId} was not ${archived ? "archived" : "restored"} in its agent's own archive:`, error)
+    }
+  })
+}
+
+/**
  * POST /api/archive-sessions — hide sessions from the sidebar or bring them
  * back. Archiving is a sidebar concern only: transcripts are untouched, and
  * the session list reports `archived` on rows the user chose to hide. The
@@ -75,9 +97,10 @@ export function registerSessionArchiveRoutes(use: UseFn) {
       const { sessionIds: requested, archived } = await readArchiveRequest(req)
       const sessionIds = await authorizeAll(req, res, requested)
       if (!sessionIds) return
-      const changed = await setSessionsArchived(sessionIds, archived)
+      const changed = await setSessionsArchived(sessionIds, archived, { byUser: true })
       reportSessionEvent(req, "session.archive", null, { sessionIds, archived })
       sendJson(res, 200, { sessionIds, archived, changed })
+      void markAgentArchives(sessionIds, archived)
     } catch (err) {
       if (err instanceof RouteError) return sendError(res, err)
       sendError(res, new RouteError(500, ErrorCodes.INTERNAL_ERROR, String(err)))

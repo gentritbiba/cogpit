@@ -46,11 +46,14 @@ const CODEX_CAPABILITIES: Partial<ModelOption> = {
   serviceTiers: CODEX_FAST_TIER,
 }
 
-// Mirrors `model/list` from Codex CLI 0.163.0.
+// Mirrors `model/list` from Codex CLI 0.167.2.
 const CODEX_MODELS: readonly ModelOption[] = [
   { value: "", label: "Default", description: "Use the model configured in Codex" },
+  { value: "gpt-6.2-sol", label: "GPT-6.2 Sol", description: "Latest workhorse model for coding and everyday work", ...CODEX_CAPABILITIES, defaultReasoningEffort: "low", serviceTiers: CODEX_FASTER_TIER },
+  { value: "gpt-6.2-astra", label: "GPT-6.2 Astra", description: "Our most capable model for complex, demanding work", ...CODEX_CAPABILITIES, defaultReasoningEffort: "low", serviceTiers: CODEX_FASTER_TIER },
   { value: "gpt-6.1-sol", label: "GPT-6.1 Sol", description: "Latest workhorse model for coding and everyday work", ...CODEX_CAPABILITIES, defaultReasoningEffort: "low", serviceTiers: CODEX_FASTER_TIER },
   { value: "gpt-6-astra", label: "GPT-6 Astra", description: "Frontier intelligence for the most demanding work", ...CODEX_CAPABILITIES, serviceTiers: CODEX_FASTER_TIER },
+  { value: "gpt-6.1-terra", label: "GPT-6.1 Terra", description: "GPT-6.1 Terra Codex model", ...CODEX_CAPABILITIES, defaultReasoningEffort: "low", serviceTiers: CODEX_FAST_TIER_SPEED_ONLY },
   { value: "gpt-6-sol", label: "GPT-6 Sol", description: "Previous generation workhorse model", ...CODEX_CAPABILITIES, serviceTiers: CODEX_FAST_TIER_SPEED_ONLY },
   { value: "gpt-6-luna", label: "GPT-6 Luna", description: "Fast and affordable model for easier tasks", ...CODEX_CAPABILITIES, supportedReasoningEfforts: CODEX_STANDARD_EFFORTS, serviceTiers: CODEX_FAST_TIER_SPEED_ONLY },
   { value: "gpt-5.6-sol", label: "GPT-5.6 Sol", description: "Older generation workhorse model", ...CODEX_CAPABILITIES, defaultReasoningEffort: "low" },

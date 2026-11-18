@@ -121,8 +121,10 @@ export function registerSessionConfigRoutes(use: UseFn) {
         const patch = await readPatch(req)
         const target = await authorizeKey(req, res, key, true)
         if (target === null) return
-        // Shallow merge; a field explicitly set to null is removed.
-        return sendJson(res, 200, await writeSessionConfig(req, key, target === "project" ? null : target.sessionId, patch))
+        // Shallow merge; a field explicitly set to null is removed. `?fill`
+        // sets only the fields nothing is stored for, as a client seeding a
+        // session does, so a mode the server stored first stays.
+        return sendJson(res, 200, await writeSessionConfig(req, key, target === "project" ? null : target.sessionId, patch, { fill: url.searchParams.has("fill") }))
       }
 
       next()

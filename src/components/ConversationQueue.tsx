@@ -47,7 +47,7 @@ function DeliveryProblems({ storageKey, commands: receipts, readOnly, onAction }
         <span className="min-w-0 flex-1 truncate" title={command.message}>{(command.message && generatedPromptSummary(command.message, nameOf)) || command.message || "Image attachment"}</span>
         {command.state === "failed" && <Button size="icon-xs" variant="ghost" aria-label="Dismiss failed message" title="Dismiss failed message" onClick={() => setDismissals((previous) => [...(Array.isArray(previous) ? previous : []), command.id])}><X /></Button>}
       </div>
-      {command.error && <p className="text-sm text-muted-foreground">{presentTurnError(command.error)}</p>}
+      {command.error && <p className="whitespace-pre-line text-sm text-muted-foreground">{presentTurnError(command.error)}</p>}
       {command.state === "unknown" && !readOnly && <div className="flex flex-wrap gap-2">
         <Button size="xs" variant="outline" disabled={busy} onClick={() => void action({ action: "resolve", commandId: command.id, disposition: "completed" })}>History confirms completion</Button>
         <Button size="xs" variant="outline" disabled={busy} onClick={() => void action({ action: "resolve", commandId: command.id, disposition: "failed" })}>History confirms failure</Button>

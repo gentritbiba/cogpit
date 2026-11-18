@@ -53,6 +53,7 @@ export function useLiveSession(
   // Predicted next prompt for the composer. The CLI suppresses these on the
   // first turn, in plan mode, and after an error, so null is the normal case.
   const [promptSuggestion, setPromptSuggestion] = useState<string | null>(null)
+  const [signInEndsAt, setSignInEndsAt] = useState<string | null>(null)
   // The runtime refused the turn on a spent allowance. Sticky by design: the
   // refusal ends the turn, so this has to outlive the stream_clear that follows
   // it and lift only when the allowance comes back or a later turn runs.
@@ -108,6 +109,7 @@ export function useLiveSession(
     setPromptSuggestion(null)
     setRateLimit(null)
     setTurnError(null)
+    setSignInEndsAt(null)
     if (!dirName || !fileName) {
       setIsLive(false)
       setSseState("disconnected")
@@ -334,6 +336,8 @@ export function useLiveSession(
           // Emitted after the turn's result, so it deliberately outlives the
           // stream_clear that immediately precedes it.
           setPromptSuggestion(typeof data.suggestion === "string" ? data.suggestion : null)
+        } else if (data.type === "sign_in_end") {
+          setSignInEndsAt(typeof data.endsAt === "string" ? data.endsAt : null)
         } else if (data.type === "turn_error") {
           setTurnError(typeof data.message === "string" ? data.message : "The turn failed")
         } else if (data.type === "stream_clear") {
@@ -397,5 +401,5 @@ export function useLiveSession(
     }
   }, [dirName, fileName, loadId, watchOffset, streamingOverlayStore])
 
-  return { isLive, sseState, isCompacting, streamingOverlayStore, sessionShown, turnError, agentProgress, promptSuggestion, rateLimit }
+  return { isLive, sseState, isCompacting, streamingOverlayStore, sessionShown, turnError, agentProgress, promptSuggestion, rateLimit, signInEndsAt }
 }

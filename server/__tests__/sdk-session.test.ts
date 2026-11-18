@@ -26,11 +26,12 @@ interface CapturedCall {
     resume?: string
     settings?: unknown
     mcpServers?: unknown
+    mcpServersDelivery?: "argv" | "initialize"
     stderr?: (data: string) => void
     canUseTool?: (
       toolName: string,
       input: Record<string, unknown>,
-      options: { toolUseID: string; signal?: AbortSignal; defaultToNo?: boolean; suppressAlwaysAllowRule?: boolean; suggestions?: Array<Record<string, unknown>> },
+      options: { toolUseID: string; signal?: AbortSignal; defaultToNo?: boolean; suppressAlwaysAllowRule?: boolean; suggestions?: Array<Record<string, unknown>>; matchedAskRule?: { source: string; toolName: string; ruleContent?: string } },
     ) => Promise<unknown>
     onElicitation?: (
       request: Record<string, unknown>,
@@ -126,6 +127,8 @@ vi.mock("@anthropic-ai/claude-agent-sdk", () => {
           await new Promise<void>((resolve) => { releaseHeldQuery = resolve })
         }
         if (scriptedError) {
+          // Scripted messages come first, as a CLI that answers and then exits non-zero.
+          for (const m of scriptedMessages ?? []) yield m
           if (scriptedStderr) args.options.stderr?.(scriptedStderr)
           const err = scriptedError
           resolveCompleted()
@@ -192,9 +195,23 @@ vi.mock("../lib/streamBus", () => ({
   publishAgentProgress: vi.fn(),
   publishPromptSuggestion: vi.fn(),
   publishCompacting: vi.fn(),
+  publishSessionConfig: vi.fn(),
+  publishSignInEnd: vi.fn(),
   clear: vi.fn(),
   getSnapshot: vi.fn(() => null),
   subscribe: vi.fn(() => () => {}),
+}))
+
+// The session's stored config, which a mode the CLI reports is written to.
+const storedConfigs = vi.hoisted(() => new Map<string, Record<string, unknown>>())
+vi.mock("../lib/sessionConfigStore", () => ({
+  sessionConfigKey: (sessionId: string) => `${sessionId}.jsonl`,
+  updateSessionConfig: vi.fn(async (key: string, change: (stored: Record<string, unknown>) => Record<string, unknown>) => {
+    const before = storedConfigs.get(key) ?? {}
+    const config = { ...before, ...change(before) }
+    storedConfigs.set(key, config)
+    return { before, config, changed: Object.keys(config).filter((field) => config[field] !== before[field]) }
+  }),
 }))
 
 // Lazy import after mocks are in place
@@ -236,6 +253,7 @@ beforeEach(() => {
   holdQueryAfterMessages = false
   releaseQueryAfterMessages = null
   nativeCli = null
+  storedConfigs.clear()
   vi.clearAllMocks()
 })
 
@@ -513,10 +531,9 @@ describe("sdk-session AskUserQuestion handling", () => {
 
   it.each(["bypassPermissions", "default"])("honors request-specific approval restrictions in %s mode", async (permissionMode) => {
     holdQueryOpen = true
-    const { createSDKSession, sdkSessions, resolvePermission, getSDKPermissions } = await loadModule()
+    const { createSDKSession, resolvePermission, getSDKPermissions } = await loadModule()
     createSDKSession({ sessionId: "restricted-approval", message: "Test", cwd: "/tmp", permissionMode })
     await waitUntil(() => captured.length > 0)
-    sdkSessions.get("restricted-approval")!.sessionAllowedTools.add("Artifact")
     const canUseTool = captured[0].options.canUseTool!
     const result = canUseTool("Artifact", { url: "https://claude.ai/public/artifacts/example" }, {
       toolUseID: "restricted",
@@ -534,21 +551,51 @@ describe("sdk-session AskUserQuestion handling", () => {
     expect(await next).toMatchObject({ behavior: "deny" })
   })
 
-  it("auto-allows regular tools via canUseTool in bypassPermissions mode", async () => {
-    const { createSDKSession, sdkSessions } = await loadModule()
-    createSDKSession({
-      sessionId: "bypass-regular",
-      cwd: "/tmp",
-      message: "hi",
-      permissionMode: "bypassPermissions",
-    })
+  it("shows every ask the CLI raises in bypassPermissions mode to the user", async () => {
+    // 2.1.323+ asks a person for some calls even in bypass mode (the MCP
+    // sign-in confirmation among them), without marking them in any way.
+    const { createSDKSession, getSDKPermissions, resolvePermission } = await loadModule()
+    holdQueryOpen = true
+    createSDKSession({ sessionId: "bypass-ask", cwd: "/tmp", message: "hi", permissionMode: "bypassPermissions" })
     await waitUntil(() => captured.length === 1)
 
     const input = { command: "ls" }
-    await expect(captured[0].options.canUseTool!("Bash", input, { toolUseID: "tool-bash-1" }))
-      .resolves.toEqual({ behavior: "allow", updatedInput: input })
-    // Must not queue a visible permission request in bypass mode
-    expect(sdkSessions.get("bypass-regular")?.pendingPermissions.size).toBe(0)
+    const result = captured[0].options.canUseTool!("Bash", input, { toolUseID: "tool-bash-1" })
+    expect(getSDKPermissions("bypass-ask")).toEqual([expect.objectContaining({ requestId: "tool-bash-1", toolName: "Bash" })])
+    resolvePermission("bypass-ask", "tool-bash-1", "allow")
+    await expect(result).resolves.toEqual({ behavior: "allow", updatedInput: input })
+    releaseHeldQuery?.()
+  })
+
+  it("always-allow saves only the rule the CLI suggested and never grants a whole tool", async () => {
+    const { createSDKSession, getSDKPermissions, resolvePermission } = await loadModule()
+    holdQueryOpen = true
+    createSDKSession({ sessionId: "always-allow", cwd: "/tmp", message: "hi" })
+    await waitUntil(() => captured.length === 1)
+    const canUseTool = captured[0].options.canUseTool!
+    const suggestions = [{ type: "addRules", rules: [{ toolName: "Bash", ruleContent: "git status:*" }], behavior: "allow", destination: "session" }]
+
+    const scoped = canUseTool("Bash", { command: "git status" }, { toolUseID: "scoped", suggestions })
+    resolvePermission("always-allow", "scoped", "allow_always")
+    await expect(scoped).resolves.toEqual({ behavior: "allow", updatedInput: { command: "git status" }, updatedPermissions: suggestions })
+
+    // No suggestion: "always" is an allow for this call alone, and the next
+    // Bash call still asks.
+    const unscoped = canUseTool("Bash", { command: "rm -rf build" }, { toolUseID: "unscoped" })
+    resolvePermission("always-allow", "unscoped", "allow_always")
+    await expect(unscoped).resolves.toEqual({ behavior: "allow", updatedInput: { command: "rm -rf build" } })
+    void canUseTool("Bash", { command: "rm -rf dist" }, { toolUseID: "again" })
+    expect(getSDKPermissions("always-allow")).toEqual([expect.objectContaining({ requestId: "again" })])
+    releaseHeldQuery?.()
+  })
+
+  it("offers always-allow only for asks that carry a rule to save", async () => {
+    const { offersAlwaysAllow } = await loadModule()
+    const suggestions = [{ type: "addRules" as const, rules: [{ toolName: "Bash" }], behavior: "allow" as const, destination: "session" as const }]
+    expect(offersAlwaysAllow({ suggestions })).toBe(true)
+    expect(offersAlwaysAllow({ suggestions: [] })).toBe(false)
+    expect(offersAlwaysAllow({})).toBe(false)
+    expect(offersAlwaysAllow({ suggestions, suppressAlwaysAllowRule: true })).toBe(false)
   })
 })
 
@@ -749,21 +796,6 @@ describe("sdk-session send resilience", () => {
     expect(captured[1].options.resume).toBe("aborted-send")
   })
 
-  it("carries session-scoped tool grants across a resume", async () => {
-    // Losing "always allow" grants on resume makes the new process re-prompt
-    // for tools the user already approved; an unanswered prompt blocks the
-    // turn forever, which reads as the session stalling.
-    const { createSDKSession, resumeSDKSession, sdkSessions } = await loadModule()
-    createSDKSession({ sessionId: "grants", cwd: "/tmp", message: "one" })
-    await waitUntil(() => captured.length === 1)
-    sdkSessions.get("grants")!.sessionAllowedTools.add("Bash")
-
-    resumeSDKSession({ sessionId: "grants", cwd: "/tmp", message: "two" })
-    await waitUntil(() => captured.length === 2)
-
-    expect(sdkSessions.get("grants")!.sessionAllowedTools.has("Bash")).toBe(true)
-  })
-
   it("does not wipe the live stream when a superseded query finishes", async () => {
     // resumeSDKSession replaces the state under the same session id. The old
     // state's finally still runs later and used to streamBus.clear() that id,
@@ -854,6 +886,66 @@ describe("sdk-session silent turn failures", () => {
     await waitUntil(() => vi.mocked(streamBus.publishError).mock.calls.length > 0)
     expect(vi.mocked(streamBus.publishError).mock.calls[0][1]).toBe("The working directory /gone no longer exists.")
     expect(describeErrorResult({ subtype: "error_max_turns", errors: [] })).toBe("Claude returned an error (error_max_turns)")
+  })
+
+  it("names the config file and backup of a start refused over an invalid config file", async () => {
+    const { describeErrorResult } = await loadModule()
+    const cliText = "Configuration error in /Users/me/.claude.json: JSON Parse error: Property name must be a string literal"
+    const message = describeErrorResult({
+      type: "result",
+      subtype: "error_during_execution",
+      is_error: true,
+      errors: [cliText],
+      startup_failure_reason: "config_file_invalid",
+      invalid_config_file: { path: "/Users/me/.claude.json", is_global: true, backup_searched: true, backup_path: "/Users/me/.claude/backups/.claude.json.backup.1763400000000" },
+    })
+
+    expect(message).toBe([
+      "Claude Code can't start: a config file isn't valid JSON.",
+      "File: /Users/me/.claude.json",
+      "Backup: /Users/me/.claude/backups/.claude.json.backup.1763400000000",
+      cliText,
+    ].join("\n"))
+  })
+
+  it("reports the error result again, described, when the CLI exits after it", async () => {
+    const streamBus = await import("../lib/streamBus")
+    const { createSDKSession } = await loadModule()
+    const cliText = "Configuration error in /Users/me/.claude.json: JSON Parse error: Property name must be a string literal"
+    const startupFailure = {
+      type: "result",
+      subtype: "error_during_execution",
+      is_error: true,
+      errors: [cliText],
+      startup_failure_reason: "config_file_invalid",
+      invalid_config_file: { path: "/Users/me/.claude.json", is_global: true, backup_searched: true, backup_path: "/Users/me/.claude/backups/.claude.json.backup.1" },
+    }
+    scriptedMessages = [startupFailure]
+    // The SDK replaces the exit error with the result's text.
+    scriptedError = new Error(`Claude Code returned an error result: ${cliText}`)
+
+    createSDKSession({ sessionId: "result-then-exit", cwd: "/tmp", message: "hi" })
+
+    await waitUntil(() => vi.mocked(streamBus.publishError).mock.calls.length > 1)
+    const published = vi.mocked(streamBus.publishError).mock.calls.map(([, message]) => String(message))
+    expect(published.every((message) => message.startsWith("Claude Code can't start: a config file isn't valid JSON.\nFile: /Users/me/.claude.json\n"))).toBe(true)
+  })
+
+  it("reports a crash in a later turn as itself, not as an earlier turn's error", async () => {
+    const streamBus = await import("../lib/streamBus")
+    const { createSDKSession } = await loadModule()
+    scriptedMessages = [
+      { type: "system", subtype: "init", cwd: "/tmp", permissionMode: "default" },
+      { type: "result", subtype: "success", is_error: true, result: "API Error: 529 Overloaded" },
+      { type: "system", subtype: "init", cwd: "/tmp", permissionMode: "default" },
+      { type: "assistant", parent_tool_use_id: null, message: { content: [] } },
+    ]
+    scriptedError = new Error("Claude Code process exited with code 1")
+
+    createSDKSession({ sessionId: "later-crash", cwd: "/tmp", message: "hi" })
+
+    await waitUntil(() => vi.mocked(streamBus.publishError).mock.calls.length > 1)
+    expect(vi.mocked(streamBus.publishError).mock.calls.at(-1)).toEqual(["later-crash", "Error: Claude Code process exited with code 1"])
   })
 
   it("reports a thrown query error over the stream bus when nothing is listening", async () => {
@@ -1467,6 +1559,7 @@ describe("sdk-session effort propagation", () => {
       sessionId: "live-permissions",
       cwd: "/tmp",
       message: "first",
+      permissionMode: "default",
       mcpConfig: JSON.stringify({ local: { command: "test" } }),
     })
     await waitUntil(() => captured.length === 1)
@@ -1679,7 +1772,7 @@ describe("sdk-session mid-turn permission mode change", () => {
   it("switching to bypassPermissions auto-allows every pending approval", async () => {
     const { createSDKSession, updateSDKSession, sdkSessions } = await loadModule()
     holdQueryOpen = true
-    createSDKSession({ sessionId: "perm-live-1", cwd: "/tmp", message: "first" })
+    createSDKSession({ sessionId: "perm-live-1", cwd: "/tmp", message: "first", permissionMode: "default" })
     await waitUntil(() => captured.length === 1)
 
     const state = sdkSessions.get("perm-live-1")!
@@ -1737,7 +1830,7 @@ describe("sdk-session mid-turn permission mode change", () => {
   it("reports the permission settings it changed and the requests the new mode approved", async () => {
     const { createSDKSession, updateSDKSession, sdkSessions } = await loadModule()
     holdQueryOpen = true
-    createSDKSession({ sessionId: "perm-live-report", cwd: "/tmp", message: "first" })
+    createSDKSession({ sessionId: "perm-live-report", cwd: "/tmp", message: "first", permissionMode: "default" })
     await waitUntil(() => captured.length === 1)
     const state = sdkSessions.get("perm-live-report")!
     addPending(state, "req-bash", "Bash")
@@ -2204,5 +2297,295 @@ describe("sdk-session failure log", () => {
     await waitUntil(() => !state.activeQuery)
     expect(failureLog.logAgentFailure).toHaveBeenCalledOnce()
     expect(failureLog.logAgentFailure.mock.calls[0][1]).toMatchObject({ sessionId: "crashed", message: expect.stringContaining("exited with code 1") })
+  })
+})
+
+describe("sdk-session CLI 2.1.326 catch-up", () => {
+  const INIT = { type: "system", subtype: "init", cwd: "/tmp", permissionMode: "default", capabilities: ["ask_user_question_unanswered_v1"] }
+
+  /** A live session whose query has processed `messages` and stays open. */
+  async function liveSession(sessionId: string, messages: unknown[], opts: Record<string, unknown> = {}) {
+    const sdk = await loadModule()
+    scriptedMessages = messages
+    holdQueryAfterMessages = true
+    const state = sdk.createSDKSession({ sessionId, cwd: "/tmp", message: "hi", permissionMode: "default", ...opts })
+    await waitUntil(() => releaseQueryAfterMessages !== null)
+    return { sdk, state }
+  }
+
+  it("follows the permission mode the CLI reports and has viewers read the config again", async () => {
+    const streamBus = await import("../lib/streamBus")
+    // Auto mode starts in Manual where it is unavailable (2.1.323).
+    const { state } = await liveSession("mode-readback", [INIT], { permissionMode: "auto" })
+    await waitUntil(() => vi.mocked(streamBus.publishSessionConfig).mock.calls.length === 1)
+    expect(state.permissionMode).toBe("default")
+    expect(storedConfigs.get("mode-readback.jsonl")).toEqual({ permissionMode: "default" })
+    expect(streamBus.publishSessionConfig).toHaveBeenCalledWith("mode-readback")
+    releaseQueryAfterMessages?.()
+  })
+
+  it("follows a mode change the CLI reports on system/status", async () => {
+    const streamBus = await import("../lib/streamBus")
+    const { state } = await liveSession("mode-status", [
+      INIT,
+      { type: "system", subtype: "status", status: null, permissionMode: "acceptEdits" },
+    ])
+    // Once for the mode the session started in, once for the change.
+    await waitUntil(() => vi.mocked(streamBus.publishSessionConfig).mock.calls.length === 2)
+    expect(state.permissionMode).toBe("acceptEdits")
+    expect(storedConfigs.get("mode-status.jsonl")).toEqual({ permissionMode: "acceptEdits" })
+    releaseQueryAfterMessages?.()
+  })
+
+  it("starts every session able to switch to bypass, in bypass when no mode was asked for", async () => {
+    await liveSession("mode-unset", [INIT], { permissionMode: undefined })
+    expect(captured.at(-1)?.options).toEqual(expect.objectContaining({ permissionMode: "bypassPermissions", allowDangerouslySkipPermissions: true }))
+    await liveSession("mode-asked", [INIT], { permissionMode: "plan" })
+    expect(captured.at(-1)?.options).toEqual(expect.objectContaining({ permissionMode: "plan", allowDangerouslySkipPermissions: true }))
+  })
+
+  it("tells no viewer to read the config again while it holds the mode the CLI reports", async () => {
+    const streamBus = await import("../lib/streamBus")
+    const { updateSessionConfig } = await import("../lib/sessionConfigStore")
+    storedConfigs.set("mode-same.jsonl", { permissionMode: "default" })
+    const { state } = await liveSession("mode-same", [INIT, { ...INIT }])
+    await waitUntil(() => vi.mocked(updateSessionConfig).mock.calls.length === 2)
+    expect(storedConfigs.get("mode-same.jsonl")).toEqual({ permissionMode: "default" })
+    expect(streamBus.publishSessionConfig).not.toHaveBeenCalled()
+    expect(state.permissionMode).toBe("default")
+    releaseQueryAfterMessages?.()
+  })
+
+  it("stores the bypass a session started without a mode runs in, over the mode a client seeded", async () => {
+    const streamBus = await import("../lib/streamBus")
+    // The owner opened the session and seeded the picker's Ask before the next turn's init.
+    storedConfigs.set("mode-seeded.jsonl", { permissionMode: "default", effort: "high" })
+    const { state } = await liveSession("mode-seeded", [{ ...INIT, permissionMode: "bypassPermissions" }], { permissionMode: undefined })
+    await waitUntil(() => vi.mocked(streamBus.publishSessionConfig).mock.calls.length === 1)
+    expect(state.permissionMode).toBe("bypassPermissions")
+    expect(storedConfigs.get("mode-seeded.jsonl")).toEqual({ permissionMode: "bypassPermissions", effort: "high" })
+    expect(streamBus.publishSessionConfig).toHaveBeenCalledWith("mode-seeded")
+    releaseQueryAfterMessages?.()
+  })
+
+  it("keeps the old mode and approves nothing when the CLI refuses a switch", async () => {
+    const streamBus = await import("../lib/streamBus")
+    const { sdk, state } = await liveSession("mode-refused", [INIT])
+    const resolve = vi.fn()
+    state.pendingPermissions.set("req-bash", { requestId: "req-bash", toolName: "Bash", input: {}, toolUseId: "req-bash", timestamp: 0, resolve })
+    setPermissionModeSpy!.mockRejectedValueOnce(new Error("Cannot set permission mode to bypassPermissions because the session was not launched with --dangerously-skip-permissions"))
+
+    const result = await sdk.updateSDKSession("mode-refused", { permissionMode: "bypassPermissions", model: "model-x" })
+
+    expect(resolve).not.toHaveBeenCalled()
+    expect(state.permissionMode).toBe("default")
+    expect(result).toMatchObject({ permissionMode: "default", permissionChange: null, appliedLive: ["model"], staged: [] })
+    expect(streamBus.publishError).toHaveBeenCalledWith("mode-refused", expect.stringContaining("not launched with --dangerously-skip-permissions"))
+    releaseQueryAfterMessages?.()
+  })
+
+  it("leaves asks the CLI wants a person to answer when the mode switches to bypassPermissions", async () => {
+    const { sdk, state } = await liveSession("mode-explicit", [INIT])
+    const plain = vi.fn()
+    const explicit = vi.fn()
+    state.pendingPermissions.set("plain", { requestId: "plain", toolName: "Bash", input: {}, toolUseId: "plain", timestamp: 0, resolve: plain })
+    state.pendingPermissions.set("explicit", { requestId: "explicit", toolName: "Bash", input: {}, toolUseId: "explicit", timestamp: 0, suppressAlwaysAllowRule: true, decisionReason: "Dangerous rm operation on working directory", resolve: explicit })
+
+    const result = await sdk.updateSDKSession("mode-explicit", { permissionMode: "bypassPermissions" })
+
+    expect(plain).toHaveBeenCalledWith(expect.objectContaining({ behavior: "allow" }))
+    expect(explicit).not.toHaveBeenCalled()
+    expect(result.permissionChange?.autoApproved).toEqual([{ requestId: "plain", toolName: "Bash" }])
+    releaseQueryAfterMessages?.()
+  })
+
+  it("switches to the mode the update asked for when the CLI reports the old one while the model changes", async () => {
+    const { sdk, state } = await liveSession("mode-raced", [{ ...INIT, permissionMode: "bypassPermissions" }], { permissionMode: "bypassPermissions" })
+    const resolve = vi.fn()
+    state.pendingPermissions.set("req-bash", { requestId: "req-bash", toolName: "Bash", input: {}, toolUseId: "req-bash", timestamp: 0, resolve })
+    // A status report from before the switch lands while setModel is awaited.
+    setModelSpy!.mockImplementationOnce(async () => { state.permissionMode = "bypassPermissions" })
+
+    await sdk.updateSDKSession("mode-raced", { permissionMode: "default", model: "model-x" })
+
+    expect(setPermissionModeSpy).toHaveBeenCalledWith("default")
+    expect(setPermissionModeSpy).not.toHaveBeenCalledWith("bypassPermissions")
+    expect(resolve).not.toHaveBeenCalled()
+    expect(state.permissionMode).toBe("default")
+    releaseQueryAfterMessages?.()
+  })
+
+  it("keeps the asked-for mode for the next resume when the process exits during the switch", async () => {
+    const streamBus = await import("../lib/streamBus")
+    const { sdk, state } = await liveSession("mode-closing", [INIT])
+    const resolve = vi.fn()
+    state.pendingPermissions.set("req-bash", { requestId: "req-bash", toolName: "Bash", input: {}, toolUseId: "req-bash", timestamp: 0, resolve })
+    // The SDK fails the request as the process exits, and ends the query just after.
+    setPermissionModeSpy!.mockImplementationOnce(async () => {
+      releaseQueryAfterMessages?.()
+      throw new Error("Query closed before response received")
+    })
+
+    const result = await sdk.updateSDKSession("mode-closing", { permissionMode: "bypassPermissions" })
+
+    expect(state.permissionMode).toBe("bypassPermissions")
+    expect(result).toMatchObject({ permissionMode: "bypassPermissions", appliedLive: [], staged: ["permissionMode"] })
+    expect(streamBus.publishError).not.toHaveBeenCalledWith("mode-closing", expect.stringContaining("kept its permission mode"))
+    expect(resolve).not.toHaveBeenCalledWith(expect.objectContaining({ behavior: "allow" }))
+  })
+
+  it("approves only the asks pending before the switch was sent, as soon as it lands", async () => {
+    const { sdk, state } = await liveSession("mode-snapshot", [INIT])
+    const before = vi.fn()
+    const duringSwitch = vi.fn()
+    const afterSwitch = vi.fn()
+    const ask = (requestId: string, resolve: () => void) => state.pendingPermissions.set(requestId, { requestId, toolName: "Bash", input: {}, toolUseId: requestId, timestamp: 0, resolve })
+    ask("before", before)
+    // The CLI may take the new mode and ask again before its answer arrives.
+    setPermissionModeSpy!.mockImplementationOnce(async () => { ask("during", duringSwitch) })
+    // An effort change follows the switch, and raises an ask while it is out.
+    let answerFlags!: () => void
+    applyFlagSettingsSpy!.mockImplementationOnce(() => new Promise<void>((resolve) => {
+      ask("after", afterSwitch)
+      answerFlags = resolve
+    }))
+
+    const update = sdk.updateSDKSession("mode-snapshot", { permissionMode: "bypassPermissions", effort: "low" })
+
+    await waitUntil(() => before.mock.calls.length === 1)
+    expect(before).toHaveBeenCalledWith(expect.objectContaining({ behavior: "allow" }))
+    answerFlags()
+    expect((await update).permissionChange?.autoApproved).toEqual([{ requestId: "before", toolName: "Bash" }])
+    expect(duringSwitch).not.toHaveBeenCalled()
+    expect(afterSwitch).not.toHaveBeenCalled()
+    expect([...state.pendingPermissions.keys()]).toEqual(["during", "after"])
+    releaseQueryAfterMessages?.()
+  })
+
+  it("leaves an ask the user's own ask rule forced for a person, and keeps the rule off the dashboard", async () => {
+    const { sdk, state } = await liveSession("mode-ask-rule", [INIT])
+    const canUseTool = captured.at(-1)!.options.canUseTool!
+    const signal = new AbortController().signal
+    const ruled = canUseTool("Bash", { command: "git push" }, { toolUseID: "ruled", signal, matchedAskRule: { source: "userSettings", toolName: "Bash", ruleContent: "git push:*" } })
+    void canUseTool("Bash", { command: "ls" }, { toolUseID: "plain", signal })
+
+    expect(sdk.getSDKPermissions("mode-ask-rule").some((request) => "matchedAskRule" in request)).toBe(false)
+    const result = await sdk.updateSDKSession("mode-ask-rule", { permissionMode: "bypassPermissions" })
+
+    expect(result.permissionChange?.autoApproved).toEqual([{ requestId: "plain", toolName: "Bash" }])
+    expect([...state.pendingPermissions.keys()]).toEqual(["ruled"])
+    sdk.resolvePermission("mode-ask-rule", "ruled", "deny")
+    await expect(ruled).resolves.toMatchObject({ behavior: "deny" })
+    releaseQueryAfterMessages?.()
+  })
+
+  it("leaves an edit outside the workspace waiting when the mode switches to acceptEdits", async () => {
+    const { sdk, state } = await liveSession("mode-blocked-path", [INIT])
+    const inside = vi.fn()
+    const outside = vi.fn()
+    state.pendingPermissions.set("inside", { requestId: "inside", toolName: "Edit", input: { file_path: "/tmp/a.ts" }, toolUseId: "inside", timestamp: 0, resolve: inside })
+    state.pendingPermissions.set("outside", { requestId: "outside", toolName: "Write", input: { file_path: "/etc/hosts" }, toolUseId: "outside", timestamp: 0, blockedPath: "/etc/hosts", resolve: outside })
+
+    const result = await sdk.updateSDKSession("mode-blocked-path", { permissionMode: "acceptEdits" })
+
+    expect(result.permissionChange?.autoApproved).toEqual([{ requestId: "inside", toolName: "Edit" }])
+    expect(outside).not.toHaveBeenCalled()
+    expect([...state.pendingPermissions.keys()]).toEqual(["outside"])
+    releaseQueryAfterMessages?.()
+  })
+
+  it("hands launch MCP servers to setMcpServers before the first change, so removed ones disconnect", async () => {
+    const a = { command: "a" }
+    const b = { command: "b" }
+    const { sdk } = await liveSession("mcp-handoff", [INIT], { mcpConfig: JSON.stringify({ a, b }) })
+    expect(captured[0].options.mcpServers).toEqual({ a, b })
+
+    await sdk.updateSDKSession("mcp-handoff", { mcpConfig: JSON.stringify({ b }) })
+    expect(setMcpServersSpy!.mock.calls).toEqual([[{ a, b }], [{ b }]])
+
+    setMcpServersSpy!.mockClear()
+    await sdk.updateSDKSession("mcp-handoff", { mcpConfig: null })
+    expect(setMcpServersSpy!.mock.calls).toEqual([[{}]])
+    releaseQueryAfterMessages?.()
+  })
+
+  it("chooses how MCP servers reach the CLI", async () => {
+    await liveSession("mcp-delivery", [INIT])
+    expect(["argv", "initialize"]).toContain(captured[0].options.mcpServersDelivery)
+    releaseQueryAfterMessages?.()
+  })
+
+  // The exact input the CLI admitted, and the result it echoed, live on 2.1.326.
+  const QUESTIONS = {
+    questions: [
+      { question: "Pick a color?", header: "Color", options: [{ label: "Red", description: "Choose red" }, { label: "Blue", description: "Choose blue" }], multiSelect: false },
+      { question: "Pick a size?", header: "Size", options: [{ label: "Small", description: "Choose small" }, { label: "Large", description: "Choose large" }], multiSelect: false },
+    ],
+  }
+
+  it("skips a question, annotated for a CLI that advertises it", async () => {
+    const { sdk } = await liveSession("skip-annotated", [INIT])
+    const result = captured[0].options.canUseTool!("AskUserQuestion", QUESTIONS, { toolUseID: "ask-1" })
+    expect(sdk.resolveUserQuestion("skip-annotated", "ask-1", [], "skipped")).toEqual({ found: true })
+    await expect(result).resolves.toEqual({
+      behavior: "allow",
+      updatedInput: {
+        ...QUESTIONS,
+        answers: { "Pick a color?": "The user skipped this question.", "Pick a size?": "The user skipped this question." },
+        annotations: { "Pick a color?": { unanswered: "skipped" }, "Pick a size?": { unanswered: "skipped" } },
+      },
+    })
+    releaseQueryAfterMessages?.()
+  })
+
+  it("answers every question with a chat reply, and leaves annotations out for a CLI without the capability", async () => {
+    const { sdk } = await liveSession("reply-plain", [{ ...INIT, capabilities: [] }])
+    const result = captured[0].options.canUseTool!("AskUserQuestion", QUESTIONS, { toolUseID: "ask-2" })
+    expect(sdk.resolveUserQuestion("reply-plain", "ask-2", "make it teal", "replied_in_chat")).toEqual({ found: true })
+    await expect(result).resolves.toEqual({
+      behavior: "allow",
+      updatedInput: { ...QUESTIONS, answers: { "Pick a color?": "make it teal", "Pick a size?": "make it teal" } },
+    })
+    releaseQueryAfterMessages?.()
+  })
+
+  it("refuses an empty chat reply and leaves the question waiting", async () => {
+    const { sdk, state } = await liveSession("reply-empty", [INIT])
+    void captured[0].options.canUseTool!("AskUserQuestion", QUESTIONS, { toolUseID: "ask-3" })
+    expect(sdk.resolveUserQuestion("reply-empty", "ask-3", "  ", "replied_in_chat")).toEqual({ found: false })
+    expect(state.pendingUserQuestions.has("ask-3")).toBe(true)
+    releaseQueryAfterMessages?.()
+  })
+
+  it("tells viewers when a full disk cost the transcript lines", async () => {
+    const streamBus = await import("../lib/streamBus")
+    await liveSession("writes-lost", [INIT, {
+      type: "system", subtype: "session_writes_lost", error_code: "ENOSPC", lost: ["transcript"], transcript_session_ids: ["writes-lost"], uuid: "u", session_id: "writes-lost",
+    }])
+    expect(streamBus.publishError).toHaveBeenCalledWith(
+      "writes-lost",
+      "The disk is full, so part of this session's transcript could not be saved. Resuming the session may miss part of the conversation. Free some space before you continue.",
+    )
+    releaseQueryAfterMessages?.()
+  })
+
+  it("names a lost settings write and a used-up quota", async () => {
+    const { describeWritesLost } = await loadModule()
+    expect(describeWritesLost({ error_code: "EDQUOT", lost: ["global_config"] }))
+      .toBe("The disk quota is used up, so changes to the CLI's global settings file could not be saved. Free some space before you continue.")
+  })
+
+  it("warns about a sign-in ending within a week, and clears the warning when it no longer is", async () => {
+    const streamBus = await import("../lib/streamBus")
+    const soon = new Date(Date.now() + 2 * 24 * 60 * 60 * 1000).toISOString()
+    const later = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString()
+    await liveSession("sign-in", [
+      INIT,
+      { type: "result", is_error: false, credential_expires_at: soon },
+      { type: "result", is_error: false, credential_expires_at: later },
+      { type: "result", is_error: false },
+    ])
+    expect(vi.mocked(streamBus.publishSignInEnd).mock.calls).toEqual([["sign-in", soon], ["sign-in", null]])
+    releaseQueryAfterMessages?.()
   })
 })

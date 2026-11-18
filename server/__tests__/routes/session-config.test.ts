@@ -143,6 +143,16 @@ describe("session-config routes", () => {
     })
   })
 
+  it("fills only the fields nothing is stored for with ?fill, and answers with what is stored", async () => {
+    await invoke("PUT", "/seeded.jsonl", JSON.stringify({ permissionMode: "bypassPermissions" }))
+
+    const seed = await invoke("PUT", "/seeded.jsonl?fill", JSON.stringify({ permissionMode: "default", effort: "high" }))
+
+    expect(seed.statusCode).toBe(200)
+    expect(seed.json()).toEqual({ permissionMode: "bypassPermissions", effort: "high" })
+    expect((await invoke("GET", "/seeded.jsonl")).json()).toEqual({ permissionMode: "bypassPermissions", effort: "high" })
+  })
+
   it("removes a field when the patch sets it to null", async () => {
     await invoke("PUT", "/session.jsonl", JSON.stringify({ model: "opus", effort: "high" }))
     await invoke("PUT", "/session.jsonl", JSON.stringify({ effort: null }))

@@ -10,7 +10,7 @@ vi.mock("../../lib/sessionArchive", () => ({
   AUTO_ARCHIVE_AFTER_MS: 14 * 24 * 60 * 60_000,
   subscribeArchiveChanges: () => () => {},
   archiveReason: () => null,
-  readArchive: async () => ({ archived: new Map(), kept: new Set() }),
+  readArchive: async () => ({ archived: new Map(), kept: new Map() }),
   setSessionsArchived: vi.fn().mockResolvedValue([]),
 }))
 vi.mock("../../sessionPaths", async (importOriginal) => {

@@ -31,6 +31,8 @@ export interface UsageData {
     currency?: string
   }
   subscriptionType?: string
+  /** The ChatGPT workspace the account is signed in to, when it names one. */
+  workspaceName?: string
   lifetimeTokens?: number
   creditBalance?: string
   creditsUnlimited?: boolean
@@ -144,21 +146,27 @@ function codexBucket(
   )
 }
 
-/** Plan ids as Codex 0.158+ names them; an id missing here is shown as it is. */
+/** Plan ids as Codex 0.167's `/status` names them; an id missing here is shown as it is. */
 const CODEX_PLAN_NAMES: Record<string, string> = {
   free: "Free",
   go: "Go",
   plus: "Plus",
-  pro: "Pro (More)",
-  prolite: "Pro",
-  promax: "Pro (Max)",
-  team: "Team",
-  business: "Business",
+  pro: "Pro 200",
+  prolite: "Pro 100",
+  promax: "Pro 500",
+  team: "Business",
+  self_serve_business_usage_based: "Business",
+  self_serve_business_prolite: "Business Premium",
+  business: "Enterprise",
   ent26: "Enterprise",
   enterprise: "Enterprise",
+  enterprise_cbp_automation: "Enterprise (Automation)",
+  enterprise_cbp_usage_based: "Enterprise",
   edu: "Edu",
   edu_plus: "Edu Plus",
   edu_pro: "Edu Pro",
+  sci: "Academic Researchers",
+  sci_plus: "Academic Researchers Plus",
 }
 
 /** Map the app-server runtime response into the shared header UI. */
@@ -183,6 +191,7 @@ export function mapCodexRuntimeResponse(data: Record<string, unknown>): UsageDat
     fiveHour: primary,
     sevenDay: secondary,
     subscriptionType: planType ? CODEX_PLAN_NAMES[planType] ?? planType : undefined,
+    workspaceName: str(account?.workspaceName),
     lifetimeTokens,
     creditBalance: str(credits?.balance),
     creditsUnlimited: credits?.unlimited === true,

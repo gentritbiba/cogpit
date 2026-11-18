@@ -46,10 +46,12 @@ export function PendingInputPrompt({
               multiSelect: question.multiSelect,
               options: question.options.map((label) => ({ label, hasPreview: false })),
             })),
+            skippable: pending.skippable,
           }}
           responding={responding}
           gone={false}
           onAnswer={(requestId, answers) => onRespond(requestId, { answers })}
+          onSkip={(requestId) => onRespond(requestId, { answers: [], unanswered: "skipped" })}
           onOpenSession={onOpen}
         />
       )

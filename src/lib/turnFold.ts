@@ -19,7 +19,7 @@ export interface FoldPlan {
  * on, or asked for — hiding them behind a "work" control would misfile them as
  * process. `task_notification` earns its place for the same reason: it is what
  * restarted the turn, so folding it away would leave the work after it with no
- * visible cause.
+ * visible cause. A `notice` is the CLI telling the reader something happened.
  */
 const PINNED_KINDS: ReadonlySet<TurnContentBlock["kind"]> = new Set([
   "queued_prompt",
@@ -28,6 +28,7 @@ const PINNED_KINDS: ReadonlySet<TurnContentBlock["kind"]> = new Set([
   "recap",
   "task_notification",
   "local_command",
+  "notice",
 ])
 
 /** Blocks that represent the agent working rather than answering. */

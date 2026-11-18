@@ -1,7 +1,7 @@
 // @vitest-environment node
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import { join, resolve } from "node:path"
-import { CodexAppServerError, CodexAppServerRpcError, type CodexThread } from "../../agents/codexAppServer"
+import { CodexAppServerError, type CodexThread } from "../../agents/codexAppServer"
 import { codexSessionConfig } from "../../agents/codexSessionConfig"
 
 vi.mock("../../agents/codexSessionConfig", () => ({ codexSessionConfig: vi.fn(async () => ({})) }))
@@ -11,7 +11,6 @@ beforeEach(() => {
 })
 import {
   buildCodexAccessSettings,
-  codexSendError,
   buildCodexUserInput,
   continueCodexExecution,
   getCodexThreadIdentity,
@@ -69,11 +68,6 @@ describe("Codex execution mappings", () => {
     expect(await continueCodexExecution(runtime, "thread-1", { cwd: "/work", message: "Crew notice", onlyWhileRunning: true, deliveryIntent: "steer" })).toMatchObject({ action: "steered" })
     expect(runtime.steerTurn).toHaveBeenCalledWith("thread-1", expect.anything(), "running")
     expect(runtime.startTurn).not.toHaveBeenCalled()
-  })
-  it("marks a definitive model rejection before turn acceptance and keeps an uncertain delivery ambiguous", () => {
-    expect(codexSendError(new CodexAppServerRpcError("turn/start", { code: -32602, message: "There is an issue with the selected model" }))).toMatchObject({ status: 400, code: "MODEL_REJECTED" })
-    expect(codexSendError(new CodexAppServerError("RPC timed out: selected model might be unavailable"))).toMatchObject({ status: 500, code: "INTERNAL_ERROR" })
-    expect(codexSendError(new CodexAppServerRpcError("turn/steer", { code: -32602, message: "There is an issue with the selected model" }))).toMatchObject({ status: 500, code: "INTERNAL_ERROR" })
   })
   it("passes the context limit on start and resume without losing browser configuration", async () => {
     vi.mocked(codexSessionConfig).mockResolvedValue({ developer_instructions: "Browser instructions" })
@@ -218,7 +212,18 @@ describe("Codex execution mappings", () => {
       serviceTier: null,
     }))
     expect(runtime.steerTurn).not.toHaveBeenCalled()
-    expect(result).toEqual({ action: "started", threadId: "thread-1", turnId: "turn-new" })
+    expect(result).toEqual({ action: "started", threadId: "thread-1", turnId: "turn-new", turnModel: { fastMode: false } })
+  })
+
+  it("reports what a started turn runs on: what the send named, else what the thread reported", async () => {
+    const resumed = { thread: thread(), model: "gpt-6.1-sol", reasoningEffort: "low", serviceTier: "priority" }
+    const named = await continueCodexExecution(client({ resumeThread: vi.fn().mockResolvedValue(resumed) }), "thread-1", { cwd: "/work", message: "Go", effort: "xhigh", fastMode: false })
+    const reported = await continueCodexExecution(client({ resumeThread: vi.fn().mockResolvedValue({ ...resumed, serviceTier: null }) }), "thread-1", { cwd: "/work", message: "Go" })
+    const started = await startCodexExecution(client({ startThread: vi.fn().mockResolvedValue(resumed) }), { cwd: "/work", message: "Go" })
+
+    expect(named).toMatchObject({ turnModel: { model: "gpt-6.1-sol", effort: "xhigh", fastMode: false } })
+    expect(reported).toMatchObject({ turnModel: { model: "gpt-6.1-sol", effort: "low", fastMode: false } })
+    expect(started.turnModel).toEqual({ model: "gpt-6.1-sol", effort: "low", fastMode: true })
   })
 
   it("steers a known active turn without resuming", async () => {
