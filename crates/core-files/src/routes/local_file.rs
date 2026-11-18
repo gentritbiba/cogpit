@@ -2,6 +2,7 @@
 //! ranges so a video element can seek.
 
 use std::io::{Read, Seek, SeekFrom};
+use std::time::UNIX_EPOCH;
 
 use axum::body::Body;
 use axum::http::{HeaderMap, HeaderValue, StatusCode, Uri, header};
@@ -75,7 +76,34 @@ pub fn parse_range(header: Option<&str>, size: u64) -> ByteRange {
     ByteRange::Part { start, end }
 }
 
+/// A validator that changes whenever the file is rewritten, so an image an
+/// agent re-takes at the same path is fetched again.
+fn entity_tag(info: &std::fs::Metadata) -> String {
+    let modified = info
+        .modified()
+        .ok()
+        .and_then(|time| time.duration_since(UNIX_EPOCH).ok())
+        .map_or(0, |since| since.as_nanos());
+    format!("\"{:x}-{modified:x}\"", info.len())
+}
+
+/// Whether an `If-None-Match` list names `tag` (weak comparison) or `*`.
+fn matches_any(header: &str, tag: &str) -> bool {
+    header.split(',').map(str::trim).any(|candidate| {
+        candidate == "*" || candidate.strip_prefix("W/").unwrap_or(candidate) == tag
+    })
+}
+
+struct Conditions {
+    range: Option<String>,
+    if_none_match: Option<String>,
+    if_range: Option<String>,
+}
+
 enum Opened {
+    NotModified {
+        tag: String,
+    },
     Unsatisfiable {
         size: u64,
     },
@@ -84,6 +112,7 @@ enum Opened {
         range: ByteRange,
         length: u64,
         body: Body,
+        tag: String,
     },
 }
 
@@ -91,8 +120,23 @@ const READ_FAILED: Failure = Failure(500, "Failed to read file");
 
 /// Check the file, open it at the range and read it, or set up the stream
 /// for a long range. Blocks.
-fn open_range(path: &str, max_size: u64, range_header: Option<&str>) -> Result<Opened, Failure> {
-    let size = validate_readable_file(path, max_size)?;
+fn open_range(path: &str, max_size: u64, conditions: &Conditions) -> Result<Opened, Failure> {
+    let info = validate_readable_file(path, max_size)?;
+    let size = info.len();
+    let tag = entity_tag(&info);
+    if conditions
+        .if_none_match
+        .as_deref()
+        .is_some_and(|header| matches_any(header, &tag))
+    {
+        return Ok(Opened::NotModified { tag });
+    }
+    // A range of a file that changed since the client's copy would splice
+    // two versions together; `If-Range` asks for the whole file instead.
+    let range_header = match conditions.if_range.as_deref() {
+        Some(validator) if validator.trim() != tag => None,
+        _ => conditions.range.as_deref(),
+    };
     let range = parse_range(range_header, size);
     let (start, length) = match range {
         ByteRange::Unsatisfiable => return Ok(Opened::Unsatisfiable { size }),
@@ -109,7 +153,8 @@ fn open_range(path: &str, max_size: u64, range_header: Option<&str>) -> Result<O
         let mut bytes = vec![0; usize::try_from(length).unwrap_or_default()];
         // A file that shrank since it was measured fails here rather than
         // answering with fewer bytes than its Content-Length.
-        file.read_exact(&mut bytes).map_err(|_| READ_FAILED)?;
+        file.read_exact(&mut bytes)
+            .map_err(|cause| READ_FAILED.because(cause))?;
         Body::from(bytes)
     } else {
         let file = tokio::fs::File::from_std(file).take(length);
@@ -120,7 +165,28 @@ fn open_range(path: &str, max_size: u64, range_header: Option<&str>) -> Result<O
         range,
         length,
         body,
+        tag,
     })
+}
+
+fn header_text(headers: &HeaderMap, name: header::HeaderName) -> Option<String> {
+    headers
+        .get(name)
+        .and_then(|value| value.to_str().ok())
+        .map(str::to_owned)
+}
+
+/// Revalidate on every use: one stat answers it, and a stale screenshot is
+/// worse than a round trip.
+const CACHE_CONTROL: HeaderValue = HeaderValue::from_static("private, no-cache");
+
+fn validated(mut response: Response, tag: &str) -> Response {
+    let headers = response.headers_mut();
+    headers.insert(header::CACHE_CONTROL, CACHE_CONTROL);
+    if let Ok(value) = HeaderValue::from_str(tag) {
+        headers.insert(header::ETAG, value);
+    }
+    response
 }
 
 pub async fn handler(uri: Uri, headers: HeaderMap) -> Response {
@@ -135,20 +201,25 @@ pub async fn handler(uri: Uri, headers: HeaderMap) -> Response {
         (None, Some(video)) => (video, MAX_VIDEO_SIZE),
         (None, None) => return error(403, "Only image and video files are allowed"),
     };
-    let range_header = headers
-        .get(header::RANGE)
-        .and_then(|value| value.to_str().ok())
-        .map(str::to_owned);
-    let opened = blocking(move || open_range(&path, max_size, range_header.as_deref()))
+    let conditions = Conditions {
+        range: header_text(&headers, header::RANGE),
+        if_none_match: header_text(&headers, header::IF_NONE_MATCH),
+        if_range: header_text(&headers, header::IF_RANGE),
+    };
+    let opened = blocking(move || open_range(&path, max_size, &conditions))
         .await
         .unwrap_or(Err(READ_FAILED));
-    let (size, range, length, body) = match opened {
+    let (size, range, length, body, tag) = match opened {
         Ok(Opened::Serve {
             size,
             range,
             length,
             body,
-        }) => (size, range, length, body),
+            tag,
+        }) => (size, range, length, body, tag),
+        Ok(Opened::NotModified { tag }) => {
+            return validated(StatusCode::NOT_MODIFIED.into_response(), &tag);
+        }
         Ok(Opened::Unsatisfiable { size }) => {
             let mut response = error(416, "Range not satisfiable");
             if let Ok(value) = HeaderValue::from_str(&format!("bytes */{size}")) {
@@ -163,13 +234,9 @@ pub async fn handler(uri: Uri, headers: HeaderMap) -> Response {
         ByteRange::Part { .. } => StatusCode::PARTIAL_CONTENT,
         _ => StatusCode::OK,
     };
-    let mut response = (status, body).into_response();
+    let mut response = validated((status, body).into_response(), &tag);
     let headers = response.headers_mut();
     headers.insert(header::CONTENT_TYPE, HeaderValue::from_static(content_type));
-    headers.insert(
-        header::CACHE_CONTROL,
-        HeaderValue::from_static("private, max-age=3600"),
-    );
     headers.insert(header::ACCEPT_RANGES, HeaderValue::from_static("bytes"));
     if let ByteRange::Part { start, end } = range
         && let Ok(value) = HeaderValue::from_str(&format!("bytes {start}-{end}/{size}"))
@@ -183,6 +250,16 @@ pub async fn handler(uri: Uri, headers: HeaderMap) -> Response {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn if_none_match_lists_compare_weakly() {
+        let tag = "\"5-a\"";
+        assert!(matches_any("\"5-a\"", tag));
+        assert!(matches_any("W/\"5-a\"", tag));
+        assert!(matches_any("\"0-0\", \"5-a\"", tag));
+        assert!(matches_any("*", tag));
+        assert!(!matches_any("\"5-b\"", tag));
+    }
 
     #[test]
     fn ranges_follow_the_typescript_parser() {

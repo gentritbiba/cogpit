@@ -37,26 +37,35 @@ type Listing = Arc<Vec<String>>;
 #[derive(Default)]
 pub struct ListingCache {
     entries: Mutex<HashMap<String, (Instant, Listing)>>,
+    /// One load per root at a time, so concurrent cold requests share it.
+    loads: Mutex<HashMap<String, Arc<tokio::sync::Mutex<()>>>>,
+}
+
+fn locked<T>(mutex: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
+    mutex
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
 }
 
 impl ListingCache {
-    fn get(&self, root: &str) -> Option<Arc<Vec<String>>> {
-        let entries = self
-            .entries
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner());
-        entries
+    fn get(&self, root: &str) -> Option<Listing> {
+        locked(&self.entries)
             .get(root)
             .filter(|(expires_at, _)| *expires_at > Instant::now())
             .map(|(_, files)| Arc::clone(files))
     }
 
-    fn set(&self, root: &str, files: Arc<Vec<String>>) {
-        let mut entries = self
-            .entries
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner());
-        entries.insert(root.to_owned(), (Instant::now() + CACHE_TTL, files));
+    fn set(&self, root: &str, files: Listing) {
+        let now = Instant::now();
+        let mut entries = locked(&self.entries);
+        entries.retain(|_, (expires_at, _)| *expires_at > now);
+        entries.insert(root.to_owned(), (now + CACHE_TTL, files));
+    }
+
+    fn load_lock(&self, root: &str) -> Arc<tokio::sync::Mutex<()>> {
+        let mut loads = locked(&self.loads);
+        loads.retain(|_, lock| Arc::strong_count(lock) > 1);
+        Arc::clone(loads.entry(root.to_owned()).or_default())
     }
 }
 
@@ -138,6 +147,11 @@ pub async fn list_project_files(
     root: &str,
     skip_cache: bool,
 ) -> Arc<Vec<String>> {
+    if !skip_cache && let Some(files) = cache.get(root) {
+        return files;
+    }
+    let lock = cache.load_lock(root);
+    let _loading = lock.lock().await;
     if !skip_cache && let Some(files) = cache.get(root) {
         return files;
     }
@@ -399,6 +413,39 @@ mod tests {
 
     fn owned(files: &[&str]) -> Vec<String> {
         files.iter().map(|file| (*file).to_owned()).collect()
+    }
+
+    #[test]
+    fn the_listing_cache_drops_expired_roots_when_it_stores_one() {
+        let cache = ListingCache::default();
+        let expired = Instant::now()
+            .checked_sub(Duration::from_secs(1))
+            .expect("monotonic clock past one second");
+        locked(&cache.entries).insert("/gone".to_owned(), (expired, Arc::new(owned(&["a"]))));
+
+        cache.set("/kept", Arc::new(owned(&["b"])));
+
+        let entries = locked(&cache.entries);
+        assert_eq!(entries.len(), 1);
+        assert!(entries.contains_key("/kept"));
+    }
+
+    #[tokio::test]
+    async fn concurrent_cold_listings_share_one_load() {
+        let dir = tempfile::TempDir::new().unwrap();
+        std::fs::write(dir.path().join("one.txt"), "1").unwrap();
+        let root = dir.path().to_str().unwrap().to_owned();
+        let cache = ListingCache::default();
+
+        let (first, second) = tokio::join!(
+            list_project_files(&cache, &root, false),
+            list_project_files(&cache, &root, false)
+        );
+
+        assert!(Arc::ptr_eq(&first, &second));
+        assert_eq!(*first, owned(&["one.txt"]));
+        drop(cache.load_lock("/other"));
+        assert_eq!(locked(&cache.loads).len(), 1);
     }
 
     fn entry(name: &str, kind: &'static str) -> TreeEntry {

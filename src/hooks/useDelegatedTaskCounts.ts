@@ -3,6 +3,8 @@ import { fetchIfChanged } from "@/lib/conditionalFetch"
 import { countDelegatedTasks, type DelegatedTask, type DelegatedTaskCounts } from "../../shared/contracts/orchestration"
 
 const POLL_MS = 3000
+/** A session that has delegated nothing is checked less often: most never do. */
+const IDLE_POLL_MS = 15_000
 
 export const NO_DELEGATED_TASKS: DelegatedTaskCounts = { total: 0, running: 0, unread: 0, unreadRunning: 0 }
 
@@ -29,7 +31,7 @@ function poll(sessionId: string, watch: Watch): void {
   const controller = new AbortController()
   watch.controller = controller
   const next = () => {
-    if (!controller.signal.aborted) watch.timer = setTimeout(() => poll(sessionId, watch), POLL_MS)
+    if (!controller.signal.aborted) watch.timer = setTimeout(() => poll(sessionId, watch), watch.counts.total > 0 ? POLL_MS : IDLE_POLL_MS)
   }
   if (document.visibilityState !== "visible") return next()
   watch.inFlight = true

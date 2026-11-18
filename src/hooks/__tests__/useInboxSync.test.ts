@@ -48,15 +48,27 @@ describe("useInboxSync", () => {
     await waitFor(() => expect(mocks.onInboxRead).toHaveBeenLastCalledWith([GRANTED]))
   })
 
-  it("reads the inbox without an edition to hand it to", async () => {
+  it("does not read the inbox without an edition to hand it to", async () => {
     __resetEditionUiForTest()
     mocks.authFetch.mockResolvedValue(new Response(JSON.stringify({ notifications: [GRANTED] })))
 
     renderHook(() => useInboxSync())
-
-    await waitFor(() => expect(mocks.authFetch).toHaveBeenCalled())
+    act(() => { window.dispatchEvent(new Event("focus")) })
     await Promise.resolve()
-    expect(mocks.onInboxRead).not.toHaveBeenCalled()
+
+    expect(mocks.authFetch).not.toHaveBeenCalled()
+  })
+
+  it("does not read the inbox while the window is hidden", async () => {
+    const visibility = vi.spyOn(document, "visibilityState", "get").mockReturnValue("hidden")
+    mocks.authFetch.mockResolvedValue(new Response(JSON.stringify({ notifications: [GRANTED] })))
+
+    renderHook(() => useInboxSync())
+    act(() => { window.dispatchEvent(new Event("focus")) })
+    await Promise.resolve()
+
+    expect(mocks.authFetch).not.toHaveBeenCalled()
+    visibility.mockRestore()
   })
 
   it("hands nothing on when the inbox could not be read", async () => {

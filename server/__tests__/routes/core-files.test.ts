@@ -114,8 +114,25 @@ describe("local-file through core", () => {
     expect(response.headers.get("content-type")).toBe("image/png")
     expect(response.headers.get("content-length")).toBe("5")
     expect(response.headers.get("accept-ranges")).toBe("bytes")
-    expect(response.headers.get("cache-control")).toBe("private, max-age=3600")
+    expect(response.headers.get("cache-control")).toBe("private, no-cache")
     expect(await response.text()).toBe("image")
+  })
+
+  it("answers a revalidation with 304 until the file is rewritten", async () => {
+    const directory = await temporaryDirectory("cogpit-core-files-revalidate-")
+    const image = join(directory, "shot.png")
+    await writeFile(image, "first")
+    const first = await fetch(url("/api/local-file", { path: image }))
+    const tag = first.headers.get("etag")!
+    await first.arrayBuffer()
+
+    const unchanged = await fetch(url("/api/local-file", { path: image }), { headers: { "if-none-match": tag } })
+    expect(unchanged.status).toBe(304)
+
+    await writeFile(image, "second shot")
+    const changed = await fetch(url("/api/local-file", { path: image }), { headers: { "if-none-match": tag } })
+    expect(changed.status).toBe(200)
+    expect(await changed.text()).toBe("second shot")
   })
 
   it("serves byte ranges so videos seek, and refuses ranges past the end", async () => {

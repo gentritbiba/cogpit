@@ -71,6 +71,16 @@ describe("useDelegatedTaskCounts", () => {
     }
   })
 
+  it("checks a session that has delegated nothing every 15 seconds instead of every 3", async () => {
+    mocks.fetch.mockResolvedValue(counted({ total: 0, running: 0, unread: 0, unreadRunning: 0 }))
+    renderHook(() => useDelegatedTaskCounts("lead-idle"))
+    await waitFor(() => expect(mocks.fetch).toHaveBeenCalledTimes(1))
+    await act(async () => { await vi.advanceTimersByTimeAsync(3_000) })
+    expect(mocks.fetch).toHaveBeenCalledTimes(1)
+    await act(async () => { await vi.advanceTimersByTimeAsync(12_000) })
+    expect(mocks.fetch).toHaveBeenCalledTimes(2)
+  })
+
   it("polls once for every place that shows the same session", async () => {
     mocks.fetch.mockResolvedValue(counted({ total: 1, running: 0, unread: 1, unreadRunning: 0 }))
     const first = renderHook(() => useDelegatedTaskCounts("lead-shared"))

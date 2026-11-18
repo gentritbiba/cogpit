@@ -1,6 +1,5 @@
-import { memo, useMemo, useState, type ReactNode } from "react"
+import { memo, type ReactNode } from "react"
 import ReactMarkdown, { type Components } from "react-markdown"
-import { IncrementalMarkdownParser, incrementalMarkdownPlugin } from "@/lib/incrementalMarkdown"
 import { markdownComponents, markdownPlugins } from "./markdown-components"
 
 function compactHeading(Tag: "h1" | "h2" | "h3" | "h4" | "h5" | "h6") {
@@ -54,12 +53,10 @@ export const StreamingMarkdown = memo(function StreamingMarkdown({
   text,
   compactHeadings = false,
 }: StreamingMarkdownProps) {
-  const [parser] = useState(() => new IncrementalMarkdownParser())
-  const plugins = useMemo(() => [...markdownPlugins, incrementalMarkdownPlugin(parser)], [parser])
   return (
     <ReactMarkdown
       components={compactHeadings ? compactStreamingMarkdownComponents : streamingMarkdownComponents}
-      remarkPlugins={plugins}
+      remarkPlugins={markdownPlugins}
     >
       {text}
     </ReactMarkdown>

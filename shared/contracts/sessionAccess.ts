@@ -60,6 +60,3 @@ export interface SessionConfigFrame {
 
 /** Which sessions a list asks for, from its `scope` query parameter. Its values are the edition's; core passes them on. */
 export type ListScope = string
-
-/** The scope of a list request that names none: every session the caller may see. */
-export const DEFAULT_LIST_SCOPE: ListScope = "all"

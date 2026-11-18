@@ -156,9 +156,80 @@ async fn local_file_streams_an_image_with_its_headers() {
     assert_eq!(reply.header("content-type"), Some("image/png"));
     assert_eq!(reply.header("content-length"), Some("5"));
     assert_eq!(reply.header("accept-ranges"), Some("bytes"));
-    assert_eq!(reply.header("cache-control"), Some("private, max-age=3600"));
+    assert_eq!(reply.header("cache-control"), Some("private, no-cache"));
+    assert!(reply.header("etag").is_some());
     assert_eq!(reply.header("content-range"), None);
     assert_eq!(reply.text(), "image");
+}
+
+async fn get_headers(
+    app: &Router,
+    route: &str,
+    pairs: &[(&str, &str)],
+    headers: &[(&str, &str)],
+) -> Reply {
+    let mut request = Request::get(format!("{route}?{}", query(pairs)));
+    for (name, value) in headers {
+        request = request.header(*name, *value);
+    }
+    send(app, request.body(Body::empty()).unwrap()).await
+}
+
+#[tokio::test]
+async fn local_file_revalidates_so_a_rewritten_image_is_fetched_again() {
+    let dir = TempDir::new().unwrap();
+    let image = dir.path().join("shot.png");
+    write(&image, "first");
+    let app = app();
+    let path = [("path", path_str(&image))];
+
+    let first = get(&app, "/local-file", &path).await;
+    let tag = first.header("etag").unwrap().to_owned();
+
+    let unchanged = get_headers(&app, "/local-file", &path, &[("if-none-match", &tag)]).await;
+    assert_eq!(unchanged.status, StatusCode::NOT_MODIFIED);
+    assert_eq!(unchanged.header("etag"), Some(tag.as_str()));
+    assert!(unchanged.body.is_empty());
+
+    write(&image, "second shot");
+    let changed = get_headers(&app, "/local-file", &path, &[("if-none-match", &tag)]).await;
+    assert_eq!(changed.status, StatusCode::OK);
+    assert_ne!(changed.header("etag"), Some(tag.as_str()));
+    assert_eq!(changed.text(), "second shot");
+}
+
+#[tokio::test]
+async fn local_file_ignores_a_range_for_a_stale_if_range() {
+    let dir = TempDir::new().unwrap();
+    let video = dir.path().join("clip.mp4");
+    write(&video, "video");
+    let app = app();
+    let path = [("path", path_str(&video))];
+    let tag = get(&app, "/local-file", &path)
+        .await
+        .header("etag")
+        .unwrap()
+        .to_owned();
+
+    let current = get_headers(
+        &app,
+        "/local-file",
+        &path,
+        &[("range", "bytes=1-2"), ("if-range", &tag)],
+    )
+    .await;
+    assert_eq!(current.status, StatusCode::PARTIAL_CONTENT);
+    assert_eq!(current.text(), "id");
+
+    let stale = get_headers(
+        &app,
+        "/local-file",
+        &path,
+        &[("range", "bytes=1-2"), ("if-range", "\"0-0\"")],
+    )
+    .await;
+    assert_eq!(stale.status, StatusCode::OK);
+    assert_eq!(stale.text(), "video");
 }
 
 #[tokio::test]
@@ -608,22 +679,25 @@ async fn project_file_save_keeps_the_file_mode() {
     let root = project();
     let script = root.path().join("run.sh");
     write(&script, "echo one\n");
-    std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755)).unwrap();
     let app = app();
 
-    let mtime = read_file(&app, root.path(), "run.sh").await.json()["mtimeMs"].clone();
-    let save = put_json(
-        &app,
-        "/project-file",
-        &save_body(root.path(), "run.sh", "echo two\n", &mtime),
-    )
-    .await;
+    // 0666 is the case the umask would otherwise strip on save.
+    for mode in [0o755, 0o666] {
+        std::fs::set_permissions(&script, std::fs::Permissions::from_mode(mode)).unwrap();
+        let mtime = read_file(&app, root.path(), "run.sh").await.json()["mtimeMs"].clone();
+        let save = put_json(
+            &app,
+            "/project-file",
+            &save_body(root.path(), "run.sh", &format!("echo {mode:o}\n"), &mtime),
+        )
+        .await;
 
-    assert_eq!(save.status, StatusCode::OK);
-    assert_eq!(
-        std::fs::metadata(&script).unwrap().permissions().mode() & 0o777,
-        0o755
-    );
+        assert_eq!(save.status, StatusCode::OK);
+        assert_eq!(
+            std::fs::metadata(&script).unwrap().permissions().mode() & 0o777,
+            mode
+        );
+    }
 }
 
 #[tokio::test]
@@ -858,6 +932,30 @@ async fn git_status_reports_the_branch_and_working_tree_files() {
             "files",
         ],
     );
+}
+
+#[tokio::test]
+async fn git_status_leaves_the_index_alone_for_concurrent_git_commands() {
+    let root = repository();
+    let tracked = root.path().join("tracked.txt");
+    write(&tracked, "one\n");
+    commit_all(root.path(), "initial");
+    // A stat change without a content change is what makes a plain `git
+    // status` refresh and rewrite the index.
+    let earlier = std::time::SystemTime::now() - std::time::Duration::from_secs(3600);
+    std::fs::File::options()
+        .write(true)
+        .open(&tracked)
+        .unwrap()
+        .set_modified(earlier)
+        .unwrap();
+    let index = root.path().join(".git/index");
+    let before = std::fs::read(&index).unwrap();
+
+    let reply = get(&app(), "/git-status", &[("cwd", path_str(root.path()))]).await;
+
+    assert_eq!(reply.status, StatusCode::OK);
+    assert_eq!(std::fs::read(&index).unwrap(), before);
 }
 
 fn dunce_root(path: &Path) -> String {

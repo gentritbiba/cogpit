@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react"
 import { Button } from "@/components/ui/button"
 import { RateLimitBanner } from "@/components/RateLimitBanner"
 import { authFetch } from "@/lib/auth"
+import { jsonEqual } from "@/lib/jsonEqual"
 import type { RateLimitBlock } from "../../shared/session/rateLimit"
 import { isTerminalOccurrence } from "../../shared/contracts/triggers"
 import type { RecoveryStatus } from "../../shared/contracts/recovery"
@@ -55,8 +56,11 @@ export function AllowanceRecovery({ sessionId, block, canResume, className, ...b
     let timer: ReturnType<typeof setTimeout>
     let fetching = false
     let denied = false
+    // A continuation in flight changes within seconds; an offer or a finished run can sit for days.
+    let inFlight = true
     const refresh = async () => {
       if (fetching || controller.signal.aborted || denied) return
+      if (document.visibilityState !== "visible") { clearTimeout(timer); return }
       if (mutation.current) { timer = setTimeout(() => { void refresh() }, 3000); return }
       fetching = true
       const version = mutationVersion.current
@@ -68,19 +72,24 @@ export function AllowanceRecovery({ sessionId, block, canResume, className, ...b
           throw new Error(`Recovery unavailable (${response.status})`)
         }
         const data = await response.json() as RecoveryStatus
-        if (!controller.signal.aborted && current === generation.current && version === mutationVersion.current) { setSnapshot({ sessionId, data }); setError(null) }
+        inFlight = Boolean(data.run && !isTerminalOccurrence(data.run.state))
+        if (!controller.signal.aborted && current === generation.current && version === mutationVersion.current) {
+          setSnapshot((previous) => previous?.sessionId === sessionId && jsonEqual(previous.data, data) ? previous : { sessionId, data })
+          setError(null)
+        }
       } catch (error) {
         if (!controller.signal.aborted && current === generation.current && version === mutationVersion.current) { if (denied) setSnapshot(null); setError(error instanceof Error ? error.message : "Recovery unavailable") }
       } finally {
         fetching = false
-        if (!controller.signal.aborted && !denied) timer = setTimeout(() => { void refresh() }, 3000)
+        if (!controller.signal.aborted && !denied) timer = setTimeout(() => { void refresh() }, inFlight ? 3000 : 15_000)
       }
     }
     const update = () => { void refresh() }
     void refresh()
     window.addEventListener("cogpit-command-accepted", update)
     window.addEventListener("online", update)
-    return () => { controller.abort(); mutation.current?.abort(); mutation.current = null; clearTimeout(timer); window.removeEventListener("cogpit-command-accepted", update); window.removeEventListener("online", update) }
+    document.addEventListener("visibilitychange", update)
+    return () => { controller.abort(); mutation.current?.abort(); mutation.current = null; clearTimeout(timer); window.removeEventListener("cogpit-command-accepted", update); window.removeEventListener("online", update); document.removeEventListener("visibilitychange", update) }
   }, [sessionId, block, scope])
 
   const action = async (action: "enable" | "cancel" | "reauthorize") => {

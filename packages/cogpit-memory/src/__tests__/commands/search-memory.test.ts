@@ -185,6 +185,21 @@ describe("index sync", () => {
     expect(statSync(join(dir, "memory.db")).mode & 0o777).toBe(0o600)
   })
 
+  it("leaves transcripts older than the search window out of the tool index and its backlog", () => {
+    writeAgedSession("month-old", "a", "b", "ls", 30)
+    writeAgedSession("fresh", "c", "d", "pwd", 1)
+    mkdirSync(join(tmpDir, "index"), { recursive: true })
+    const index = new SearchIndex(mockDbPath.value)
+    try {
+      const sync = syncTranscripts({ index, memory: null, toolIndexSinceMs: Date.now() - 5 * DAY })
+      expect(sync).toMatchObject({ files: 2, parsed: 1, toolIndexFiles: 1, pending: 0, unindexed: 0 })
+      expect([...index.indexedFiles().keys()].map((path) => path.split("/").pop())).toEqual(["fresh.jsonl"])
+      expect(syncTranscripts({ index, memory: null })).toMatchObject({ parsed: 1, toolIndexFiles: 1 })
+    } finally {
+      index.close()
+    }
+  })
+
   it("stops starting files once the time budget is spent, newest first", () => {
     writeAgedSession("old", "a", "b", "ls", 3)
     writeAgedSession("new", "c", "d", "ls", 0)

@@ -111,20 +111,20 @@ export async function currentSession(cwd: string): Promise<SessionSummary | null
   const direct = claude.list(0, claude.root())
     .filter((file) => !file.isSubagent && file.path.startsWith(projectDir + sep))
 
-  const searched: SessionFile[] = []
-  for (const file of listAllSessionFiles(0)) {
-    if (file.isSubagent || storeForPath(file.path)?.kind === "claude") continue
+  let latest = direct.reduce<SessionFile | null>((newest, file) => (!newest || file.mtimeMs > newest.mtimeMs ? file : newest), null)
+  // Newest first, so the first match wins and nothing older than the newest
+  // direct match needs reading: a metadata read of every transcript ever
+  // written took ~18 s on a machine with 1,680 of them.
+  const others = listAllSessionFiles(0)
+    .filter((file) => !file.isSubagent && storeForPath(file.path)?.kind !== "claude")
+  for (const file of others) {
+    if (latest && file.mtimeMs <= latest.mtimeMs) break
     try {
-      if ((await getSessionMeta(file.path)).cwd === cwd) searched.push(file)
+      if ((await getSessionMeta(file.path)).cwd === cwd) { latest = file; break }
     } catch {
       continue
     }
   }
-
-  const valid = [...direct, ...searched]
-  if (valid.length === 0) return null
-  valid.sort((a, b) => b.mtimeMs - a.mtimeMs)
-  const latest = valid[0]
 
   if (!latest) return null
 

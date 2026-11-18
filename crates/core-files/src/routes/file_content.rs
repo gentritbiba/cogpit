@@ -17,7 +17,9 @@ pub async fn handler(uri: Uri) -> Response {
     };
     let read = blocking(move || {
         validate_readable_file(&path, MAX_FILE_SIZE)?;
-        std::fs::read(&path).map(lossy).map_err(|_| READ_FAILED)
+        std::fs::read(&path)
+            .map(lossy)
+            .map_err(|cause| READ_FAILED.because(cause))
     })
     .await
     .unwrap_or(Err(READ_FAILED));

@@ -2,7 +2,7 @@ import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process"
 import { randomBytes } from "node:crypto"
 
 import { resolveCoreBinary } from "./binary"
-import { CORE_SECRET_HEADER, parseHandshake, type CoreConfig } from "./protocol"
+import { CORE_SECRET_HEADER, parseHandshake, type CoreBootMessage, type CoreConfig } from "./protocol"
 
 /**
  * The one cogpit-core process this server talks to. Like `processRegistry`,
@@ -151,7 +151,7 @@ async function launch(binary: string, config: CoreConfig): Promise<Running> {
   forwardStderr(child, stderrTail)
   // A core that dies before reading its boot line would otherwise raise EPIPE.
   child.stdin.on("error", () => undefined)
-  child.stdin.write(`${JSON.stringify({ secret, config })}\n`)
+  child.stdin.write(`${JSON.stringify({ secret, config } satisfies CoreBootMessage)}\n`)
   try {
     const handshake = parseHandshake(await readHandshakeLine(child, stderrTail))
     const endpoint: CoreEndpoint = {

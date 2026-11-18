@@ -13,7 +13,10 @@ use icu_collator::{Collator, CollatorBorrowed};
 /// each trip costs two thread hand-offs, more than a small file's I/O.
 /// `None` when the work panicked.
 pub async fn blocking<T: Send + 'static>(work: impl FnOnce() -> T + Send + 'static) -> Option<T> {
-    tokio::task::spawn_blocking(work).await.ok()
+    tokio::task::spawn_blocking(work)
+        .await
+        .inspect_err(|error| tracing::error!(%error, "blocking file work failed"))
+        .ok()
 }
 
 /// `fs.realpath`, as a UTF-8 string. Blocks: call it inside [`blocking`].
