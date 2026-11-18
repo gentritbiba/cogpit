@@ -1068,6 +1068,8 @@ interface AppliedSessionUpdates {
   fastModeChanged: boolean
   ultracodeChanged: boolean
   permissionModeChanged: boolean
+  /** The mode this update asked for; the session's own can move while the update is pushed. */
+  requestedPermissionMode: string
   /** The mode before the update, which a refused switch keeps. */
   previousPermissionMode: string
   permissionsChanged: boolean
@@ -1108,6 +1110,7 @@ function applySessionUpdates(
     fastModeChanged,
     ultracodeChanged,
     permissionModeChanged,
+    requestedPermissionMode: updates?.permissionMode ?? previousPermissionMode,
     previousPermissionMode,
     permissionsChanged,
     mcpConfigChanged,
@@ -1161,7 +1164,7 @@ async function pushSessionUpdates(
     applied.push("model")
   }
   if (changes.permissionModeChanged) {
-    const requested = state.permissionMode
+    const requested = changes.requestedPermissionMode
     // Asks raised before the switch was sent are the old mode's to answer;
     // one raised after it may be one the CLI asks even in the new mode.
     const askedBefore = [...state.pendingPermissions.keys()]

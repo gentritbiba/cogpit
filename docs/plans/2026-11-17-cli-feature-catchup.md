@@ -33,7 +33,7 @@ Primary sources:
 | `config_file_invalid` | Classified as `config_invalid` with `File:` / `Backup:` lines; the error banner offers Restore from backup. `POST /api/agent-check/restore-config` restores only a file/backup pair a failed start reported, only the global `.claude.json` from its own `backups/`, and only from valid JSON. |
 | Session archive (SDK 0.3.326) | Archiving or restoring a Claude session in Cogpit also calls the SDK's `archiveSession` / `unarchiveSession` (explicit user actions only, best effort). The session catalog reads the CLI's `archived.json` marker with an mtime-keyed cache, so sessions archived elsewhere show as archived; the newest of Cogpit's archive, Cogpit's restore and the CLI marker wins (archive file version 3 records restore times). |
 | Errors after a failed turn | A crash in a later turn is reported as itself, not as the earlier turn's error result. |
-| Code Mode sessions | Resuming one from the SDK fails; the banner says it continues only in a terminal and offers Open in terminal with the command. |
+| Code Mode sessions | Resuming one from the SDK fails; the banner says it continues only in a terminal and offers the resume command to copy. Cogpit never runs a command taken from an error message. |
 | `session_writes_lost` | Shown in the turn-error banner (disk full or quota). The CLI sends it only when it exits by itself. |
 | `credential_expires_at` | A dismissible notice above the composer within 7 days of the sign-in ending, with the existing sign-in action. |
 

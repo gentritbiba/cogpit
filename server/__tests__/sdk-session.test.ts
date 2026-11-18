@@ -2399,6 +2399,22 @@ describe("sdk-session CLI 2.1.326 catch-up", () => {
     releaseQueryAfterMessages?.()
   })
 
+  it("switches to the mode the update asked for when the CLI reports the old one while the model changes", async () => {
+    const { sdk, state } = await liveSession("mode-raced", [{ ...INIT, permissionMode: "bypassPermissions" }], { permissionMode: "bypassPermissions" })
+    const resolve = vi.fn()
+    state.pendingPermissions.set("req-bash", { requestId: "req-bash", toolName: "Bash", input: {}, toolUseId: "req-bash", timestamp: 0, resolve })
+    // A status report from before the switch lands while setModel is awaited.
+    setModelSpy!.mockImplementationOnce(async () => { state.permissionMode = "bypassPermissions" })
+
+    await sdk.updateSDKSession("mode-raced", { permissionMode: "default", model: "model-x" })
+
+    expect(setPermissionModeSpy).toHaveBeenCalledWith("default")
+    expect(setPermissionModeSpy).not.toHaveBeenCalledWith("bypassPermissions")
+    expect(resolve).not.toHaveBeenCalled()
+    expect(state.permissionMode).toBe("default")
+    releaseQueryAfterMessages?.()
+  })
+
   it("keeps the asked-for mode for the next resume when the process exits during the switch", async () => {
     const streamBus = await import("../lib/streamBus")
     const { sdk, state } = await liveSession("mode-closing", [INIT])

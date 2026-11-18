@@ -1,5 +1,5 @@
 import { useState } from "react"
-import { Copy, Check, AlertCircle, ExternalLink, SquareTerminal } from "lucide-react"
+import { Copy, Check, AlertCircle, ExternalLink } from "lucide-react"
 import {
   Dialog,
   DialogContent,
@@ -9,9 +9,6 @@ import {
 } from "@/components/ui/dialog"
 import { Button } from "@/components/ui/button"
 import { descriptorFor, type AgentKind } from "@/lib/agents"
-import { useCapability } from "@/hooks/useCapability"
-import { isRemoteDeviceActive } from "@/lib/device"
-import { openProjectTerminal, type TerminalTarget } from "@/lib/openTerminal"
 import { agentConfigInvalidIn, agentNotInstalledIn, agentSignedOutTitle, agentTerminalCommandIn, classifyAgentFailure } from "../../../shared/session/agentFailures"
 import { RestoreConfigAction } from "./RestoreConfigAction"
 
@@ -21,17 +18,14 @@ import { RestoreConfigAction } from "./RestoreConfigAction"
  * CLI's captured stderr) in a copyable dialog so failures can actually be
  * diagnosed instead of just reading "Claude Code process exited with code 1".
  */
-export function ErrorBanner({ error, agentKind, instanceId = null, terminalAt }: {
+export function ErrorBanner({ error, agentKind, instanceId = null }: {
   error: string
   agentKind: AgentKind
   /** The account instance the session runs under; null for the default account, the only one whose config file a restore reaches. */
   instanceId?: string | null
-  /** Where a failure that has to go on in the agent's own terminal opens one. */
-  terminalAt?: Omit<TerminalTarget, "command">
 }) {
   const [open, setOpen] = useState(false)
-  const [copied, setCopied] = useState(false)
-  const terminalAllowed = useCapability("terminal")
+  const [copied, setCopied] = useState<"error" | "command" | null>(null)
 
   // A missing login reads the same for every agent, whatever words its CLI used.
   const signedOut = classifyAgentFailure(error).reason === "not_signed_in"
@@ -41,13 +35,12 @@ export function ErrorBanner({ error, agentKind, instanceId = null, terminalAt }:
   const installPage = missing ? descriptorFor(missing).cli.install?.page : null
   const invalidConfig = agentConfigInvalidIn(error)
   const terminalCommand = agentTerminalCommandIn(error)
-  const canOpenTerminal = terminalCommand !== null && terminalAllowed && !isRemoteDeviceActive() && Boolean(terminalAt?.path || terminalAt?.dirName)
 
-  const handleCopy = async () => {
+  const copy = async (what: "error" | "command", text: string) => {
     try {
-      await navigator.clipboard.writeText(error)
-      setCopied(true)
-      setTimeout(() => setCopied(false), 1500)
+      await navigator.clipboard.writeText(text)
+      setCopied(what)
+      setTimeout(() => setCopied(null), 1500)
     } catch {
       // clipboard unavailable — ignore
     }
@@ -80,10 +73,10 @@ export function ErrorBanner({ error, agentKind, instanceId = null, terminalAt }:
         </Button>
       )}
       {invalidConfig?.backupPath && instanceId === null && <RestoreConfigAction path={invalidConfig.path} backupPath={invalidConfig.backupPath} />}
-      {canOpenTerminal && (
-        <Button variant="outline" size="xs" className="ml-2" onClick={() => openProjectTerminal({ ...terminalAt, command: terminalCommand })}>
-          <SquareTerminal data-icon="inline-start" />
-          Open in terminal
+      {terminalCommand !== null && (
+        <Button variant="outline" size="xs" className="ml-2" onClick={() => copy("command", terminalCommand)}>
+          {copied === "command" ? <Check data-icon="inline-start" /> : <Copy data-icon="inline-start" />}
+          {copied === "command" ? "Copied" : "Copy command"}
         </Button>
       )}
 
@@ -109,10 +102,10 @@ export function ErrorBanner({ error, agentKind, instanceId = null, terminalAt }:
               type="button"
               variant="outline"
               size="sm"
-              onClick={handleCopy}
+              onClick={() => copy("error", error)}
             >
-              {copied ? <Check data-icon="inline-start" /> : <Copy data-icon="inline-start" />}
-              {copied ? "Copied" : "Copy"}
+              {copied === "error" ? <Check data-icon="inline-start" /> : <Copy data-icon="inline-start" />}
+              {copied === "error" ? "Copied" : "Copy"}
             </Button>
           </div>
         </DialogContent>

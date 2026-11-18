@@ -1,10 +1,8 @@
-import { fireEvent, render, screen } from "@testing-library/react"
+import { fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 
-const mocks = vi.hoisted(() => ({ authFetch: vi.fn(), openProjectTerminal: vi.fn(), terminal: true }))
+const mocks = vi.hoisted(() => ({ authFetch: vi.fn() }))
 vi.mock("@/lib/auth", () => ({ authFetch: mocks.authFetch }))
-vi.mock("@/lib/openTerminal", () => ({ openProjectTerminal: mocks.openProjectTerminal }))
-vi.mock("@/hooks/useCapability", () => ({ useCapability: (capability: string) => capability === "terminal" && mocks.terminal }))
 
 import { ErrorBanner } from "../ErrorBanner"
 import { agentConfigInvalidMessage, agentTerminalOnlyMessage } from "../../../../shared/session/agentFailures"
@@ -15,8 +13,6 @@ const CLI_TEXT = `Configuration error in ${PATH}: JSON Parse error: Property nam
 
 beforeEach(() => {
   mocks.authFetch.mockReset()
-  mocks.openProjectTerminal.mockReset()
-  mocks.terminal = true
 })
 
 describe("ErrorBanner for a config file the agent would not start with", () => {
@@ -70,23 +66,15 @@ describe("ErrorBanner for a session that can only go on in the agent's terminal"
     "Failed to resume session: This session was started in Code Mode (experimental), which isn't available because for now it only works in the interactive terminal, so it can't be resumed here.",
   )
 
-  it("opens a terminal in the project running the resume command", () => {
-    render(<ErrorBanner error={error} agentKind="claude" terminalAt={{ path: "/repo", dirName: "-repo" }} />)
+  it("offers the resume command to copy and never runs it", async () => {
+    const writeText = vi.fn().mockResolvedValue(undefined)
+    Object.defineProperty(navigator, "clipboard", { value: { writeText }, configurable: true })
+    render(<ErrorBanner error={error} agentKind="claude" />)
 
     expect(screen.getByText("This session was started in Code Mode, so it can only be continued in Claude Code in a terminal.")).toBeInTheDocument()
-    fireEvent.click(screen.getByRole("button", { name: "Open in terminal" }))
-
-    expect(mocks.openProjectTerminal).toHaveBeenCalledWith({ path: "/repo", dirName: "-repo", command })
-  })
-
-  it("offers no terminal to a reader who may not open one, or with nowhere to open it", () => {
-    mocks.terminal = false
-    const { unmount } = render(<ErrorBanner error={error} agentKind="claude" terminalAt={{ path: "/repo" }} />)
     expect(screen.queryByRole("button", { name: "Open in terminal" })).toBeNull()
-    unmount()
+    fireEvent.click(screen.getByRole("button", { name: "Copy command" }))
 
-    mocks.terminal = true
-    render(<ErrorBanner error={error} agentKind="claude" />)
-    expect(screen.queryByRole("button", { name: "Open in terminal" })).toBeNull()
+    await waitFor(() => expect(writeText).toHaveBeenCalledWith(command))
   })
 })
