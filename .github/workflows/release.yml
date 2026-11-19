@@ -335,21 +335,22 @@ jobs:
             exit 0
           fi
           url="$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$RUN_ID"
-          state() { gh api "repos/$GITHUB_REPOSITORY/actions/runs/$RUN_ID" --jq '"\(.status) \(.conclusion)"' || echo "unknown -"; }
+          state() { gh api "repos/$GITHUB_REPOSITORY/actions/runs/$RUN_ID" --jq '"\(.run_attempt) \(.status) \(.conclusion)"' || echo "0 unknown -"; }
           # A failed run gets its failed jobs rerun once: most failures there
           # are a test timing out on a loaded runner, and a rerun is what a
-          # person would do anyway.
-          rerun=false
+          # person would do anyway. The rerun is a new attempt; only its
+          # outcome counts.
+          rerun_from=""
           echo "Waiting for $url"
           while :; do
-            read -r status conclusion <<<"$(state)"
+            read -r attempt status conclusion <<<"$(state)"
+            if [ -n "$rerun_from" ] && [ "$attempt" -le "$rerun_from" ]; then sleep 5; continue; fi
             if [ "$status" != completed ]; then sleep 10; continue; fi
             [ "$conclusion" = success ] && exit 0
-            if [ "$conclusion" = failure ] && [ "$rerun" = false ]; then
+            if [ "$conclusion" = failure ] && [ -z "$rerun_from" ]; then
               echo "::warning::Quality for this commit failed; rerunning its failed jobs once: $url"
               gh run rerun "$RUN_ID" --failed --repo "$GITHUB_REPOSITORY"
-              rerun=true
-              until read -r status _ <<<"$(state)" && [ "$status" != completed ]; do sleep 5; done
+              rerun_from=$attempt
               continue
             fi
             echo "::error::Quality for this commit concluded $conclusion: $url. Rerun its failed jobs there, then rerun this job."
