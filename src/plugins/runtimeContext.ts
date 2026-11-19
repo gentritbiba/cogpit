@@ -9,16 +9,37 @@ export const PLUGIN_THEME_TOKENS = [
 ]
 type Presentation = Pick<PluginContext, "theme" | "locale" | "reducedMotion">
 
-export function readPluginPresentation(): Presentation {
-  const root = document.documentElement
-  const styles = getComputedStyle(root)
+function themeTokens(element: Element): Record<string, string> {
+  const styles = getComputedStyle(element)
   const tokens: Record<string, string> = {}
   for (const name of PLUGIN_THEME_TOKENS) {
     const value = styles.getPropertyValue(name).trim()
     if (value && new TextEncoder().encode(value).byteLength <= 256) tokens[name] = value
   }
+  return tokens
+}
+
+/**
+ * The open theme's colors and those of its opposite mode, for a page shown outside Cogpit. The opposite comes from a
+ * hidden element that flips the mode, so it is that mode's default palette rather than a variant such as OLED.
+ */
+export function readLightAndDarkTokens(): { light: Record<string, string>; dark: Record<string, string> } {
+  const root = document.documentElement
+  const dark = root.classList.contains("dark")
+  const probe = document.createElement("div")
+  probe.className = dark ? "color-scheme-inverse" : "dark"
+  probe.hidden = true
+  document.body.append(probe)
+  try {
+    const current = themeTokens(root), opposite = themeTokens(probe)
+    return dark ? { light: opposite, dark: current } : { light: current, dark: opposite }
+  } finally { probe.remove() }
+}
+
+export function readPluginPresentation(): Presentation {
+  const root = document.documentElement
   return {
-    theme: { mode: root.classList.contains("dark") ? "dark" : "light", tokens },
+    theme: { mode: root.classList.contains("dark") ? "dark" : "light", tokens: themeTokens(root) },
     locale: (root.lang || navigator.language || "en").slice(0, 64),
     reducedMotion: window.matchMedia("(prefers-reduced-motion: reduce)").matches,
   }

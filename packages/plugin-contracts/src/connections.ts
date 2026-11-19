@@ -1,7 +1,7 @@
 import { z } from "zod"
 import { CONTRACT_LIMITS } from "./json.js"
 import { identifier, jsonPointer as pointer, label, parseSchema } from "./schema.js"
-import { audioMimeSchema, MEDIA_LIMIT_BYTES } from "./media.js"
+import { audioMimeSchema, HTML_MIME, MEDIA_LIMIT_BYTES } from "./media.js"
 
 const origin = z.string().max(256).refine((value) => {
   try {
@@ -26,7 +26,9 @@ const queryValue = z.union([
   z.strictObject({ literal: z.union([z.string().max(1024), z.number().int().min(Number.MIN_SAFE_INTEGER).max(Number.MAX_SAFE_INTEGER), z.boolean()]) }),
   z.strictObject({ arg: identifier }), z.strictObject({ resource: identifier }), z.strictObject({ identity: identifier }),
 ])
-const audioTransfer = z.strictObject({ type: z.literal("audio"), mimeTypes: z.array(audioMimeSchema).min(1).max(6), maxBytes: z.number().int().min(1).max(MEDIA_LIMIT_BYTES) })
+const transferBytes = z.number().int().min(1).max(MEDIA_LIMIT_BYTES)
+const audioTransfer = z.strictObject({ type: z.literal("audio"), mimeTypes: z.array(audioMimeSchema).min(1).max(6), maxBytes: transferBytes })
+const htmlTransfer = z.strictObject({ type: z.literal("html"), mimeTypes: z.tuple([z.literal(HTML_MIME)]), maxBytes: transferBytes })
 const operation = z.strictObject({
   audience: z.enum(["setup", "panel"]), origin, method: z.enum(["GET", "POST"]),
   path: z.array(segment).min(1).max(16),
@@ -36,8 +38,8 @@ const operation = z.strictObject({
     .refine((value) => Object.keys(value).length <= 16),
   body: z.record(identifier, queryValue).refine(value => Object.keys(value).length <= 16).optional(),
   response: audioTransfer.optional(),
-  /** The request body is a recording supplied by Cogpit's own UI; the operation answers with JSON. */
-  upload: audioTransfer.optional(),
+  /** The request body is a recording or a page supplied by Cogpit's own UI; the operation answers with JSON. */
+  upload: z.discriminatedUnion("type", [audioTransfer, htmlTransfer]).optional(),
 })
 const optionSource = z.strictObject({ operation: identifier, items: pointer, nested: pointer.optional(), id: pointer, label: pointer })
 const resource = z.strictObject({

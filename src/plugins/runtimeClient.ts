@@ -4,6 +4,7 @@ import { pluginSettingsSnapshotSchema } from "../../shared/contracts/pluginSetti
 import { pluginHostStatusSchema, pluginPreviewSchema, pluginSnapshotSchema, pluginProjectSchema, type PluginHostStatus, type PluginProjectSummary } from "../../shared/contracts/pluginManagement"
 import { pluginConnectionSnapshotSchema, pluginResourceOptionsSchema, type PluginConnectionTarget } from "../../shared/contracts/pluginConnections"
 import type { PluginInstallPreview, PluginScope } from "../../shared/contracts/plugins"
+import type { PublishViewRequest, UnpublishViewRequest, ViewPublication } from "../../shared/views/publish"
 import { authFetch } from "@/lib/auth"
 import { getActiveDeviceScope, getActiveIdentity, withBase } from "@/lib/device"
 import { version } from "../../package.json"
@@ -16,6 +17,7 @@ const leaseSchema = z.strictObject({ id: z.string().min(1).max(128), expiresAt: 
 const trialSchema = z.strictObject({ deadline: z.number().int().positive() })
 const outcomeSchema = z.strictObject({ status: z.enum(["prepared", "trial", "committing", "committed", "cancelled", "abandoned"]), preview: pluginPreviewSchema, deadline: z.number().int().positive().optional() })
 export type RuntimeLease = z.infer<typeof leaseSchema>
+const viewPublicationSchema = z.object({ pluginId: z.string(), title: z.string(), url: z.string().url(), version: z.number().int().positive(), publishedAt: z.string() })
 export interface RuntimePluginState { status: PluginHostStatus | null; error: string | null; activation: string }
 export const EMPTY_PLUGIN_STATE: RuntimePluginState = { status: null, error: null, activation: "" }
 
@@ -24,7 +26,7 @@ export function clientRuntimeDescriptor(): ClientRuntimeDescriptor {
   return {
     appVersion: version, apiVersions: [PLUGIN_API_VERSION], manifestVersions: [1], protocolVersions: [PROTOCOL_MAJOR],
     runtimes: support.supported ? [RUNTIME] : [],
-    capabilities: support.supported ? { "workspace.panel": "1.0.0", "composer.append": "1.0.0", "composer.context": "1.0.0", "review.start": "1.0.0", "navigation.external": "1.0.0", "navigation.session": "1.0.0", "chat.blocks": "1.0.0", "session.actions": "1.0.0", "media.audio": "1.0.0", "settings.fields": "1.0.0", "composer.dictation": "1.0.0", ...clientIntegrationCapabilities() } : {},
+    capabilities: support.supported ? { "workspace.panel": "1.0.0", "composer.append": "1.0.0", "composer.context": "1.0.0", "review.start": "1.0.0", "navigation.external": "1.0.0", "navigation.session": "1.0.0", "chat.blocks": "1.0.0", "session.actions": "1.0.0", "media.audio": "1.0.0", "settings.fields": "1.0.0", "composer.dictation": "1.0.0", "views.publish": "1.0.0", ...clientIntegrationCapabilities() } : {},
     browser: support.browser,
   }
 }
@@ -255,6 +257,15 @@ export class RuntimePluginClient {
     const { text } = z.strictObject({ text: z.string() }).parse(await readResponse(response))
     this.assertCurrent(owner)
     return text
+  }
+  /** Publishes a stored view through the leased plugin's host; the server composes the page from the view and `themes`. */
+  async publishView(leaseId: string, request: PublishViewRequest, signal?: AbortSignal): Promise<ViewPublication> {
+    const { publication } = z.object({ publication: viewPublicationSchema }).parse(await this.json(`leases/${encodeURIComponent(leaseId)}/publish`, request, "POST", signal))
+    return publication
+  }
+  /** Takes down the page the leased plugin published for a view. */
+  async unpublishView(leaseId: string, request: UnpublishViewRequest, signal?: AbortSignal): Promise<void> {
+    await this.json(`leases/${encodeURIComponent(leaseId)}/unpublish`, request, "POST", signal)
   }
   private acceptStore(value: unknown): void {
     const store = pluginSnapshotSchema.parse(value)

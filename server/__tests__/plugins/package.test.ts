@@ -186,6 +186,28 @@ describe("authenticated payload inspection", () => {
     expect(result.connections.size).toBe(0)
   })
 
+  it("accepts publishing only through an HTML upload with an optional slug and a slug-only removal", () => {
+    const operation = { audience: "setup", method: "GET", origin: "https://share.example.test", path: [{ literal: "check" }], args: {}, query: {} }
+    const slug = { slug: { type: "string", maxLength: 64 } }
+    const upload = { ...operation, audience: "panel", method: "POST", path: [{ literal: "publish" }], args: slug, query: { slug: { arg: "slug" } }, upload: { type: "html", mimeTypes: ["text/html"], maxBytes: 1024 } }
+    const removal = { ...operation, audience: "panel", method: "POST", path: [{ literal: "unpublish" }], args: { slug: { ...slug.slug, required: true } }, body: { slug: { arg: "slug" } } }
+    const packaged = (publish: Record<string, unknown>, unpublish: Record<string, unknown> = removal) => {
+      const definition = { version: 1, id: "share", label: "Share", secret: { id: "key", label: "Key" }, auth: { header: "Authorization", scheme: "bearer" }, validationOperation: "validate", resources: {}, operations: { validate: operation, publish, unpublish } }
+      const entries = files(json(manifest({ contributes: { panels: [], publish: { title: "Share", connection: "share", operation: "publish", unpublish: "unpublish", url: "/url", slug: "/slug" } },
+        permissions: { connections: [{ id: "share", definition: "share.json", operations: ["publish", "unpublish"] }] } })))
+      entries.push(file("share.json", "application/json", json(definition)))
+      return archive(entries)
+    }
+    expect(inspectPackage(packaged(upload), "fixture").manifest.contributes.publish?.operation).toBe("publish")
+    for (const target of [{ ...upload, upload: { type: "audio", mimeTypes: ["audio/wav"], maxBytes: 1024 } }, { ...upload, upload: undefined },
+      { ...upload, args: { slug: { ...slug.slug, required: true } } }, { ...upload, args: {}, query: {} }]) {
+      expect(() => inspectPackage(packaged(target), "fixture")).toThrow(/Publishing/)
+    }
+    for (const target of [{ ...removal, args: slug }, { ...removal, method: "GET", body: undefined, query: { slug: { arg: "slug" } } }]) {
+      expect(() => inspectPackage(packaged(upload, target), "fixture")).toThrow(/Unpublishing|Only POST/)
+    }
+  })
+
   it("accepts dictation only through a WAV upload operation without required arguments", () => {
     const operation = { audience: "setup", method: "GET", origin: "https://speech.example.test", path: [{ literal: "me" }], args: {}, query: {} }
     const transcribe = { ...operation, audience: "panel", method: "POST", path: [{ literal: "transcribe" }], upload: { type: "audio", mimeTypes: ["audio/wav"], maxBytes: 1024 } }

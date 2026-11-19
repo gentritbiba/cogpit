@@ -18,11 +18,21 @@ import { parseJsonText } from "../plugins/json"
 import { canReadPluginManifest, canReadConnection, pluginSnapshotForClient } from "../plugins/presentation"
 import type { ClientRuntimeDescriptor } from "@cogpit/plugin-contracts"
 import type { PluginInstallPreview } from "../../shared/contracts/plugins"
+import { isViewId } from "../../shared/views/stored"
+import { validThemeTokens } from "../../shared/views/publish"
+import { viewStore } from "../views/store"
+import { authorizeView } from "../views/access"
+import { publishView, unpublishView } from "../views/publishing"
 
 const revisionSchema = z.strictObject({ expectedRevision: z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER) })
 const uninstallSchema = z.union([revisionSchema.extend({ deleteData: z.literal(false).optional() }), revisionSchema.extend({ deleteData: z.literal(true), expectedConnectionRevision: revisionSchema.shape.expectedRevision })])
 const leaseSchema = z.strictObject({ pluginId: z.string().max(128), projectId: z.string().max(64).nullable(), workspacePath: z.string().min(1).max(8192).nullable().optional(), contextEpoch: z.string().min(1).max(128), client: clientRuntimeSchema })
 const publisherSchema = z.strictObject({ publisher: z.string().max(64), label: z.string().min(1).max(100), root: z.string().max(PACKAGE_LIMITS.metadata), fingerprint: z.string().regex(/^[a-f0-9]{64}$/), development: z.literal(true) })
+
+const themeTokensSchema = z.record(z.string(), z.string()).transform((value, context) => validThemeTokens(value) ?? (context.addIssue({ code: "custom", message: "Invalid theme tokens" }), z.NEVER))
+const viewIdSchema = z.string().refine(isViewId, "Expected a view id")
+const publishSchema = z.strictObject({ view: viewIdSchema, version: z.number().int().min(1).max(1_000_000), themes: z.strictObject({ light: themeTokensSchema, dark: themeTokensSchema }) })
+const unpublishSchema = z.strictObject({ view: viewIdSchema })
 
 function headerJson(req: IncomingMessage, name: string): unknown {
   const raw = req.headers[name]
@@ -46,7 +56,7 @@ export function registerPluginRoutes(use: UseFn): void {
       return
     }
     const recognized = ["/session", "/status", "/settings", "/workspace/resolve", "/publishers", "/stage", "/stage-seed", "/leases", "/connections", "/connections/credential", "/connections/options", "/connections/select", "/connections/disconnect", "/connections/clear-data", "/connections/import-legacy"].includes(path)
-      || /^\/(?:transactions|payload|installed|leases)\/[a-zA-Z0-9.-]+(?:\/(?:trial|commit|enabled|scope|pin|rollback|renew|call|dictation|session|session-handle|review-session|worktree-setup-confirm))?$/.test(path)
+      || /^\/(?:transactions|payload|installed|leases)\/[a-zA-Z0-9.-]+(?:\/(?:trial|commit|enabled|scope|pin|rollback|renew|call|dictation|publish|unpublish|session|session-handle|review-session|worktree-setup-confirm))?$/.test(path)
     if (!recognized) { sendJson(res, 404, { code: "NOT_FOUND", error: "Unknown plugin endpoint" }); return }
     const requestAbort = new AbortController()
     const abort = () => requestAbort.abort()
@@ -265,6 +275,23 @@ export function registerPluginRoutes(use: UseFn): void {
           const value = await manager.dictate(req, id, audio, { signal: requestAbort.signal })
           authorize()
           sendJson(res, 200, value)
+          return
+        }
+        if (method === "POST" && (operation === "publish" || operation === "unpublish")) {
+          const publishing = operation === "publish" ? publishSchema.parse(await readJsonBody(req, { maxBytes: 65_536 })) : null
+          const { view } = publishing ?? unpublishSchema.parse(await readJsonBody(req, { maxBytes: 1024 }))
+          const store = viewStore()
+          if (!(await authorizeView(req, res, await store.read(view), "interact"))) return
+          const target = { manager, store, req, leaseId: id, view, signal: requestAbort.signal }
+          if (publishing) {
+            const publication = await publishView(target, publishing.version, publishing.themes)
+            authorize()
+            sendJson(res, 200, { publication })
+          } else {
+            await unpublishView(target)
+            authorize()
+            sendJson(res, 200, { unpublished: true })
+          }
           return
         }
         if (method === "POST" && operation === "review-session") {

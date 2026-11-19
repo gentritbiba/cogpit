@@ -13,6 +13,7 @@ import { StoredViewSource, storedViewPrepare, storedViewProblem, useStoredView }
 import { revealSessionById } from "@/lib/revealSession"
 import { formatViewReference, type ViewReference } from "../../../shared/views/stored"
 import type { ViewsList } from "./useViews"
+import { PublishViewMenu } from "./PublishViewMenu"
 
 const renderCode = (code: string, lang: string) => <HighlightedCodeBlock code={code} lang={lang} />
 
@@ -93,6 +94,7 @@ export function OpenView({ reference, list, onSelect, onClose }: {
           </Button>
         )}
         <div className="flex-1" />
+        {view && <PublishViewMenu id={reference.id} title={title} version={reference.version} />}
         <ViewSourceToggle controls={controls} />
         <ViewRunButtons controls={controls} disabled={!prepare} />
       </div>

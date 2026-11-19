@@ -1,6 +1,6 @@
 // @vitest-environment node
 import { describe, expect, it } from "vitest"
-import { MEDIA_LIMIT_BYTES, parseFrameMessage, parseManifest, parsePluginBlockLanguage, parsePluginMedia, supportsPluginHost, validateSettings } from "../index.js"
+import { MEDIA_LIMIT_BYTES, parseConnectionDefinition, parseFrameMessage, parseManifest, parsePluginBlockLanguage, parsePluginMedia, parsePluginUpload, supportsPluginHost, validateSettings } from "../index.js"
 
 const base = { manifestVersion: 1, id: "example.skills", publisher: "example", name: "Skills", version: "1.0.0", runtime: "browser-iife-v1", engines: { pluginApi: "^1.2.0", client: "*", host: "*" }, requires: { client: {}, host: {} }, permissions: {}, stateVersion: 1 }
 const skill = { id: "read", title: "Read", description: "Reading guidance", source: "skills/read/SKILL.md" }
@@ -57,5 +57,28 @@ describe("independent plugin contributions", () => {
     expect(() => parseManifest({ ...base, permissions, contributes: { dictation: { ...dictation, operation: "synthesize" } } })).toThrow()
     expect(() => parseManifest({ ...base, contributes: { dictation } })).toThrow()
     expect(() => parseManifest({ ...base, permissions, contributes: { dictation: { ...dictation, text: "text" } } })).toThrow()
+  })
+  it("binds publishing to two granted operations of one connection", () => {
+    const permissions = { connections: [{ id: "share", definition: "connections/share.json", operations: ["publish", "unpublish"] }] }
+    const publish = { title: "Share host", connection: "share", operation: "publish", unpublish: "unpublish", url: "/url", slug: "/slug" }
+    expect(parseManifest({ ...base, permissions, contributes: { publish } }).contributes.publish).toEqual(publish)
+    expect(() => parseManifest({ ...base, contributes: { publish } })).toThrow()
+    expect(() => parseManifest({ ...base, permissions: { connections: [{ ...permissions.connections[0], operations: ["publish"] }] }, contributes: { publish } })).toThrow()
+    expect(() => parseManifest({ ...base, permissions, contributes: { publish: { ...publish, unpublish: "publish" } } })).toThrow()
+    expect(() => parseManifest({ ...base, permissions, contributes: { publish: { ...publish, url: "url" } } })).toThrow()
+  })
+  it("accepts HTML page uploads only as text/html within the media limit", () => {
+    const page = { mimeType: "text/html", bytes: new TextEncoder().encode("<p>x").buffer }
+    expect(parsePluginUpload(page)).toEqual(page)
+    expect(parsePluginUpload({ mimeType: "audio/wav", bytes: new Uint8Array([1]).buffer }).mimeType).toBe("audio/wav")
+    for (const value of [{ ...page, bytes: new ArrayBuffer(0) }, { ...page, bytes: new ArrayBuffer(MEDIA_LIMIT_BYTES + 1) }, { ...page, mimeType: "text/plain" }]) expect(() => parsePluginUpload(value)).toThrow()
+    expect(() => parsePluginMedia(page)).toThrow()
+    const operation = { audience: "setup", method: "GET", origin: "https://share.example.com", path: [{ literal: "check" }], args: {}, query: {} }
+    const definition = (upload: unknown) => ({ version: 1, id: "share", label: "Share", secret: { id: "key", label: "Key" }, auth: { header: "Authorization", scheme: "bearer" }, validationOperation: "validate", resources: {},
+      operations: { validate: operation, publish: { ...operation, audience: "panel", method: "POST", path: [{ literal: "publish" }], upload } } })
+    expect(parseConnectionDefinition(definition({ type: "html", mimeTypes: ["text/html"], maxBytes: 1024 })).operations.publish.upload?.type).toBe("html")
+    for (const upload of [{ type: "html", mimeTypes: ["text/plain"], maxBytes: 1024 }, { type: "html", mimeTypes: ["text/html", "text/html"], maxBytes: 1024 }, { type: "html", mimeTypes: ["text/html"], maxBytes: MEDIA_LIMIT_BYTES + 1 }]) {
+      expect(() => parseConnectionDefinition(definition(upload))).toThrow()
+    }
   })
 })

@@ -1,5 +1,5 @@
 import { Fragment, useMemo, useState, type FormEvent } from "react"
-import { AlertTriangle, AppWindow, Folder, MoreHorizontal, Pencil, Pin, PinOff, Trash2, type LucideIcon } from "lucide-react"
+import { AlertTriangle, AppWindow, Folder, Globe, MoreHorizontal, Pencil, Pin, PinOff, Trash2, type LucideIcon } from "lucide-react"
 import { toast } from "sonner"
 import { Alert, AlertAction, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import { Button } from "@/components/ui/button"
@@ -20,6 +20,7 @@ import { cn } from "@/lib/utils"
 import type { ViewSummary } from "../../../shared/views/stored"
 import { useViewPanel } from "./ViewPanelContext"
 import { sortViews, type ViewsList } from "./useViews"
+import { publishFailure, useViewPublishing } from "./useViewPublishing"
 
 interface RowAction {
   label: string
@@ -48,6 +49,8 @@ export function ViewBrowser({ list, include, empty }: ViewBrowserProps) {
   const panel = useViewPanel()
   const [renaming, setRenaming] = useState<ViewSummary | null>(null)
   const [deleting, setDeleting] = useState<ViewSummary | null>(null)
+  const publishing = useViewPublishing()
+  const deletingPublisher = publishing.publisherOf(deleting?.published)
 
   const listed = useMemo(() => {
     const sorted = sortViews((views ?? []).filter((view) => !include || include(view)))
@@ -61,8 +64,13 @@ export function ViewBrowser({ list, include, empty }: ViewBrowserProps) {
     if (failure) toast.error(failure)
   }
 
+  /** A published view's page comes down first, so no public page outlives a view Cogpit forgot. */
   const confirmDelete = async (view: ViewSummary): Promise<string | null> => {
-    const failure = await remove(view.id)
+    const owner = publishing.publisherOf(view.published)
+    if (owner) {
+      try { await publishing.unpublish(owner, view.id) } catch (error) { return publishFailure(error, owner.manifest.contributes.publish.title) }
+    }
+    const failure = await remove(view.id, { leavePublished: !!view.published && !owner })
     if (failure) return failure
     if (panel?.target?.id === view.id) panel.select(null)
     setDeleting(null)
@@ -131,7 +139,12 @@ export function ViewBrowser({ list, include, empty }: ViewBrowserProps) {
           open
           onOpenChange={(open) => { if (!open) setDeleting(null) }}
           title="Delete view?"
-          description={<>“<span className="font-medium text-foreground">{deleting.title}</span>” and every version of it are removed from this computer. Replies that show it can no longer load it.</>}
+          description={<>
+            “<span className="font-medium text-foreground">{deleting.title}</span>” and every version of it are removed from this computer. Replies that show it can no longer load it.
+            {deleting.published && (deletingPublisher
+              ? <> Its public page at {deleting.published.title} is taken down first.</>
+              : <> Its public page at <span className="break-all">{deleting.published.url}</span> stays online: {deleting.published.title} is not installed here, so remove it from that host yourself.</>)}
+          </>}
           confirmLabel="Delete view"
           destructive
           onConfirm={() => confirmDelete(deleting)}
@@ -173,6 +186,12 @@ function ViewRow({ view, active, onOpen, actions }: {
             </span>
             <span className="flex items-center gap-2 text-[11px] text-muted-foreground">
               <span className="tabular-nums">{version === null ? "Not built yet" : `v${version}`}</span>
+              {view.published && (
+                <span className="flex items-center gap-1" title={view.published.url}>
+                  <Globe className="size-3" aria-hidden="true" />
+                  Published
+                </span>
+              )}
               <span className="ml-auto tabular-nums" title={new Date(view.updatedAt).toLocaleString()}>{formatRelativeTime(view.updatedAt)}</span>
             </span>
           </button>

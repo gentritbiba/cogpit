@@ -141,12 +141,20 @@ describe("hostile HTTPS responses", () => {
     expect(test.request.mock.calls[0][0]).toMatchObject({ method: "POST", headers: { "Content-Type": "audio/wav", "Content-Length": 6, Accept: "application/json" } })
     expect(test.outgoing.end).toHaveBeenCalledWith(Buffer.from(recording))
   })
+  it("sends a published page as its own text/html body", async () => {
+    const page = new TextEncoder().encode("<p>hi</p>").buffer
+    const test = fixture({ chunks: [Buffer.from('{"url":"https://share.example.com/a/","slug":"a"}')] })
+    expect(await test.transport(input({ method: "POST", upload: { mimeType: "text/html", bytes: page } }))).toEqual({ url: "https://share.example.com/a/", slug: "a" })
+    expect(test.request.mock.calls[0][0]).toMatchObject({ method: "POST", headers: { "Content-Type": "text/html", "Content-Length": 9 } })
+    expect(test.outgoing.end).toHaveBeenCalledWith(Buffer.from(page))
+  })
   it.each([
     { method: "GET" as const, upload: { mimeType: "audio/wav", bytes: new ArrayBuffer(2) } },
     { method: "POST" as const, body: { a: 1 }, upload: { mimeType: "audio/wav", bytes: new ArrayBuffer(2) } },
-    { method: "POST" as const, upload: { mimeType: "text/html", bytes: new ArrayBuffer(2) } },
+    { method: "POST" as const, upload: { mimeType: "text/plain", bytes: new ArrayBuffer(2) } },
     { method: "POST" as const, upload: { mimeType: "audio/wav", bytes: new ArrayBuffer(0) } },
-  ])("refuses uploads that are not a lone, non-empty audio POST body", async extra => {
+    { method: "POST" as const, upload: { mimeType: "text/html", bytes: new ArrayBuffer(0) } },
+  ])("refuses uploads that are not a lone, non-empty audio or page POST body", async extra => {
     const test = fixture()
     await expect(test.transport(input(extra))).rejects.toMatchObject({ code: "INVALID_REQUEST" })
     expect(test.request).not.toHaveBeenCalled()

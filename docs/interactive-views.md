@@ -77,6 +77,25 @@ always builds and serves it. It swaps the viewer's theme into the placeholder
 (`withViewTheme`) and posts the page into the shell. It shows the source files,
 and offers the newest version when the reply's is older.
 
+## Publishing
+
+A stored view can be published to a public address through a plugin that
+contributes `publish` (see `docs/plugins.md`). The user picks the host from
+the globe button on the card or the view open in the Library and confirms;
+agents cannot publish. The computer that holds the view composes the public
+page in `server/views/publishing.ts`: `publishedViewDocument`
+(`shared/views/publish.ts`) fills the theme placeholder with the
+publisher's light and dark colors, read in the browser by
+`readLightAndDarkTokens`, and picks one by the visitor's
+`prefers-color-scheme`, switching when it changes. With no Cogpit window
+around it, `ask` does nothing and links open normally.
+
+`view.json`'s `published` records the plugin, the host's title, the URL, the
+host's slug, the version and the time. The views list and a version's page
+report it without the slug. Publishing again replaces the same page; taking
+it down clears the record. `DELETE /api/views/<id>` refuses a published view
+(409) unless `?leavePublished=1`, so the client takes the page down first.
+
 ## How a view runs
 
 1. `MarkdownCodeBlock` hands a `cogpit-view` block in an agent's reply to the

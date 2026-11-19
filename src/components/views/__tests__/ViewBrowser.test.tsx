@@ -33,7 +33,7 @@ function serve(initial: ViewSummary[]) {
   mocks.authFetch.mockImplementation((url: string, init: RequestInit = {}) => {
     const method = init.method ?? "GET"
     if (url === "/api/views" && method === "GET") return json({ views })
-    const id = decodeURIComponent(url.split("/").pop() ?? "")
+    const id = decodeURIComponent(url.split("?")[0]!.split("/").pop() ?? "")
     if (method === "PATCH") {
       const change = JSON.parse(String(init.body)) as Partial<ViewSummary>
       if (change.title === "") return json({ error: "A view's title is 1 to 200 characters" }, 400)
@@ -176,6 +176,20 @@ describe("ViewBrowser", () => {
     expect(mocks.authFetch).toHaveBeenCalledWith("/api/views/sales-funnel", expect.objectContaining({ method: "DELETE" }))
     expect(screen.getByText("Other")).toBeInTheDocument()
     expect(screen.getByTestId("panel-target")).toHaveTextContent("none")
+  })
+
+  it("marks a published view, and deletes it leaving its page up when its host plugin is not installed", async () => {
+    const published = { pluginId: "dev-me.share", title: "Share host", url: "https://share.example.com/abc/", version: 1, publishedAt: ago(HOUR) }
+    serve([summary({ id: "sales-funnel", title: "Sales funnel", published })])
+    renderBrowser()
+    expect(within(await rowOf("Sales funnel")).getByText("Published")).toBeInTheDocument()
+
+    await chooseAction("Sales funnel", "Delete view")
+    expect(await screen.findByText(/stays online: Share host is not installed here/)).toBeInTheDocument()
+    await userEvent.click(await screen.findByRole("button", { name: "Delete view" }))
+
+    await waitFor(() => expect(screen.queryByText("Sales funnel")).not.toBeInTheDocument())
+    expect(mocks.authFetch).toHaveBeenCalledWith("/api/views/sales-funnel?leavePublished=1", expect.objectContaining({ method: "DELETE" }))
   })
 
   it("offers a retry when the list cannot load", async () => {

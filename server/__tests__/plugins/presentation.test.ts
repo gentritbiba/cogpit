@@ -40,4 +40,16 @@ describe("plugin DTO compatibility", () => {
       expect(pluginSnapshotForClient(snapshot, { ...client, apiVersions: ["1.3.0"] })).toEqual(snapshot)
     }
   })
+  it("keeps publishers and page uploads from clients older than API 1.5", () => {
+    const operation = { audience: "setup", method: "GET", origin: "https://share.example.com", path: [{ literal: "check" }], args: {}, query: {} }
+    const definition = parseConnectionDefinition({ version: 1, id: "share", label: "Share", secret: { id: "key", label: "Key" }, auth: { header: "Authorization", scheme: "bearer" }, validationOperation: "validate", resources: {},
+      operations: { validate: operation, publish: { ...operation, audience: "panel", method: "POST", path: [{ literal: "publish" }], upload: { type: "html", mimeTypes: ["text/html"], maxBytes: 1024 } } } })
+    expect(canReadConnection(definition, { ...client, apiVersions: ["1.4.0"] })).toBe(false)
+    expect(canReadConnection(definition, { ...client, apiVersions: ["1.5.0"] })).toBe(true)
+    const publishing = parseManifest({ ...legacy, version: "3.0.0", contributes: { ...legacy.contributes, publish: { title: "Share", connection: "share", operation: "publish", unpublish: "unpublish", url: "/url", slug: "/slug" } },
+      permissions: { connections: [{ id: "share", definition: "share.json", operations: ["publish", "unpublish"] }] } })
+    const snapshot = { available: true, revision: 1, publishers: [], plugins: [{ id: publishing.id, selectedDigest: latest.digest, manifest: publishing, enabled: true, scope: { type: "all" as const }, pinned: false, versions: [{ ...latest, manifest: publishing }] }] }
+    expect(pluginSnapshotForClient(snapshot, { ...client, apiVersions: ["1.4.0"] }).plugins).toEqual([])
+    expect(pluginSnapshotForClient(snapshot, { ...client, apiVersions: ["1.5.0"] })).toEqual(snapshot)
+  })
 })

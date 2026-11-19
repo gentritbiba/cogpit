@@ -510,4 +510,31 @@ describe("host-owned plugin connections and state", () => {
     transport.mockImplementation(async input => input.path === "/transcribe" ? { result: { words: [] } } : response(input.path))
     await expect(manager.dictate(req, (await lease()).id, recording)).rejects.toMatchObject({ code: "INVALID_RESPONSE" })
   })
+
+  it("publishes a page and takes it down only through the plugin's declared publish operations", async () => {
+    const page = "<!doctype html><p>Hi</p>"
+    await expect(manager.publish(req, (await lease()).id, page, undefined)).rejects.toMatchObject({ code: "PERMISSION_REQUIRED" })
+    const get = (path: string) => ({ audience: "setup", origin: "https://api.example.com", method: "GET", path: [{ literal: path }], args: {}, query: {} })
+    const share = parseConnectionDefinition({ version: 1, id: "catalog", label: "Share", secret: { id: "token", label: "Token" }, auth: { header: "Authorization", scheme: "bearer" }, validationOperation: "validate", resources: {},
+      operations: { validate: get("validate"),
+        publish: { ...get("publish"), audience: "panel", method: "POST", args: { slug: { type: "string", maxLength: 64 } }, query: { slug: { arg: "slug" } }, upload: { type: "html", mimeTypes: ["text/html"], maxBytes: 1024 } },
+        unpublish: { ...get("unpublish"), audience: "panel", method: "POST", args: { slug: { type: "string", required: true, maxLength: 64 } }, body: { slug: { arg: "slug" } } } } })
+    await install(signedPackage(authority, { version: "1.1.0", metadataVersion: 2, retained: [installed], connection: share,
+      contributes: { panels: [], publish: { title: "Share", connection: "catalog", operation: "publish", unpublish: "unpublish", url: "/page/url", slug: "/page/slug" } } }))
+    await expect(manager.publish(req, (await lease()).id, page, undefined)).rejects.toMatchObject({ code: "CONNECTION_REQUIRED" })
+    await manager.setCredential(req, { ...mutation(), secret: token }, options)
+    transport.mockImplementation(async input => input.path.startsWith("/publish") ? { page: { url: "https://share.example.com/abc123/", slug: "abc123" } } : input.path === "/unpublish" ? { ok: true } : response(input.path))
+    expect(await manager.publish(req, (await lease()).id, page, undefined)).toEqual({ title: "Share", url: "https://share.example.com/abc123/", slug: "abc123" })
+    const sent = transport.mock.calls.at(-1)?.[0]
+    expect(sent).toMatchObject({ path: "/publish", method: "POST", upload: { mimeType: "text/html" } })
+    expect(Buffer.from(sent!.upload!.bytes).toString()).toBe(page)
+    await manager.publish(req, (await lease()).id, page, "abc123")
+    expect(transport).toHaveBeenLastCalledWith(expect.objectContaining({ path: "/publish?slug=abc123" }))
+    await manager.unpublish(req, (await lease()).id, "abc123")
+    expect(transport).toHaveBeenLastCalledWith(expect.objectContaining({ path: "/unpublish", method: "POST", body: { slug: "abc123" } }))
+    for (const answer of [{ page: { url: "http://share.example.com/x/", slug: "x" } }, { page: { url: "https://share.example.com/x/", slug: "../x" } }, { page: {} }]) {
+      transport.mockImplementation(async input => input.path.startsWith("/publish") ? answer : response(input.path))
+      await expect(manager.publish(req, (await lease()).id, page, undefined)).rejects.toMatchObject({ code: "INVALID_RESPONSE" })
+    }
+  })
 })

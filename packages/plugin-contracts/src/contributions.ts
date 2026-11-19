@@ -28,6 +28,12 @@ export const sessionActionContributionSchema = z.strictObject({ id: identifier, 
 /** Cogpit records the user's microphone and sends the WAV to `operation`; `text` points at the transcript in its JSON answer. */
 export const dictationContributionSchema = z.strictObject({ title: label, connection: identifier, operation: identifier, text: jsonPointer })
 export type PluginDictationContribution = z.infer<typeof dictationContributionSchema>
+/**
+ * Cogpit sends a view's finished page to `operation`, which answers with JSON holding the public address at `url`
+ * and, at `slug`, the name Cogpit passes back to replace that page or, through `unpublish`, to take it down.
+ */
+export const publishContributionSchema = z.strictObject({ title: label, connection: identifier, operation: identifier, unpublish: identifier, url: jsonPointer, slug: jsonPointer })
+export type PluginPublishContribution = z.infer<typeof publishContributionSchema>
 export type PluginSettingsContribution = z.infer<typeof settingsContributionSchema>
 export type PluginSettingsValues = Record<string, string | number | boolean>
 export const SETTINGS_STORAGE_KEY = "cogpit.settings"

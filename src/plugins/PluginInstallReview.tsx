@@ -42,6 +42,7 @@ function accessLines(manifest: PluginManifest): string[] {
     ...(manifest.contributes.chatBlocks ?? []).map(block => `Render ${block.title} cards and read the text inside their declared chat blocks`),
     ...(manifest.contributes.sessionActions ?? []).map(action => `Add a ${action.title} button that sends an agent request when clicked`),
     ...(manifest.contributes.dictation ? [`Add a ${manifest.contributes.dictation.title} button that records your microphone only while you dictate, and sends the recording to connection ${manifest.contributes.dictation.connection} to transcribe`] : []),
+    ...(manifest.contributes.publish ? [`Add a Publish button to views that, when you choose to, uploads a view's page through connection ${manifest.contributes.publish.connection} so anyone with its link can open it`] : []),
     ...permissions.connections.flatMap((connection) => connection.operations.map((operation) => `Use connection ${connection.id}: ${operation}`)),
     ...permissions.integrations.flatMap((integration) => integration.operations.map((operation) => integrationLine(integration.id, operation))),
   ])]

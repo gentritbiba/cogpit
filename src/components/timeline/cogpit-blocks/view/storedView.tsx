@@ -3,6 +3,7 @@ import { authFetch } from "@/lib/auth"
 import { getActiveDeviceScope } from "@/lib/device"
 import { withViewTheme } from "../../../../../shared/views/frame"
 import { formatViewReference, viewVersionPath, VIEWS_PATH, type StoredViewVersion, type ViewReference, type ViewSummary } from "../../../../../shared/views/stored"
+import type { ViewPublication } from "../../../../../shared/views/publish"
 import type { PreparedView } from "./ViewFrame"
 
 export type StoredState =
@@ -31,6 +32,8 @@ export function onViewsChanged(listener: () => void): () => void {
  * device's earlier address, cannot leak into another.
  */
 const newest = new Map<string, number>()
+/** Where each view is published, per device; null once known not to be. */
+const publications = new Map<string, ViewPublication | null>()
 const subscribers = new Set<() => void>()
 const checkedAt = new Map<string, number>()
 const RECHECK_MS = 5_000
@@ -40,10 +43,15 @@ export function viewsScope(): string {
   return getActiveDeviceScope()
 }
 
-export function rememberNewestVersions(scope: string, views: ReadonlyArray<Pick<ViewSummary, "id" | "latestVersion">>): void {
+export function rememberViews(scope: string, views: ReadonlyArray<Pick<ViewSummary, "id" | "latestVersion" | "published">>): void {
   let changed = false
-  for (const { id, latestVersion } of views) {
+  for (const { id, latestVersion, published } of views) {
     const key = `${scope} ${id}`
+    const publication = published ?? null
+    if (!publications.has(key) || JSON.stringify(publications.get(key)) !== JSON.stringify(publication)) {
+      publications.set(key, publication)
+      changed = true
+    }
     if (latestVersion === null || (newest.get(key) ?? 0) >= latestVersion) continue
     newest.set(key, latestVersion)
     changed = true
@@ -56,7 +64,7 @@ function checkNewestVersions(): void {
   if (Date.now() - (checkedAt.get(scope) ?? 0) < RECHECK_MS) return
   checkedAt.set(scope, Date.now())
   authFetch(VIEWS_PATH)
-    .then(async (response) => { if (response.ok) rememberNewestVersions(scope, ((await response.json()) as { views: ViewSummary[] }).views) })
+    .then(async (response) => { if (response.ok) rememberViews(scope, ((await response.json()) as { views: ViewSummary[] }).views) })
     .catch(() => {})
 }
 
@@ -81,6 +89,11 @@ function subscribe(notify: () => void): () => void {
   }
 }
 
+/** Where `id` on the active device is published, null when it is not, and undefined until this window knows. */
+export function usePublication(id: string): ViewPublication | null | undefined {
+  return useSyncExternalStore(subscribe, () => publications.get(`${viewsScope()} ${id}`))
+}
+
 /** The newest version of `id` on the active device that this window has heard of, or null. */
 export function useNewestVersion(id: string): number | null {
   return useSyncExternalStore(subscribe, () => newest.get(`${viewsScope()} ${id}`) ?? null)
@@ -99,7 +112,7 @@ export function useStoredView({ id, version }: ViewReference): StoredState {
       else if (!response.ok) settle({ status: "failed" })
       else {
         const view = await response.json() as StoredViewVersion
-        rememberNewestVersions(scope, [{ id: view.id, latestVersion: view.latestVersion }])
+        rememberViews(scope, [{ id: view.id, latestVersion: view.latestVersion, published: view.published }])
         settle({ status: "ready", view })
       }
     }).catch(() => settle({ status: "failed" }))

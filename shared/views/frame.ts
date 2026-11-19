@@ -70,7 +70,8 @@ export const VIEW_FRAME_KIT = String.raw`(initialTheme) => {
     const height = Math.ceil(root.getBoundingClientRect().height)
     if (height !== lastHeight) post({ type: "resize", height: (lastHeight = height) })
   }).observe(root)
-  document.addEventListener("click", (event) => {
+  // Published on its own, a page's links open as they would anywhere.
+  if (host !== window) document.addEventListener("click", (event) => {
     const link = event.target instanceof Element ? event.target.closest("a[href]") : null
     if (!link || (link.getAttribute("href") ?? "").startsWith("#")) return
     event.preventDefault()
