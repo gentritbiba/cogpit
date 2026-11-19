@@ -1318,14 +1318,18 @@ async fn a_save_abandoned_by_its_client_finishes_or_never_starts_and_leaves_no_t
     use std::future::Future;
     use std::task::Poll;
     let root = project();
-    let path = root.path().join("src/app.ts");
     let app = app();
 
     // Drop the response future after each possible number of polls: that is
-    // what hyper does when the client goes away mid-request.
+    // what hyper does when the client goes away mid-request. Each round saves
+    // its own file, so a detached save from an earlier round that lands late
+    // (slow Windows runners) cannot change what a later round reads.
     for polls in 1..40u64 {
+        let relative = format!("src/app-{polls}.ts");
+        let path = root.path().join(&relative);
+        std::fs::write(&path, "start\n").unwrap();
         let before = std::fs::read_to_string(&path).unwrap();
-        let mtime = read_file(&app, root.path(), "src/app.ts").await.json()["mtimeMs"].clone();
+        let mtime = read_file(&app, root.path(), &relative).await.json()["mtimeMs"].clone();
         let content = format!("after {polls} polls\n");
         let request = Request::builder()
             .method(Method::PUT)
@@ -1333,7 +1337,7 @@ async fn a_save_abandoned_by_its_client_finishes_or_never_starts_and_leaves_no_t
             .header("content-type", "application/json")
             .body(Body::from(save_body(
                 root.path(),
-                "src/app.ts",
+                &relative,
                 &content,
                 &mtime,
             )))
