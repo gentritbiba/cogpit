@@ -128,14 +128,20 @@ cores when ready (`.github/actions/await-artifacts`), plus Quality with the
 edition package. For the public Quality it waits on the master push's run for
 the tagged commit, and runs its own only when there is none. `publish` checks
 the update manifests, then ships the GitHub release, npm and AUR once both
-quality runs pass. `workflow_dispatch` on a branch dry-runs everything up to
+quality runs pass; a failed public run gets its failed jobs rerun once first.
+`workflow_dispatch` on a branch dry-runs everything up to
 the checks in `publish` with the public edition and publishes nothing. The tag
 must equal `package.json`'s version.
+
+A `chore: release` commit that only bumps `package.json`'s version reuses its
+parent's green Quality run instead of running its own. Push it on its own once
+master is green: the release then has the account's runners to itself and
+publishes in about five minutes.
 
 Quality (`.github/workflows/quality.yml`) shards the Vitest suite across Linux
 runners, merging their coverage in one job, and runs the `node` project (the
 suites that touch the OS) on Windows. CI builds `generated/` once per job
-(`.github/actions/setup-js` sets `COGPIT_GENERATED_BUILT`) and restores
+(`.github/actions/setup-js` caches it and sets `COGPIT_GENERATED_BUILT`) and restores
 `cogpit-core` from a cache keyed on the Rust sources
 (`.github/actions/core-binary`); master pushes that change the core run
 `core.yml` so the next release finds its binaries cached. The account runs at

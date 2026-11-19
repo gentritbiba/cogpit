@@ -31,7 +31,43 @@ concurrency:
 # submodule empty, and its builds prove it by failing if they emit the edition
 # UI chunk; the edition run (release only) checks the build that ships.
 jobs:
+  # A release commit that only bumps package.json's version changes nothing
+  # Quality checks, so a push of one reuses its parent's green run. That keeps
+  # the runners free for the release that comes with it. Other pushes skip
+  # this job, so it costs them nothing.
+  version-bump:
+    if: "${{ github.event_name == 'push' && !inputs.edition && startsWith(github.event.head_commit.message, 'chore: release') }}"
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      actions: read
+      contents: read
+    outputs:
+      green: ${{ steps.parent.outputs.green }}
+
+    steps:
+      - id: parent
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          parent=$(gh api "repos/$GITHUB_REPOSITORY/commits/$GITHUB_SHA" --jq 'if (.parents | length) == 1 then .parents[0].sha else "" end')
+          [ -n "$parent" ] || exit 0
+          gh api "repos/$GITHUB_REPOSITORY/compare/$parent...$GITHUB_SHA" --jq '.files' > files.json
+          jq -e 'length == 1 and .[0].filename == "package.json" and .[0].additions == 1 and .[0].deletions == 1' files.json > /dev/null || exit 0
+          jq -r '.[0].patch' files.json | grep -E '^[+-]' | grep -qvE '^[+-]  "version": "[^"]+",$' && exit 0
+          run=$(gh api "repos/$GITHUB_REPOSITORY/actions/workflows/quality.yml/runs?head_sha=$parent&event=push&per_page=1" --jq '.workflow_runs[0].id // empty')
+          [ -n "$run" ] || exit 0
+          echo "Only the version changed since $parent; waiting for its run $run"
+          until [ "$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$run" --jq .status)" = completed ]; do sleep 10; done
+          if [ "$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$run" --jq .conclusion)" = success ]; then
+            echo "Its run passed; nothing here needs checking again."
+            echo "green=true" >> "$GITHUB_OUTPUT"
+          fi
+
   checks:
+    needs: [version-bump]
+    if: ${{ !cancelled() && needs.version-bump.outputs.green != 'true' }}
     runs-on: ubuntu-latest
     timeout-minutes: 15
     environment: ${{ inputs.edition && 'release' || '' }}
@@ -88,6 +124,8 @@ jobs:
   # The suite, split across runners. Each shard of the public run records its
   # coverage in a blob; `coverage` merges them and checks the thresholds.
   test:
+    needs: [version-bump]
+    if: ${{ !cancelled() && needs.version-bump.outputs.green != 'true' }}
     name: test (${{ matrix.shard }}/5)
     runs-on: ubuntu-latest
     timeout-minutes: 15
@@ -134,7 +172,7 @@ jobs:
           if-no-files-found: error
 
   coverage:
-    if: ${{ !inputs.edition }}
+    if: ${{ !cancelled() && needs.test.result == 'success' && !inputs.edition }}
     needs: [test]
     runs-on: ubuntu-latest
     timeout-minutes: 10
@@ -168,7 +206,8 @@ jobs:
           if-no-files-found: error
 
   build:
-    if: ${{ !inputs.edition }}
+    needs: [version-bump]
+    if: ${{ !cancelled() && needs.version-bump.outputs.green != 'true' && !inputs.edition }}
     runs-on: ubuntu-latest
     timeout-minutes: 15
 
@@ -204,7 +243,8 @@ jobs:
   # touch the OS run here: the dom project renders React in jsdom and reads
   # nothing from the machine, and types and builds do not differ either.
   windows:
-    if: ${{ !inputs.edition }}
+    needs: [version-bump]
+    if: ${{ !cancelled() && needs.version-bump.outputs.green != 'true' && !inputs.edition }}
     name: windows (${{ matrix.shard }}/4)
     runs-on: windows-latest
     timeout-minutes: 20
@@ -240,7 +280,8 @@ jobs:
 
   # The core's stdin-close exit and spawn are what differ on Windows.
   rust-windows:
-    if: ${{ !inputs.edition }}
+    needs: [version-bump]
+    if: ${{ !cancelled() && needs.version-bump.outputs.green != 'true' && !inputs.edition }}
     runs-on: windows-latest
     timeout-minutes: 15
 

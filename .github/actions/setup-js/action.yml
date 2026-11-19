@@ -1,9 +1,10 @@
 name: Set up Bun, Node and the dependencies
 description: >
-  Installs the pinned Bun and Node and the root dependencies, then builds the
-  plugin packages and generated/ once and sets COGPIT_GENERATED_BUILT so the
-  scripts that start with build:generated skip it. The install skips lifecycle
-  scripts: the only one Cogpit needs is its own postinstall, which is that build.
+  Installs the pinned Bun and Node and the root dependencies, then restores or
+  builds the plugin packages and generated/ once and sets COGPIT_GENERATED_BUILT
+  so the scripts that start with build:generated skip it. The install skips
+  lifecycle scripts: the only one Cogpit needs is its own postinstall, which is
+  that build.
 
 inputs:
   memory:
@@ -41,9 +42,37 @@ runs:
       working-directory: packages/cogpit-memory
       run: bun install --frozen-lockfile
 
-    - name: Build the plugin packages and generated/
+    # What build:generated reads: the plugin packages, the bundled plugins,
+    # the view kit, the package checks that digest the bundles, the app
+    # version and the dependencies. The output differs by OS (line endings).
+    - id: paths
       if: inputs.generated == 'true'
       shell: bash
       run: |
-        bun run build:generated
-        echo "COGPIT_GENERATED_BUILT=1" >> "$GITHUB_ENV"
+        echo "key=generated-${{ runner.os }}-${{ hashFiles('packages/plugin-*/**', '!packages/plugin-*/dist/**', '!packages/plugin-*/node_modules/**', 'plugins/**', 'src/viewKit/**', 'shared/views/**', 'server/plugins/package.ts', 'server/plugins/json.ts', 'scripts/build-generated.ts', 'scripts/build-runtime-plugins.ts', 'scripts/build-view-kit.ts', 'package.json', 'bun.lock') }}" >> "$GITHUB_OUTPUT"
+
+    - id: cache
+      if: inputs.generated == 'true'
+      uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+      with:
+        path: |
+          generated
+          packages/plugin-*/dist
+        key: ${{ steps.paths.outputs.key }}
+
+    - name: Build the plugin packages and generated/
+      if: inputs.generated == 'true' && steps.cache.outputs.cache-hit != 'true'
+      shell: bash
+      run: bun run build:generated
+
+    - if: inputs.generated == 'true' && steps.cache.outputs.cache-hit != 'true'
+      uses: actions/cache/save@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+      with:
+        path: |
+          generated
+          packages/plugin-*/dist
+        key: ${{ steps.paths.outputs.key }}
+
+    - if: inputs.generated == 'true'
+      shell: bash
+      run: echo "COGPIT_GENERATED_BUILT=1" >> "$GITHUB_ENV"

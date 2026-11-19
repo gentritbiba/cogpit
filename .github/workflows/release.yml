@@ -288,7 +288,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     permissions:
-      actions: read
+      actions: write # rerun a flaky Quality run
       contents: write
       id-token: write # npm provenance attestation
 
@@ -312,17 +312,26 @@ jobs:
             exit 0
           fi
           url="$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$RUN_ID"
+          state() { gh api "repos/$GITHUB_REPOSITORY/actions/runs/$RUN_ID" --jq '"\(.status) \(.conclusion)"' || echo "unknown -"; }
+          # A failed run gets its failed jobs rerun once: most failures there
+          # are a test timing out on a loaded runner, and a rerun is what a
+          # person would do anyway.
+          rerun=false
           echo "Waiting for $url"
           while :; do
-            state=$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$RUN_ID" --jq '"\(.status) \(.conclusion)"' || echo "unknown -")
-            read -r status conclusion <<<"$state"
-            [ "$status" = completed ] && break
-            sleep 10
-          done
-          if [ "$conclusion" != success ]; then
+            read -r status conclusion <<<"$(state)"
+            if [ "$status" != completed ]; then sleep 10; continue; fi
+            [ "$conclusion" = success ] && exit 0
+            if [ "$conclusion" = failure ] && [ "$rerun" = false ]; then
+              echo "::warning::Quality for this commit failed; rerunning its failed jobs once: $url"
+              gh run rerun "$RUN_ID" --failed --repo "$GITHUB_REPOSITORY"
+              rerun=true
+              until read -r status _ <<<"$(state)" && [ "$status" != completed ]; do sleep 5; done
+              continue
+            fi
             echo "::error::Quality for this commit concluded $conclusion: $url. Rerun its failed jobs there, then rerun this job."
             exit 1
-          fi
+          done
 
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         with:
