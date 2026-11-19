@@ -62,7 +62,7 @@ Electron composition -> server public composition API
 | Renderer orchestration | feature hooks plus `src/components/AppShell/` | `src/App.tsx` composes state and feature boundaries; feature logic should not move back into it. |
 | Compile-time UI plugins | `plugins/`, `src/plugin-api/`, `src/plugins/registry.ts` | The public API is the only renderer surface available to root plugins. Built-in panels adapt existing UI and services through `src/components/workspace-panels/`. |
 | Renderer live-event lifecycle | `src/hooks/useLiveEventStream.ts` | Team and workflow hooks supply parsing/domain state only; connection, stale-timer, and cleanup semantics stay shared. |
-| Quality and release policy | `.github/workflows/quality.yml`, `.github/workflows/release.yml` | Releases cannot package or publish until the reusable quality workflow passes. Third-party actions and build containers are immutable references. |
+| Quality and release policy | `.github/workflows/quality.yml`, `.github/workflows/release.yml` | Releases build while quality runs and cannot publish until the reusable quality workflow passes on the tagged commit, with and without the edition package. Third-party actions and build containers are immutable references. |
 
 Compatibility facades are intentionally one-way. New code imports the canonical owner unless a test seam requires the existing facade. A facade may re-export a symbol, but it must not wrap it or create a second implementation.
 

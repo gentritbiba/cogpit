@@ -121,12 +121,22 @@ release's `latest*.yml`. `bun run electron:dev` runs it from source;
 
 ## Releases
 
-A `v*` tag runs `.github/workflows/release.yml`: `cogpit-core` for five
-targets (`core`), the desktop app per platform with its core (`build`), the
-merged and checked update manifests (`assemble`), then the GitHub release, npm
-and AUR. `workflow_dispatch` on a branch dry-runs everything up to
-`assemble` with the public edition and publishes nothing. The tag must equal
+A `v*` tag runs `.github/workflows/release.yml`, which starts everything at
+once: `cogpit-core` for five targets (`core`), the desktop app per platform
+(`build`) and the npm packages (`npm-pack`), which pick up their cores when
+ready (`.github/actions/await-artifacts`), plus Quality with the edition
+package. For the public Quality it waits on the master push's run for the
+tagged commit, and runs its own only when there is none. `publish` merges and
+checks the update manifests, then ships the GitHub release, npm and AUR.
+`workflow_dispatch` on a branch dry-runs everything up to the checks in
+`publish` with the public edition and publishes nothing. The tag must equal
 `package.json`'s version.
+
+Quality (`.github/workflows/quality.yml`) shards the Vitest suite across
+Linux and Windows runners and merges the Linux shards' coverage in one job.
+CI builds `generated/` once per job (`.github/actions/setup-js` sets
+`COGPIT_GENERATED_BUILT`) and restores `cogpit-core` from a cache keyed on
+the Rust sources (`.github/actions/core-binary`).
 
 ## App Icon
 

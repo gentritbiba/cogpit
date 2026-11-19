@@ -184,14 +184,26 @@ jobs:
           # files the in-app updater downloads: the mac zips, the Windows
           # blockmap for differential downloads. `cores` names the cogpit-core
           # builds each app carries.
+          # One job per Mac architecture: electron-builder packages them one
+          # after the other. publish merges their two update manifests.
           - os: macos-latest
-            name: macOS
-            cores: core-darwin-arm64 core-darwin-x64
-            package: bunx electron-builder --mac --arm64 --x64 --publish never
+            name: macOS (arm64)
+            cores: core-darwin-arm64
+            package: bunx electron-builder --mac --arm64 --publish never
+            manifest: latest-mac-arm64.yml
             pattern: |
               release/*.dmg
               release/*-mac.zip
-              release/latest-mac.yml
+              release/latest-mac-arm64.yml
+          - os: macos-latest
+            name: macOS (x64)
+            cores: core-darwin-x64
+            package: bunx electron-builder --mac --x64 --publish never
+            manifest: latest-mac-x64.yml
+            pattern: |
+              release/*.dmg
+              release/*-mac.zip
+              release/latest-mac-x64.yml
           - os: ubuntu-latest
             name: Linux (AppImage)
             cores: core-linux-x64
@@ -279,10 +291,11 @@ jobs:
           CSC_IDENTITY_AUTO_DISCOVERY: "false"
         run: ${{ matrix.package }}
 
-      # Both Linux jobs write latest-linux.yml; publish merges the two.
-      - name: Name the Linux update manifest
+      # Both Linux jobs write latest-linux.yml and both Mac jobs latest-mac.yml;
+      # publish merges each pair.
+      - name: Name the update manifest
         if: matrix.manifest
-        run: mv release/latest-linux.yml "release/${{ matrix.manifest }}"
+        run: mv "release/${{ runner.os == 'macOS' && 'latest-mac.yml' || 'latest-linux.yml' }}" "release/${{ matrix.manifest }}"
 
       - name: Upload artifacts
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
@@ -409,21 +422,27 @@ jobs:
       - name: List artifacts
         run: find artifacts -type f
 
-      # electron-updater on Linux reads one latest-linux.yml for both the
-      # AppImage and the pacman package and picks its file by extension.
-      # The AppImage goes last so the legacy top-level path describes it.
-      - name: Merge the Linux update manifests
+      # electron-updater reads one manifest per platform and picks its file
+      # from it: on Linux by extension (AppImage or pacman), on a Mac by
+      # architecture. The second of each pair goes last so the legacy top-level
+      # path describes it, as when one electron-builder run wrote both.
+      - name: Merge the Linux and Mac update manifests
         shell: bash
         working-directory: artifacts
         run: |
           set -euo pipefail
-          if [ "$(yq -N '.version' latest-linux-pacman.yml latest-linux-appimage.yml | sort -u | wc -l)" -ne 1 ]; then
-            echo "The Linux update manifests disagree on the version" >&2
-            exit 1
-          fi
-          yq eval-all '. as $m ireduce ({}; . *+ $m)' latest-linux-pacman.yml latest-linux-appimage.yml > latest-linux.yml
-          rm latest-linux-pacman.yml latest-linux-appimage.yml
-          cat latest-linux.yml
+          merge() {
+            local out=$1 first=$2 second=$3
+            if [ "$(yq -N '.version' "$first" "$second" | sort -u | wc -l)" -ne 1 ]; then
+              echo "$first and $second disagree on the version" >&2
+              exit 1
+            fi
+            yq eval-all '. as $m ireduce ({}; . *+ $m)' "$first" "$second" > "$out"
+            rm "$first" "$second"
+            cat "$out"
+          }
+          merge latest-linux.yml latest-linux-pacman.yml latest-linux-appimage.yml
+          merge latest-mac.yml latest-mac-arm64.yml latest-mac-x64.yml
 
       # The installed apps compare the manifests' version with their own.
       - name: Require the tag to match the built version
