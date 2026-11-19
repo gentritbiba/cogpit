@@ -370,12 +370,11 @@ export function registerFileWatchRoutes(use: UseFn) {
     // updates. A transcript filed under its session keeps its file stem, which
     // nothing publishes under.
     const sessionId = transcript.transcriptSessionId ?? fileName.replace(/\.jsonl$/, "")
-    const descriptor = descriptorForDirName(dirName)
-    // An agent that publishes no tokens gives the client nothing to keep a
-    // turn "live" by, so its runtime's own turn state is reported instead.
-    const runtimeTurnActive = () =>
-      !descriptor.capabilities.tokenStreaming
-      && runtimeForDirName(dirName).activity(sessionId).running
+    // Tokens alone cannot keep a turn "live": none flow while a command runs
+    // or the model thinks (thinking arrives without text), often for longer
+    // than the client's stale timer. So the runtime's own turn state is
+    // reported on every heartbeat, whichever agent runs the session.
+    const runtimeTurnActive = () => runtimeForDirName(dirName).activity(sessionId).running
     const sendCompacting = (active: boolean) => {
       res.write(`data: ${JSON.stringify({ type: "compacting", active })}\n\n`)
     }
