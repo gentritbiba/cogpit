@@ -17,8 +17,9 @@ export class DurationSequencer extends BaseSequencer {
     const { root, shard } = this.ctx.config
     if (!shard) return files
     const durations = JSON.parse(readFileSync(join(root, TEST_DURATIONS_FILE), "utf8")) as Record<string, number>
-    const known = Object.values(durations).sort((a, b) => a - b)
-    const typical = known[Math.floor(known.length / 2)] ?? 1
+    // A file the table does not know (new, or the edition's) counts as an average one.
+    const known = Object.values(durations)
+    const typical = known.length > 0 ? known.reduce((sum, seconds) => sum + seconds, 0) / known.length : 1
     const weighed = files.map((spec) => {
       const path = relative(root, spec.moduleId).replaceAll("\\", "/")
       return { spec, key: `${spec.project.name}:${path}`, seconds: durations[path] ?? typical }

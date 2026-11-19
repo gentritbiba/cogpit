@@ -39,6 +39,8 @@ jobs:
     if: "${{ github.event_name == 'push' && !inputs.edition && startsWith(github.event.head_commit.message, 'chore: release') }}"
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    # If it cannot tell, everything runs; that is no reason to fail the run.
+    continue-on-error: true
     permissions:
       actions: read
       contents: read
@@ -69,7 +71,7 @@ jobs:
     needs: [version-bump]
     if: ${{ !cancelled() && needs.version-bump.outputs.green != 'true' }}
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 20
     environment: ${{ inputs.edition && 'release' || '' }}
 
     steps:

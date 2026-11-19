@@ -2,8 +2,8 @@
  * Rewrites build/testDurations.json, the seconds per test file that `--shard`
  * runs split the suite by (build/durationSequencer.ts). It reads the Vitest
  * JSON report you name, or by default the `test-report` artifact of the latest
- * green Quality run on master, timed on the runners the shards run on. Rerun
- * it when one shard in CI takes much longer than the rest.
+ * green Quality run on master that has one, timed on the runners the shards
+ * run on. Rerun it when one shard in CI takes much longer than the rest.
  *
  *   bun scripts/update-test-durations.ts [report.json]
  */
@@ -35,9 +35,11 @@ const scratch = mkdtempSync(join(tmpdir(), "cogpit-test-durations-"))
 try {
   let report = process.argv[2]
   if (!report) {
-    const runId = gh("run", "list", "--workflow", "quality.yml", "--branch", "master", "--event", "push",
-      "--status", "success", "--limit", "1", "--json", "databaseId", "--jq", ".[0].databaseId")
-    if (!runId) throw new Error("No green Quality run on master to read durations from")
+    // A version-bump run reuses its parent's checks and uploads no report.
+    const runIds = gh("run", "list", "--workflow", "quality.yml", "--branch", "master", "--event", "push",
+      "--status", "success", "--limit", "20", "--json", "databaseId", "--jq", ".[].databaseId").split("\n")
+    const runId = runIds.find((id) => id && gh("api", `repos/{owner}/{repo}/actions/runs/${id}/artifacts?name=test-report`, "--jq", ".total_count") !== "0")
+    if (!runId) throw new Error("No recent green Quality run on master has a test-report to read durations from")
     gh("run", "download", runId, "--name", "test-report", "--dir", scratch)
     report = join(scratch, "test-report.json")
   }
