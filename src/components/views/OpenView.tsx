@@ -1,5 +1,5 @@
 import type { ReactNode } from "react"
-import { AppWindow, LayoutList, MessageSquare, X } from "lucide-react"
+import { AppWindow, ArrowLeft, MessageSquare, X } from "lucide-react"
 import { toast } from "sonner"
 import { Button } from "@/components/ui/button"
 import { Select, SelectContent, SelectGroup, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
@@ -11,43 +11,19 @@ import {
 } from "@/components/timeline/cogpit-blocks/view/ViewFrame"
 import { StoredViewSource, storedViewPrepare, storedViewProblem, useStoredView } from "@/components/timeline/cogpit-blocks/view/storedView"
 import { revealSessionById } from "@/lib/revealSession"
-import type { WorkspacePanelProps } from "@/plugin-api"
 import { formatViewReference, type ViewReference } from "../../../shared/views/stored"
-import { ViewBrowser } from "./ViewBrowser"
-import { useViewPanel } from "./ViewPanelContext"
-import { useViews } from "./useViews"
+import type { ViewsList } from "./useViews"
 
 const renderCode = (code: string, lang: string) => <HighlightedCodeBlock code={code} lang={lang} />
 
-/** The workspace panel beside the chat: one stored view at a time, or the list of views to pick from. */
-export function ViewPanel({ closePanel }: WorkspacePanelProps) {
-  const panel = useViewPanel()
-  const target = panel?.target ?? null
-  if (!panel || !target) {
-    return (
-      <aside aria-label="Views" data-testid="view-panel" className="flex size-full min-h-0 flex-col bg-canvas">
-        <div className="flex h-10 shrink-0 items-center gap-2 px-3">
-          <AppWindow aria-hidden="true" className="size-4 text-muted-foreground" />
-          <h2 className="text-sm font-medium">Views</h2>
-          <div className="flex-1" />
-          <Button variant="ghost" size="icon-sm" onClick={closePanel} aria-label="Close views">
-            <X data-icon="inline-start" />
-          </Button>
-        </div>
-        <Separator />
-        <ViewBrowser />
-      </aside>
-    )
-  }
-  return <OpenView key={target.id} reference={target} onSelect={panel.select} onClose={closePanel} />
-}
-
-function OpenView({ reference, onSelect, onClose }: {
+/** One stored view in the Library panel, with its versions, source and the session that made it. */
+export function OpenView({ reference, list, onSelect, onClose }: {
   reference: ViewReference
+  list: ViewsList
   onSelect: (target: ViewReference | null) => void
   onClose: () => void
 }) {
-  const { views } = useViews()
+  const { views } = list
   const summary = views?.find((view) => view.id === reference.id)
   const state = useStoredView(reference)
   const view = state.status === "ready" ? state.view : null
@@ -88,8 +64,8 @@ function OpenView({ reference, onSelect, onClose }: {
       <div className="flex h-10 shrink-0 items-center gap-1 pr-1.5 pl-3">
         <AppWindow aria-hidden="true" className="size-4 shrink-0 text-muted-foreground" />
         <h2 className="ml-1 min-w-0 flex-1 truncate text-sm font-medium" title={title}>{title}</h2>
-        <Button variant="ghost" size="icon-sm" onClick={() => onSelect(null)} aria-label="All views" title="All views">
-          <LayoutList data-icon="inline-start" />
+        <Button variant="ghost" size="icon-sm" onClick={() => onSelect(null)} aria-label="Back to the library" title="Back to the library">
+          <ArrowLeft data-icon="inline-start" />
         </Button>
         <Button variant="ghost" size="icon-sm" onClick={onClose} aria-label="Close view panel" title="Close">
           <X data-icon="inline-start" />

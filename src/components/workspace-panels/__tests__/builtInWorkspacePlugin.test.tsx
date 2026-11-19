@@ -106,15 +106,15 @@ describe("builtInWorkspacePlugin", () => {
       .toBeLessThan(order.indexOf(BUILT_IN_WORKSPACE_PANEL_IDS.fileChanges))
   })
 
-  it("registers the Views panel after the Browser, kept mounted and open to everyone", () => {
-    const panel = panels.find((entry) => entry.id === BUILT_IN_WORKSPACE_PANEL_IDS.views)
-    if (!panel) throw new Error("the Views panel is not registered")
+  it("registers the Library panel after the Browser, kept mounted and open to everyone", () => {
+    const panel = panels.find((entry) => entry.id === BUILT_IN_WORKSPACE_PANEL_IDS.library)
+    if (!panel) throw new Error("the Library panel is not registered")
 
-    expect(panel.title).toBe("Views")
+    expect(panel.title).toBe("Library")
     expect(panel.keepAlive).toBe(true)
     expect(panel.when).toBeUndefined()
     const order = panels.map((entry) => entry.id)
-    expect(order.indexOf(BUILT_IN_WORKSPACE_PANEL_IDS.views))
+    expect(order.indexOf(BUILT_IN_WORKSPACE_PANEL_IDS.library))
       .toBe(order.indexOf(BUILT_IN_WORKSPACE_PANEL_IDS.browser) + 1)
   })
 

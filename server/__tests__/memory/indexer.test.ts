@@ -83,6 +83,19 @@ describe("memory indexer", () => {
     expect(h.indexer.counts()).toEqual({ pendingFiles: 0, pendingEmbeddings: 0 })
   })
 
+  it("hands the synced store to an index kept from it after each pass, and warns when that fails", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "Date"] })
+    const seen: number[] = []
+    const h = harness({ afterSync: async (store) => {
+      seen.push(chunkCount(store, ROOT.path))
+      throw new Error("library disk full")
+    } })
+    await firstPass(h)
+
+    expect(seen).toEqual([2])
+    expect(h.warn).toHaveBeenCalledWith("[memory] an index kept from the store failed: Error: library disk full")
+  })
+
   it("syncs a new transcript on the backstop pass even when nothing hinted at it", async () => {
     vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "Date"] })
     const h = harness()

@@ -18,7 +18,6 @@ import { lstat, mkdir, readdir, readFile, rename, rm, writeFile } from "node:fs/
 import { homedir } from "node:os"
 import { join } from "node:path"
 import { isViewId, type ViewSourceFile, type ViewSummary, type ViewUpdate } from "../../shared/views/stored"
-import { parseWorktreePath } from "../../shared/worktreePath"
 
 export interface ViewVersionMeta {
   version: number
@@ -53,11 +52,6 @@ export function viewSummary(record: ViewRecord): ViewSummary {
 }
 
 const MAX_TITLE = 200
-
-/** The project a folder belongs to for views: a worktree counts as its parent checkout. */
-export function projectOfCwd(cwd: string): string {
-  return parseWorktreePath(cwd)?.parentPath ?? cwd
-}
 
 export class ViewStoreError extends Error {}
 

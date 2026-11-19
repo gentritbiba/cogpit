@@ -8,6 +8,7 @@ import { allStores } from "../agents"
 import { readTranscriptText } from "../agents/transcriptFile"
 import { subscribeTouchedFiles } from "../sessionCatalog/changes"
 import { catalogRow } from "../sessionCatalog/rows"
+import { stopLibrary, syncLibraryFrom } from "../library"
 import { createMemoryIndexer, type Embedder, type EmbeddingConfigFile, type MemoryIndexer } from "./indexer"
 import { memoryDir } from "./paths"
 import { openServerMemoryStore } from "./store"
@@ -91,6 +92,7 @@ export function startMemoryIndexer(): void {
     title: sessionTitle,
     readEmbeddingConfig: () => readEmbeddingConfig(dir),
     createEmbedder: (text) => embedderFor(text, fetch),
+    afterSync: syncLibraryFrom,
   })
   unsubscribe = subscribeTouchedFiles(() => indexer?.hint())
   indexer.start()
@@ -101,7 +103,10 @@ export async function stopMemoryIndexer(): Promise<void> {
   unsubscribe = null
   const stopping = indexer
   indexer = null
+  // Started first: the indexer's stop waits for its pass, and the pass for the library's read.
+  const library = stopLibrary()
   await stopping?.stop()
+  await library
 }
 
 /** The running indexer, or null before the catalog starts and in agent workers. */

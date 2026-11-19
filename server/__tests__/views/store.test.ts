@@ -3,7 +3,8 @@ import { mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSyn
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { afterEach, beforeEach, describe, expect, it } from "vitest"
-import { createViewStore, projectOfCwd, STARTER_APP, VIEW_LIMITS, viewSummary, type ViewStore } from "../../views/store"
+import { projectOfCwd } from "../../../shared/worktreePath"
+import { createViewStore, STARTER_APP, VIEW_LIMITS, viewSummary, type ViewStore } from "../../views/store"
 
 let root: string
 let store: ViewStore

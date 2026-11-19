@@ -1,5 +1,5 @@
 import { lazy, Suspense, useEffect, useState } from "react"
-import { AppWindow, CalendarClock, FileCode2, FolderTree, GitBranch, Globe, ListChecks, Network, PanelRight } from "lucide-react"
+import { CalendarClock, FileCode2, FolderTree, GitBranch, Globe, Library, ListChecks, Network, PanelRight } from "lucide-react"
 import { FileChangesPanel } from "@/components/FileChangesPanel"
 import { StatsPanel } from "@/components/StatsPanel"
 import { needsYouCount } from "@/components/board/boardView"
@@ -34,8 +34,8 @@ const StatusPanel = lazy(() =>
 const BrowserPanel = lazy(() =>
   import("@/components/BrowserPanel").then((module) => ({ default: module.BrowserPanel })),
 )
-const ViewPanel = lazy(() =>
-  import("@/components/views/ViewPanel").then((module) => ({ default: module.ViewPanel })),
+const LibraryPanel = lazy(() =>
+  import("@/components/library/LibraryPanel").then((module) => ({ default: module.LibraryPanel })),
 )
 const AutomationsPanel = lazy(() =>
   import("@/components/AutomationsPanel").then((module) => ({ default: module.AutomationsPanel })),
@@ -202,8 +202,8 @@ function WorktreesWorkspacePanel({ closePanel }: WorkspacePanelProps) {
   )
 }
 
-function ViewWorkspacePanel(props: WorkspacePanelProps) {
-  return <Suspense fallback={<PanelFallback />}><ViewPanel {...props} /></Suspense>
+function LibraryWorkspacePanel(props: WorkspacePanelProps) {
+  return <Suspense fallback={<PanelFallback />}><LibraryPanel {...props} /></Suspense>
 }
 
 function AutomationsWorkspacePanel(props: WorkspacePanelProps) {
@@ -272,10 +272,10 @@ export const builtInWorkspacePlugin = definePlugin({
       when: (context) => context.canUseBrowser,
     },
     {
-      id: "views",
-      title: "Views",
-      icon: AppWindow,
-      component: ViewWorkspacePanel,
+      id: "library",
+      title: "Library",
+      icon: Library,
+      component: LibraryWorkspacePanel,
       order: 17,
       defaultSize: "46%",
       minSize: "340px",

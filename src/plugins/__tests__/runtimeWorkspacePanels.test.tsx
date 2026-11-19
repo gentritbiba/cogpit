@@ -50,6 +50,9 @@ describe("runtime workspace registry", () => {
     expect(resolvePluginPanelPreference(old.id, [legacy])).toBeNull()
     expect(canonicalPluginPanelId(old.id)).toBe(canonicalPluginPanelId(current.id))
   })
+  it("reopens the Library for a layout saved while it was the Views panel", () => {
+    expect(canonicalPluginPanelId("cogpit.views")).toBe("cogpit.library")
+  })
   it("preserves static panels in host or URL safe mode", () => {
     expect(panels({ ...panelHostStatus, safeMode: true })).toEqual([legacy])
     window.history.replaceState(null, "", "/?pluginSafeMode=1")

@@ -22,6 +22,8 @@ interface ViewsState {
   error: string | null
 }
 
+export type ViewsList = ReturnType<typeof useViews>
+
 /**
  * The stored views on the active device the caller may see, kept current
  * while shown: loaded on mount, every 30 seconds and whenever the tab becomes

@@ -16,6 +16,7 @@ vi.mock("sonner", () => ({ toast: { error: mocks.toastError } }))
 
 import { ViewBrowser } from "../ViewBrowser"
 import { ViewPanelProvider, useViewPanel } from "../ViewPanelContext"
+import { useViews } from "../useViews"
 
 const HOUR = 3_600_000
 const ago = (ms: number) => new Date(Date.now() - ms).toISOString()
@@ -47,6 +48,10 @@ function serve(initial: ViewSummary[]) {
   })
 }
 
+function Browser() {
+  return <ViewBrowser list={useViews()} />
+}
+
 function PanelTarget() {
   const panel = useViewPanel()
   return <output data-testid="panel-target">{panel?.target ? `${panel.target.id}@${panel.target.version}` : "none"}</output>
@@ -55,7 +60,7 @@ function PanelTarget() {
 function renderBrowser(onReveal = vi.fn()) {
   render(
     <ViewPanelProvider shown={false} onReveal={onReveal}>
-      <ViewBrowser />
+      <Browser />
       <PanelTarget />
     </ViewPanelProvider>,
   )

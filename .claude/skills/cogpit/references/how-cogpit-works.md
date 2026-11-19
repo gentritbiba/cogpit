@@ -34,6 +34,13 @@
   Those questions appear above the composer until answered.
 - The user can send messages while you work. Depending on the agent, a message
   joins your running turn or waits for it to end.
+- The Library panel keeps what your replies share, per session, project or
+  everywhere: images and videos you show with `![alt](/absolute/path)`, links,
+  absolute-path links to documents (reports, PDFs, HTML, Markdown, CSV) and
+  views. It copies local media and documents into `~/.cogpit/library`, so a
+  screenshot under `/tmp` outlives a reboot. Code blocks, inline code and
+  `file:line` references are not collected. To keep something for the user,
+  link it in your reply.
 - Panels beside the chat show the files you changed per turn, git worktrees,
   terminals and project scripts, the [Browser panel](browser.md), and
   integrations such as GitHub pull requests, ClickUp, Vercel and Cloudflare.
@@ -53,6 +60,7 @@
 | `~/.cogpit/browser` | Browser profiles and their logins |
 | `~/.cogpit/workspaces` | Worktrees for tasks other devices sent to this one |
 | `~/.cogpit/views` | [Interactive views](views.md): each view's source and built versions |
+| `~/.cogpit/library` | The Library: what replies shared, and its copies of shared local files |
 | `~/.cogpit/notifications.json` | The notification inbox |
 | `~/.cogpit/port` | Port of the running server |
 
