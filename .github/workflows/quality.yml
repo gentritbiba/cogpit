@@ -155,7 +155,17 @@ jobs:
           merge-multiple: true
 
       - name: Merge the shards' coverage and check the thresholds
-        run: bunx vitest run --merge-reports --coverage --reporter=dot
+        run: >-
+          bunx vitest run --merge-reports --coverage
+          --reporter=dot --reporter=json --outputFile.json=test-report.json
+
+      # Per-file timings: scripts/update-test-durations.ts reads them to keep
+      # the shards even.
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: test-report
+          path: test-report.json
+          if-no-files-found: error
 
   build:
     if: ${{ !inputs.edition }}

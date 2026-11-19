@@ -1,6 +1,7 @@
 import { join } from "node:path"
 import { defineConfig } from "vitest/config"
 import { fileURLToPath, URL } from "node:url"
+import { DurationSequencer } from "./build/durationSequencer"
 import { editionAliases } from "./build/editionAliases"
 import { viewLibraryAliases } from "./build/viewLibraryAliases"
 import { hasTeamEdition, root, TEAM_EDITION_ENTRY } from "./scripts/lib/sourceFiles"
@@ -24,6 +25,7 @@ export default defineConfig({
     // A test that only fails under a loaded CI runner would otherwise block a
     // release until someone reruns it; the reporter still lists every retry.
     retry: process.env.CI ? 2 : 0,
+    sequence: { sequencer: DurationSequencer },
     css: { include: [/theme\.css\?raw$/] },
     globals: true,
     setupFiles: ["./src/__tests__/setup.ts"],

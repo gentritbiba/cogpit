@@ -40,3 +40,4 @@ qa-notes.md
 /target
 /core-dist
 .vitest-reports/
+test-report.json
