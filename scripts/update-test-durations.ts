@@ -19,6 +19,18 @@ function gh(...args: string[]): string {
   return run.stdout.toString().trim()
 }
 
+/** The deepest directory every path is under: the checkout the suite ran in. */
+function commonDirectory(paths: string[]): string {
+  const [first = "", ...rest] = paths.map((path) => path.split("/"))
+  let length = first.length - 1
+  for (const parts of rest) {
+    let same = 0
+    while (same < length && parts[same] === first[same]) same++
+    length = same
+  }
+  return first.slice(0, length).join("/") || "/"
+}
+
 const scratch = mkdtempSync(join(tmpdir(), "cogpit-test-durations-"))
 try {
   let report = process.argv[2]
@@ -32,10 +44,13 @@ try {
   const { testResults } = JSON.parse(readFileSync(report, "utf8")) as {
     testResults: { name: string; startTime: number; endTime: number }[]
   }
+  // The report names files by absolute path on the machine that ran them.
+  const names = testResults.map(({ name }) => name.replaceAll("\\", "/"))
+  const checkout = commonDirectory(names)
   const durations = Object.fromEntries(
     testResults
-      .map(({ name, startTime, endTime }) => [
-        relative(root, name).replaceAll("\\", "/"),
+      .map(({ startTime, endTime }, index) => [
+        relative(checkout, names[index]!).replaceAll("\\", "/"),
         Math.max(0.1, Math.round((endTime - startTime) / 100) / 10),
       ] as const)
       .sort(([a], [b]) => (a < b ? -1 : 1)),
