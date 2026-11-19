@@ -145,9 +145,18 @@ export function inspectPackage(payload: Buffer, publisher: string): InspectedPac
   const dictation = manifest.contributes.dictation
   if (dictation) {
     const operation = connections.get(dictation.connection)?.operations[dictation.operation]
-    if (!operation?.upload?.mimeTypes.includes("audio/wav") || Object.values(operation.args).some(argument => argument.required)) {
+    if (operation?.upload?.type !== "audio" || !operation.upload.mimeTypes.includes("audio/wav") || Object.values(operation.args).some(argument => argument.required)) {
       throw new Error("Dictation must use an upload operation that accepts WAV recordings without required arguments")
     }
+  }
+  const publish = manifest.contributes.publish
+  if (publish) {
+    const definition = connections.get(publish.connection)
+    const upload = definition?.operations[publish.operation], removal = definition?.operations[publish.unpublish]
+    const onlySlug = (args: ConnectionDefinition["operations"][string]["args"], required: boolean) => args.slug?.type === "string" && !!args.slug.required === required
+      && Object.entries(args).every(([name, argument]) => name === "slug" || !argument.required)
+    if (upload?.upload?.type !== "html" || !onlySlug(upload.args, false)) throw new Error("Publishing must use an HTML upload operation with an optional slug argument")
+    if (!removal || removal.method !== "POST" || removal.upload || removal.response || !onlySlug(removal.args, true)) throw new Error("Unpublishing must use a POST operation whose only required argument is slug")
   }
   return { manifest, digest: createHash("sha256").update(payload).digest("hex"), files, connections, payload }
 }

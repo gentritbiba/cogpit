@@ -1,5 +1,5 @@
 import { CONTRACT_LIMITS, connectionResourceDependencies, parseConnectionDefinition, parseJson, utf8Length,
-  parsePluginMedia, type PluginMedia, type ConnectionDefinition, type ConnectionOperation, type JsonValue } from "@cogpit/plugin-contracts"
+  parsePluginMedia, parsePluginUpload, type PluginMedia, type ConnectionDefinition, type ConnectionOperation, type JsonValue } from "@cogpit/plugin-contracts"
 import type { PluginHttpsInput } from "./httpsTransport"
 
 export const CONNECTION_LIMITS = Object.freeze({ options: 100, secretBytes: 4096, stringBytes: 1024 })
@@ -114,7 +114,7 @@ export function createConnectionExecutor(rawDefinition: unknown, rawConnection: 
     const operation = definition.operations[request.operation]
     if (operation.audience !== audience || (audience === "panel" && !allowed.has(request.operation))) return deny()
     const accepts: readonly string[] = operation.upload?.mimeTypes ?? []
-    if (!!operation.upload !== !!upload || upload && (!accepts.includes(parsePluginMedia(upload).mimeType) || upload.bytes.byteLength > operation.upload!.maxBytes)) return deny()
+    if (!!operation.upload !== !!upload || upload && (!accepts.includes(parsePluginUpload(upload).mimeType) || upload.bytes.byteLength > operation.upload!.maxBytes)) return deny()
     const args = argsFor(operation, request.args)
     const path = operation.path.map((part) => "literal" in part ? part.literal
       : encodeURIComponent(pathValue("arg" in part ? args[part.arg] : requireResource(part.resource).id))).join("/")

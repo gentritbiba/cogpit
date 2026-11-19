@@ -1,12 +1,12 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react"
 import { Mic, Square, X } from "lucide-react"
 import type { PluginConnectionStatus } from "@cogpit/plugin-contracts"
-import type { InstalledPlugin } from "../../shared/contracts/plugins"
 import { Button } from "@/components/ui/button"
 import { Spinner } from "@/components/ui/Spinner"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
 import { PluginRequestError } from "./runtimeClient"
 import { useComposerPlugins } from "./RuntimePluginActions"
+import { withLease } from "./lease"
 import { DictationWaveform } from "./dictation/DictationWaveform"
 import { canRecord, MAX_DICTATION_SECONDS, startRecording, type Recording } from "./dictation/recorder"
 
@@ -27,13 +27,6 @@ export interface ComposerDictation {
 }
 
 interface Take { abort: AbortController; recording?: Recording; wav?: Blob; send: boolean; timer?: ReturnType<typeof setTimeout> }
-type Runtime = NonNullable<ReturnType<typeof useComposerPlugins>>["runtime"]
-
-async function withLease<T>(runtime: Runtime, plugin: InstalledPlugin, signal: AbortSignal, run: (leaseId: string) => Promise<T>): Promise<T> {
-  const lease = await runtime.client.lease(plugin.id, runtime.project?.id ?? null, crypto.randomUUID(), signal, runtime.project ? runtime.workspacePath : null)
-  try { return await run(lease.id) }
-  finally { void runtime.client.revokeLease(lease.id).catch(() => {}) }
-}
 
 function microphoneFailure(error: unknown): string {
   const name = error instanceof DOMException ? error.name : ""

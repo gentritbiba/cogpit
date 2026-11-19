@@ -1,35 +1,14 @@
-import type { IncomingMessage, ServerResponse } from "node:http"
+import type { IncomingMessage } from "node:http"
 import { catchAsyncErrors, sendJson, withJsonBody, type UseFn } from "../http"
 import { isViewId, type StoredViewVersion, type ViewUpdate } from "../../shared/views/stored"
-import type { SessionAccessLevel } from "../../shared/contracts/sessionAccess"
-import { authorizeHostWide, authorizeSession, itemVisibilityFor, markDecided, sendSessionHidden } from "../edition"
+import { itemVisibilityFor, markDecided, sendSessionHidden } from "../edition"
 import { shareGuestSessionId } from "../share/requestGuest"
 import { VIEW_SHELL_HEADERS, VIEW_SHELL_HTML } from "../views/shell"
 import { projectOfCwd } from "../../shared/worktreePath"
-import { viewStore, viewSummary, ViewStoreError, type ViewRecord, type ViewStore } from "../views/store"
+import { viewPublication, viewStore, viewSummary, ViewStoreError, type ViewRecord, type ViewStore } from "../views/store"
+import { authorizeView } from "../views/access"
 
 const VERSION = /^[1-9][0-9]{0,6}$/
-
-/**
- * A view belongs to the session that made it: the caller reaches it as they
- * would that session, and one no session made as host-wide. A share guest
- * reads only its shared session's views. False after answering; a missing
- * view answers like a hidden one, so ids cannot be probed.
- */
-async function authorizeView(req: IncomingMessage, res: ServerResponse, record: ViewRecord | null, needed: SessionAccessLevel): Promise<boolean> {
-  const guest = shareGuestSessionId(req)
-  if (!record || (guest !== null && (needed !== "view" || record.sessionId !== guest))) {
-    markDecided(req)
-    sendSessionHidden(res, null)
-    return false
-  }
-  if (guest !== null) {
-    markDecided(req)
-    return true
-  }
-  if (!record.sessionId) return authorizeHostWide(req, res)
-  return (await authorizeSession(req, res, { sessionId: record.sessionId, readByServer: true }, needed)) !== null
-}
 
 /** The views the caller may see: those of sessions they may see, or of their shared session for a guest. */
 async function visibleViews(req: IncomingMessage, records: readonly ViewRecord[]): Promise<ViewRecord[]> {
@@ -78,6 +57,7 @@ export function registerViewRoutes(use: UseFn, store: () => ViewStore = viewStor
         latestVersion: found.record.versions.at(-1)?.version ?? 0,
         html: found.html,
         files: found.files,
+        ...(found.record.published ? { published: viewPublication(found.record) } : {}),
       }
       res.setHeader("Cache-Control", "no-store")
       sendJson(res, 200, body)
@@ -87,7 +67,13 @@ export function registerViewRoutes(use: UseFn, store: () => ViewStore = viewStor
 
     if (!(await authorizeView(req, res, await store().read(id, { includeDeleted: req.method === "DELETE" }), "interact"))) return
     if (req.method === "DELETE") {
-      await store().remove(id)
+      try {
+        await store().remove(id, { leavePublished: url.searchParams.get("leavePublished") === "1" })
+      } catch (error) {
+        if (!(error instanceof ViewStoreError)) throw error
+        sendJson(res, 409, { error: error.message })
+        return
+      }
       sendJson(res, 200, { deleted: true })
       return
     }

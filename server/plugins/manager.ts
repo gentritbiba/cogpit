@@ -2,7 +2,7 @@ import { dirname, isAbsolute, join, resolve } from "node:path"
 import { createHash } from "node:crypto"
 import { realpath } from "node:fs/promises"
 import type { IncomingMessage } from "node:http"
-import { CONTRACT_LIMITS, connectionResourceDependencies, isDraftMethod, evaluateCompatibility, supportsPluginHost, parseIntegrationRequest, parseJson, parseMethodResult, SETTINGS_STORAGE_KEY, validateSettings, type PluginMedia, type PluginIntegrationRequest, type ClientRuntimeDescriptor, type ConnectionDefinition, type JsonValue, type PluginRequest } from "@cogpit/plugin-contracts"
+import { CONTRACT_LIMITS, connectionResourceDependencies, isDraftMethod, evaluateCompatibility, supportsPluginHost, parseIntegrationRequest, parseJson, parseMethodResult, SETTINGS_STORAGE_KEY, validateSettings, HTML_MIME, type PluginMedia, type PluginPublishContribution, type PluginIntegrationRequest, type ClientRuntimeDescriptor, type ConnectionDefinition, type JsonValue, type PluginRequest } from "@cogpit/plugin-contracts"
 import type { PluginScope, PluginStoreSnapshot } from "../../shared/contracts/plugins"
 import type { PluginConnectionSnapshot, PluginConnectionTarget, PluginResourceSelection } from "../../shared/contracts/pluginConnections"
 import { getInstanceId } from "../routes/hello"
@@ -47,6 +47,15 @@ const LEGACY_IMPORT_WARNING = "Legacy ClickUp settings could not be imported. Co
 const unavailable = (): never => { throw new PluginDataError("CAPABILITY_UNAVAILABLE", "Plugin capability is unavailable") }
 const canceled = (): never => { throw new PluginDataError("CANCELED", "Plugin operation was canceled") }
 const MAX_INSPECTED_PACKAGES = 8
+/** Where a plugin published a page, and the name it answers to on that host. */
+export interface PublishedPage { title: string; url: string; slug: string }
+const PUBLISHED_SLUG = /^[a-zA-Z0-9][a-zA-Z0-9._~-]{0,127}$/
+function isPublicPageUrl(value: string): boolean {
+  try {
+    const url = new URL(value)
+    return value.length <= 2048 && url.protocol === "https:" && !url.username && !url.password
+  } catch { return false }
+}
 function result<T>(value: ConnectionResult<T>): T {
   if (value.ok) return value.data
   throw new PluginDataError(value.error, value.error === "RESOURCE_REQUIRED" ? "Select the required connection resources" : "Connection operation failed")
@@ -731,6 +740,47 @@ export class PluginManager {
         try { text = select(answer, dictation.text) } catch { text = null }
         if (typeof text !== "string" || text.length > CONTRACT_LIMITS.composerBytes) throw new PluginDataError("INVALID_RESPONSE", "The service did not return a transcript")
         return { text }
+      } finally { this.mediaActive-- }
+    } finally { context.dispose() }
+  }
+
+  /**
+   * Sends a view's finished page to the plugin's publish operation and returns where it now lives. With `slug`, the page
+   * replaces the one published under that name.
+   */
+  async publish(req: IncomingMessage, leaseId: string, html: string, slug: string | undefined, options: { signal?: AbortSignal } = {}): Promise<PublishedPage> {
+    const page = { mimeType: HTML_MIME, bytes: Uint8Array.from(Buffer.from(html)).buffer }
+    return this.withPublisher(req, leaseId, options, async (publish, execute) => {
+      const answer = await execute(executor => executor.upload({ operation: publish.operation, args: slug === undefined ? {} : { slug } }, page))
+      let url: JsonValue, name: JsonValue
+      try { url = select(answer, publish.url); name = select(answer, publish.slug) } catch { url = null; name = null }
+      if (typeof url !== "string" || !isPublicPageUrl(url) || typeof name !== "string" || !PUBLISHED_SLUG.test(name)) throw new PluginDataError("INVALID_RESPONSE", "The host did not return the page's address")
+      return { title: publish.title, url, slug: name }
+    })
+  }
+
+  /** Takes down the page the plugin published under `slug`. */
+  async unpublish(req: IncomingMessage, leaseId: string, slug: string, options: { signal?: AbortSignal } = {}): Promise<void> {
+    await this.withPublisher(req, leaseId, options, (publish, execute) => execute(executor => executor.request({ operation: publish.unpublish, args: { slug } })))
+  }
+
+  private async withPublisher<T>(req: IncomingMessage, leaseId: string, options: { signal?: AbortSignal },
+    run: (publish: PluginPublishContribution, execute: (call: (executor: Awaited<ReturnType<PluginManager["executor"]>>) => Promise<ConnectionResult<JsonValue>>) => Promise<JsonValue>) => Promise<T>): Promise<T> {
+    const lease = this.resolveLease(req, leaseId)
+    const context = await this.context(req, { pluginId: lease.pluginId, projectId: lease.projectKey }, { authorize: () => { this.resolveLease(req, leaseId) }, signal: options.signal }, lease)
+    try {
+      const publish = context.plugin.manifest.contributes.publish
+      if (!publish) throw new PluginDataError("PERMISSION_REQUIRED", "This plugin does not publish views")
+      const connection = this.connection(context, publish.connection)
+      if (!connection.connection.secret) throw new PluginDataError("CONNECTION_REQUIRED", "Configure this connection in host settings")
+      if (this.mediaActive >= 4) throw new PluginDataError("RATE_LIMITED", "Too many uploads")
+      this.mediaActive++
+      try {
+        return await run(publish, async call => {
+          const answer = await this.provider(context, async () => result(await call(await this.executor(context, connection))))
+          await context.guard()
+          return answer
+        })
       } finally { this.mediaActive-- }
     } finally { context.dispose() }
   }

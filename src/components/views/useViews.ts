@@ -3,7 +3,7 @@ import { authFetch, jsonFetch } from "@/lib/auth"
 import { readError } from "@/lib/httpJson"
 import { useVisiblePolling } from "@/hooks/useVisiblePolling"
 import { VIEWS_PATH, type ViewSummary, type ViewUpdate } from "../../../shared/views/stored"
-import { announceViewsChanged, onViewsChanged, rememberNewestVersions, viewsScope } from "@/components/timeline/cogpit-blocks/view/storedView"
+import { announceViewsChanged, onViewsChanged, rememberViews, viewsScope } from "@/components/timeline/cogpit-blocks/view/storedView"
 
 /** Views change rarely and only when an agent builds one, so a light poll keeps a shown list fresh. */
 const POLL_INTERVAL = 30_000
@@ -45,7 +45,7 @@ export function useViews() {
         return
       }
       const { views } = await response.json() as { views: ViewSummary[] }
-      rememberNewestVersions(scope, views)
+      rememberViews(scope, views)
       if (isActive()) setState({ views, error: null })
     } catch {
       if (isActive()) setState((current) => ({ ...current, error: "Could not load views" }))
@@ -77,9 +77,10 @@ export function useViews() {
     }
   }, [])
 
-  const remove = useCallback(async (id: string): Promise<string | null> => {
+  /** With `leavePublished`, a published view is deleted while its page stays online, untracked. */
+  const remove = useCallback(async (id: string, { leavePublished = false } = {}): Promise<string | null> => {
     try {
-      const response = await authFetch(viewPath(id), { method: "DELETE" })
+      const response = await authFetch(leavePublished ? `${viewPath(id)}?leavePublished=1` : viewPath(id), { method: "DELETE" })
       if (!response.ok) return await readError(response, "Could not delete the view")
       setState((current) => ({ ...current, views: current.views?.filter((view) => view.id !== id) ?? null }))
       announceViewsChanged()

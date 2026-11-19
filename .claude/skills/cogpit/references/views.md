@@ -159,6 +159,8 @@ animation or anything else the browser draws, and mix it with kit components.
   such as "Explain this step". It never sends on its own and works only from a
   click inside the view.
 - Links open in the user's browser when they click them.
+- The user can publish a view to a public link from its card. Only the user
+  can; you cannot publish one, so suggest it when they want to share a view.
 - A runtime error shows under the card with its file and line, and a button
   the user can press to send it to you.
 

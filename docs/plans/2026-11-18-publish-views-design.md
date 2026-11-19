@@ -1,13 +1,14 @@
 # Publish views to a public link
 
-Status: design approved 2026-11-18, not implemented.
+Status: design approved 2026-11-18, implemented 2026-11-19 (`feat/publish-views`). How it works now lives in `docs/interactive-views.md` and `docs/plugins.md`.
 
 ## Goal
 
 A user can publish a stored view (`<id>@<n>`) to a public URL from its card or
 the Views panel, update it in place, and take it down. Where it goes is a
 plugin's choice, so core names no host. The first host is the personal
-`share.gentrit.dev` worker that `pub` already uses.
+`share-docs` worker (https://share-docs.gentritbiba1.workers.dev) that `pub`
+already uses.
 
 ## Decisions
 
@@ -49,9 +50,10 @@ New contribution, built like `dictation`:
 
 `shared/views/publish.ts` takes the stored page and replaces the theme
 placeholder with both token sets. The light set is the current one; the dark
-set is read from a hidden element carrying the `.dark` class. The frame kit
+set is read from a hidden element that flips the mode (`.dark`, or
+`.color-scheme-inverse` under a dark root). The frame kit
 picks the set from `prefers-color-scheme` and follows changes. With no Cogpit
-parent, `ask` is a no-op, kit Ask buttons hide, and links open normally.
+parent, `ask` is a no-op and links open normally.
 
 The client composes because it owns the theme tokens.
 
@@ -81,6 +83,8 @@ published: Copy link, Update published (v3 → v5), Unpublish. The card notes
 - Nothing is recorded unless the host answered with a URL.
 - Deleting a published view unpublishes it first; if that fails, the delete
   stops and shows the error, so no public page is left that Cogpit forgot.
+  The server refuses the delete (409) unless `?leavePublished=1`, which the
+  client sends only when the publishing plugin is no longer installed.
 - Plugin uninstalled or disabled: the record stays; Copy link works, Update
   and Unpublish are disabled with "Share host is not installed".
 - 401 → "Share host rejected the token. Reconnect it in Plugins." Too large
@@ -88,8 +92,10 @@ published: Copy link, Update published (v3 → v5), Unpublish. The card notes
 
 ## Share host plugin
 
-Dev-signed, installed from file, not bundled: `plugin.json` plus
-`connections/share.json` with `origin: https://share.gentrit.dev`, bearer
+Dev-signed, installed from file, not bundled; source lives beside the worker
+in `~/.agents/tools/share-worker/cogpit-plugin/` because it names a personal
+host: `plugin.json` plus
+`connections/share.json` with `origin: https://share-docs.gentritbiba1.workers.dev`, bearer
 token secret, `publish` and `unpublish` operations. No frame code.
 
 ## Worker (`~/.agents/tools/share-worker`)

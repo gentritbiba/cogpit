@@ -118,6 +118,23 @@ describe("view store", () => {
     await expect(store.update("sales-funnel", { title: "Back" })).rejects.toThrow(/No view "sales-funnel"/)
   })
 
+  it("records a publication, hides its slug from clients and keeps a published view from being deleted", async () => {
+    await make()
+    await store.addVersion("sales-funnel", { files: [], html: "x" })
+    const published = { pluginId: "dev-me.share", title: "Share host", url: "https://share.example.com/abc/", slug: "abc", version: 1, publishedAt: "2026-11-19T00:00:00.000Z" }
+    const record = await store.setPublished("sales-funnel", published)
+    expect(record.published).toEqual(published)
+    expect(viewSummary(record).published).toEqual({ pluginId: "dev-me.share", title: "Share host", url: "https://share.example.com/abc/", version: 1, publishedAt: published.publishedAt })
+    expect(JSON.stringify(viewSummary(record))).not.toContain("\"slug\"")
+    await expect(store.remove("sales-funnel")).rejects.toThrow(/is published at https:\/\/share.example.com\/abc\/; take it down first/)
+    expect(await store.read("sales-funnel")).not.toBeNull()
+    expect((await store.setPublished("sales-funnel", null)).published).toBeUndefined()
+    await store.setPublished("sales-funnel", published)
+    expect(await store.remove("sales-funnel", { leavePublished: true })).toBe(true)
+    expect((await store.read("sales-funnel", { includeDeleted: true }))?.published).toBeUndefined()
+    await expect(store.setPublished("sales-funnel", published)).rejects.toThrow(/No view/)
+  })
+
   it("files worktree folders under their parent checkout", () => {
     expect(projectOfCwd("/work/app/.claude/worktrees/feature")).toBe("/work/app")
     expect(projectOfCwd("/work/app")).toBe("/work/app")

@@ -7,7 +7,12 @@ const supportsContributions = (client?: ClientRuntimeDescriptor) => supportsApi(
 /** API 1.3.0 added dictation, icon buttons and recording uploads, which a 1.2 client's strict schemas reject. */
 const supportsRecording = (client?: ClientRuntimeDescriptor) => supportsApi(client, "1.3.0")
 
+/** API 1.5.0 added publishing and page uploads. */
+const supportsPublishing = (client?: ClientRuntimeDescriptor) => supportsApi(client, "1.5.0")
+
 export function canReadPluginManifest(manifest: PluginManifest, client?: ClientRuntimeDescriptor): boolean {
+  if (supportsPublishing(client)) return true
+  if (manifest.contributes.publish) return false
   if (supportsRecording(client)) return true
   if (manifest.contributes.dictation || manifest.contributes.sessionActions?.some(action => action.icon)) return false
   if (supportsContributions(client)) return true
@@ -17,6 +22,8 @@ export function canReadPluginManifest(manifest: PluginManifest, client?: ClientR
 }
 
 export function canReadConnection(definition: ConnectionDefinition, client?: ClientRuntimeDescriptor): boolean {
+  if (supportsPublishing(client)) return true
+  if (Object.values(definition.operations).some(operation => operation.upload?.type === "html")) return false
   if (supportsRecording(client)) return true
   if (Object.values(definition.operations).some(operation => operation.upload)) return false
   return supportsContributions(client) || Object.values(definition.operations).every(operation => operation.method === "GET" && !operation.body && !operation.response

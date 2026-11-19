@@ -1,3 +1,5 @@
+import type { ViewPublication } from "./publish"
+
 /**
  * Stored views: small React apps an agent keeps as files on the computer that
  * runs its session. That computer builds each version into one finished page;
@@ -46,6 +48,8 @@ export interface StoredViewVersion {
   /** The finished page, waiting for the viewer's theme (`withViewTheme`). */
   html: string
   files: ViewSourceFile[]
+  /** Where the view is published, when it is. */
+  published?: ViewPublication
 }
 
 export function viewVersionPath({ id, version }: ViewReference): string {
@@ -64,6 +68,8 @@ export interface ViewSummary {
   latestVersion: number | null
   updatedAt: string
   pinned: boolean
+  /** Where the view is published, when it is. */
+  published?: ViewPublication
 }
 
 /** `PATCH /api/views/<id>` body; answers the updated `ViewSummary`. `DELETE /api/views/<id>` removes the view and its versions. */

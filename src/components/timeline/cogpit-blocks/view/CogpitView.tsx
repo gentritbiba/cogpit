@@ -3,6 +3,7 @@ import { AppWindow, PanelRightOpen } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Spinner } from "@/components/ui/Spinner"
 import { useViewPanel } from "@/components/views/ViewPanelContext"
+import { PublishViewMenu } from "@/components/views/PublishViewMenu"
 import { formatViewReference, parseViewReference, type ViewReference } from "../../../../../shared/views/stored"
 import { composeViewDocument, librariesUsed, viewTitle } from "./document"
 import { loadViewLibraries } from "./libraries"
@@ -94,14 +95,19 @@ function StoredView({ reference, renderCode }: { reference: ViewReference; rende
       prepare={view ? storedViewPrepare(view) : null}
       fixHint={key}
       status={<>{versionSwitch}<span className="mr-1 text-xs tabular-nums text-muted-foreground">v{version}</span></>}
-      actions={view && panel && (
-        <Button
-          type="button" variant="ghost" size="icon-xs" className="text-muted-foreground" aria-label="Open in panel" title="Open in panel"
-          data-testid="view-open-in-panel"
-          onClick={() => panel.open(shown)}
-        >
-          <PanelRightOpen data-icon="icon" />
-        </Button>
+      actions={view && (
+        <>
+          <PublishViewMenu id={view.id} title={title} version={version} />
+          {panel && (
+            <Button
+              type="button" variant="ghost" size="icon-xs" className="text-muted-foreground" aria-label="Open in panel" title="Open in panel"
+              data-testid="view-open-in-panel"
+              onClick={() => panel.open(shown)}
+            >
+              <PanelRightOpen data-icon="icon" />
+            </Button>
+          )}
+        </>
       )}
       sourceView={view
         ? <StoredViewSource view={view} renderCode={renderCode} />

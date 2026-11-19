@@ -128,6 +128,18 @@ describe("view routes", () => {
     expect(await store.read("secret")).not.toBeNull()
   })
 
+  it("reports where a view is published and deletes a published one only when told to leave its page up", async () => {
+    await store.setPublished("mine", { pluginId: "dev-me.share", title: "Share host", url: "https://share.example.com/abc/", slug: "abc", version: 1, publishedAt: "2026-11-19T00:00:00.000Z" })
+    const page = await call("GET", "/mine/v/1")
+    expect(page.body).toMatchObject({ published: { url: "https://share.example.com/abc/", version: 1 } })
+    expect(JSON.stringify(page.body)).not.toContain("\"slug\"")
+    expect((await call("GET", "/")).body).toMatchObject({ views: expect.arrayContaining([expect.objectContaining({ id: "mine", published: expect.objectContaining({ title: "Share host" }) })]) })
+    expect(await call("DELETE", "/mine")).toMatchObject({ status: 409, body: { error: expect.stringMatching(/take it down first/) } })
+    expect(await store.read("mine")).not.toBeNull()
+    expect(await call("DELETE", "/mine?leavePublished=1")).toEqual({ status: 200, body: { deleted: true } })
+    expect(await store.read("mine")).toBeNull()
+  })
+
   it("never lets a rename that raced a delete touch the view again", async () => {
     let release!: () => void
     let reading!: () => void

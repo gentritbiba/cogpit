@@ -18,12 +18,18 @@ import { lstat, mkdir, readdir, readFile, rename, rm, writeFile } from "node:fs/
 import { homedir } from "node:os"
 import { join } from "node:path"
 import { isViewId, type ViewSourceFile, type ViewSummary, type ViewUpdate } from "../../shared/views/stored"
+import type { ViewPublication } from "../../shared/views/publish"
 
 export interface ViewVersionMeta {
   version: number
   createdAt: string
   sessionId?: string
   hash: string
+}
+
+/** A published page, with the name the host knows it by to replace or remove it. */
+export interface StoredPublication extends ViewPublication {
+  slug: string
 }
 
 export interface ViewRecord {
@@ -36,7 +42,15 @@ export interface ViewRecord {
   updatedAt: string
   pinned?: boolean
   deleted?: true
+  published?: StoredPublication
   versions: ViewVersionMeta[]
+}
+
+/** What clients see of a publication: the host's name for the page stays on this computer. */
+export function viewPublication(record: ViewRecord): ViewPublication | undefined {
+  if (!record.published) return undefined
+  const { slug: _slug, ...publication } = record.published
+  return publication
 }
 
 export function viewSummary(record: ViewRecord): ViewSummary {
@@ -48,6 +62,7 @@ export function viewSummary(record: ViewRecord): ViewSummary {
     latestVersion: record.versions.at(-1)?.version ?? null,
     updatedAt: record.updatedAt,
     pinned: record.pinned === true,
+    ...(record.published ? { published: viewPublication(record) } : {}),
   }
 }
 
@@ -229,15 +244,33 @@ export function createViewStore(root: string = defaultViewsRoot()) {
     })
   }
 
-  /** Deletes a view's source and every version, leaving its tombstone. */
-  function remove(id: string): Promise<boolean> {
+  /** Records where the view is published, or with null that it no longer is. */
+  function setPublished(id: string, published: StoredPublication | null): Promise<ViewRecord> {
+    const dir = folder(id)
+    return exclusive(id, async () => {
+      const record = await read(id)
+      if (!record) throw new ViewStoreError(`No view "${id}"`)
+      const { published: _previous, ...rest } = record
+      const next: ViewRecord = published ? { ...rest, published } : rest
+      await writeRecord(dir, next)
+      return next
+    })
+  }
+
+  /**
+   * Deletes a view's source and every version, leaving its tombstone. A published view is refused unless
+   * `leavePublished` says its page may stay online without Cogpit tracking it.
+   */
+  function remove(id: string, { leavePublished = false } = {}): Promise<boolean> {
     const dir = folder(id)
     return exclusive(id, async () => {
       const record = await read(id, { includeDeleted: true })
       if (!record) return false
       if (record.deleted) return true
+      if (record.published && !leavePublished) throw new ViewStoreError(`View "${id}" is published at ${record.published.url}; take it down first`)
       await Promise.all(["app", "versions"].map((name) => rm(join(dir, name), { recursive: true, force: true })))
-      const tombstone: ViewRecord = { ...record, deleted: true, pinned: false, versions: [], updatedAt: new Date().toISOString() }
+      const { published: _published, ...kept } = record
+      const tombstone: ViewRecord = { ...kept, deleted: true, pinned: false, versions: [], updatedAt: new Date().toISOString() }
       await writeRecord(dir, tombstone)
       return true
     })
@@ -251,7 +284,7 @@ export function createViewStore(root: string = defaultViewsRoot()) {
     return { record, html, files: JSON.parse(files) as ViewSourceFile[] }
   }
 
-  return { root, appDir, read, create, list, readSources, addVersion, readVersion, update, remove }
+  return { root, appDir, read, create, list, readSources, addVersion, readVersion, update, setPublished, remove }
 }
 
 let defaultStore: ViewStore | null = null

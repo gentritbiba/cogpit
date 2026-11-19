@@ -5,7 +5,7 @@ import { request as httpsRequest, type RequestOptions } from "node:https"
 import { isIP, type LookupFunction } from "node:net"
 import ipaddr from "ipaddr.js"
 import { parseJsonText } from "./json"
-import { MEDIA_LIMIT_BYTES, audioMimeSchema, type PluginMedia } from "@cogpit/plugin-contracts"
+import { HTML_MIME, MEDIA_LIMIT_BYTES, audioMimeSchema, type PluginMedia } from "@cogpit/plugin-contracts"
 
 export const HTTPS_RESPONSE_LIMIT = 4 * 1024 * 1024
 export const HTTPS_DEADLINE_MS = 20_000
@@ -81,7 +81,7 @@ function validate(input: PluginHttpsInput): { hostname: string; headerValue: str
     || Object.entries(input.body).some(([key, value]) => ["__proto__", "constructor", "prototype"].includes(key) || !["string", "number", "boolean"].includes(typeof value) || typeof value === "number" && !Number.isFinite(value)))) invalid()
   const upload = input.upload
   if (upload !== undefined && (input.method !== "POST" || input.body !== undefined || input.response !== undefined || !upload || typeof upload !== "object"
-    || !audioMimeSchema.safeParse(upload.mimeType).success || !(upload.bytes instanceof ArrayBuffer) || upload.bytes.byteLength === 0 || upload.bytes.byteLength > MEDIA_LIMIT_BYTES)) invalid()
+    || upload.mimeType !== HTML_MIME && !audioMimeSchema.safeParse(upload.mimeType).success || !(upload.bytes instanceof ArrayBuffer) || upload.bytes.byteLength === 0 || upload.bytes.byteLength > MEDIA_LIMIT_BYTES)) invalid()
   const audio = input.response
   if (audio && (audio.type !== "audio" || !Array.isArray(audio.mimeTypes) || !audio.mimeTypes.length || audio.mimeTypes.length > 6 || audio.mimeTypes.some(type => !audioMimeSchema.safeParse(type).success)
     || !Number.isSafeInteger(audio.maxBytes) || audio.maxBytes < 1 || audio.maxBytes > MEDIA_LIMIT_BYTES)) invalid()
