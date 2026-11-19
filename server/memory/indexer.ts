@@ -46,6 +46,8 @@ export interface MemoryIndexerOptions {
   pause?(): Promise<void>
   /** How long after `start` the first pass runs, so it never competes with the server starting up. */
   startDelayMs?: number
+  /** Runs after each pass has synced transcripts, before embedding, while the store is sure to stay open; for indexes kept from its text. */
+  afterSync?(store: MemoryStore): Promise<void>
 }
 
 export interface MemoryIndexer {
@@ -237,6 +239,8 @@ export function createMemoryIndexer(options: MemoryIndexerOptions): MemoryIndexe
     pendingFiles = memory.planSync(files).length
     lastPassMs = Date.now() - passStarted
     lastPassEnd = Date.now()
+    await options.afterSync?.(memory).catch((error: unknown) => warn(`[memory] an index kept from the store failed: ${String(error)}`))
+    if (stopped) return
     await embed(memory)
   }
 

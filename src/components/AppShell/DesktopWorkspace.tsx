@@ -337,7 +337,7 @@ export function DesktopWorkspace({
 
   function revealViewPanel(): void {
     if (project.showPreview) project.onCloseRightWorkspace()
-    openWorkspacePanel(BUILT_IN_WORKSPACE_PANEL_IDS.views)
+    openWorkspacePanel(BUILT_IN_WORKSPACE_PANEL_IDS.library)
   }
 
   function revealStatusPanel(): void {
@@ -374,7 +374,7 @@ export function DesktopWorkspace({
 
   return (
     <RuntimePluginContributions runtime={runtimePlugins} workspacePath={project.currentCwd ?? null}>
-    <ViewPanelProvider shown={activePanel?.id === BUILT_IN_WORKSPACE_PANEL_IDS.views} onReveal={revealViewPanel}>
+    <ViewPanelProvider shown={activePanel?.id === BUILT_IN_WORKSPACE_PANEL_IDS.library} onReveal={revealViewPanel}>
     <StatusPanelProvider openSessionId={sessionId} onReveal={revealStatusPanel}>
     <div className="relative flex min-h-0 flex-1 overflow-hidden">
       {sidebarRendered && (

@@ -19,7 +19,7 @@ import { formatRelativeTime } from "@/lib/format"
 import { cn } from "@/lib/utils"
 import type { ViewSummary } from "../../../shared/views/stored"
 import { useViewPanel } from "./ViewPanelContext"
-import { sortViews, useViews } from "./useViews"
+import { sortViews, type ViewsList } from "./useViews"
 
 interface RowAction {
   label: string
@@ -30,23 +30,31 @@ interface RowAction {
 
 const SKELETON_ROWS = ["first", "second", "third"]
 
+interface ViewBrowserProps {
+  list: ViewsList
+  /** The views to show; all of them without it. */
+  include?: (view: ViewSummary) => boolean
+  /** What an empty list says, when it says something else than that no view was built yet. */
+  empty?: { title: string; description: string }
+}
+
 /**
  * The stored views on the active device: pinned first, then by when each was
  * last built, on the same date shelves as the sessions list. Opening one shows
  * it in the view panel; each row can be pinned, renamed or deleted.
  */
-export function ViewBrowser() {
-  const { views, error, refresh, update, remove } = useViews()
+export function ViewBrowser({ list, include, empty }: ViewBrowserProps) {
+  const { views, error, refresh, update, remove } = list
   const panel = useViewPanel()
   const [renaming, setRenaming] = useState<ViewSummary | null>(null)
   const [deleting, setDeleting] = useState<ViewSummary | null>(null)
 
   const listed = useMemo(() => {
-    const sorted = sortViews(views ?? [])
+    const sorted = sortViews((views ?? []).filter((view) => !include || include(view)))
     const now = Date.now()
     const shelves = sorted.map((view) => (view.pinned ? "Pinned" : recencyBucket(view.updatedAt, now)))
     return sorted.map((view, index) => ({ view, shelf: shelves[index] === shelves[index - 1] ? null : shelves[index] }))
-  }, [views])
+  }, [views, include])
 
   const togglePin = async (view: ViewSummary) => {
     const failure = await update(view.id, { pinned: !view.pinned })
@@ -91,8 +99,8 @@ export function ViewBrowser() {
           <Empty className="min-h-56 px-4 py-8">
             <EmptyHeader>
               <EmptyMedia variant="icon"><AppWindow /></EmptyMedia>
-              <EmptyTitle>No views yet</EmptyTitle>
-              <EmptyDescription>When an agent builds an interactive view, it is kept here to open again.</EmptyDescription>
+              <EmptyTitle>{empty?.title ?? "No views yet"}</EmptyTitle>
+              <EmptyDescription>{empty?.description ?? "When an agent builds an interactive view, it is kept here to open again."}</EmptyDescription>
             </EmptyHeader>
           </Empty>
         )}

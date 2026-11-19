@@ -86,6 +86,7 @@ const CANONICAL_ROUTE_IDS = [
   "browser",
   "plugins",
   "views",
+  "library",
 ] as const
 
 /** Every `./routes/*` module api-routes.ts imports, with the names it imports. */

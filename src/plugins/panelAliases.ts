@@ -4,6 +4,7 @@ const aliases: Readonly<Record<string, string>> = {
   "github.repository": "cogpit.github.repository",
   "clickup.tasks": "cogpit.clickup.tasks",
   "vercel-deployments.deployments": "cogpit.vercel.deployments",
+  "cogpit.views": "cogpit.library",
 }
 
 export function canonicalPluginPanelId(id: string | null): string | null {

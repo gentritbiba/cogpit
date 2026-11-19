@@ -12,7 +12,7 @@ import type { WorkspacePanelContext } from "@/plugin-api"
 import { useRuntimePlugins } from "@/plugins/useRuntimePlugins"
 import { RuntimePluginContributions } from "@/plugins/RuntimePluginContributions"
 import { useRuntimeWorkspacePanels } from "@/plugins/runtimeWorkspacePanels"
-import { resolvePluginPanelPreference } from "@/plugins/panelAliases"
+import { canonicalPluginPanelId, resolvePluginPanelPreference } from "@/plugins/panelAliases"
 import { useCapability } from "@/hooks/useCapability"
 import { projectContextItem } from "./desktopView"
 import type { ComposerAttachment, ComposerContextItem } from "../../../shared/session/composerContext"
@@ -112,8 +112,8 @@ export function MobileWorkspace({ navigation, sessionView, project, active }: Mo
       },
     }}>
       <ViewPanelProvider
-        shown={active && panels.activeWorkspacePanel === BUILT_IN_WORKSPACE_PANEL_IDS.views}
-        onReveal={() => panels.openWorkspacePanel(BUILT_IN_WORKSPACE_PANEL_IDS.views)}
+        shown={active && canonicalPluginPanelId(panels.activeWorkspacePanel) === BUILT_IN_WORKSPACE_PANEL_IDS.library}
+        onReveal={() => panels.openWorkspacePanel(BUILT_IN_WORKSPACE_PANEL_IDS.library)}
       >
       <StatusPanelProvider openSessionId={sessionId} onReveal={() => panels.openWorkspacePanel(BUILT_IN_WORKSPACE_PANEL_IDS.status)}>
       <MobileWorkspacePanels

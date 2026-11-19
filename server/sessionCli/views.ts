@@ -2,7 +2,8 @@ import { accessAtLeast, type SessionAccessLevel } from "../../shared/contracts/s
 import { formatViewReference, isViewId } from "../../shared/views/stored"
 import { accessLevelOf } from "../edition"
 import { buildView, formatBuildError } from "../views/build"
-import { invalidViewIdMessage, projectOfCwd, viewStore, type ViewRecord, type ViewStore } from "../views/store"
+import { projectOfCwd } from "../../shared/worktreePath"
+import { invalidViewIdMessage, viewStore, type ViewRecord, type ViewStore } from "../views/store"
 import { EXIT, json, parseArgs, UsageError, type CliInvocation, type CliOutput } from "./args"
 
 export const VIEW_USAGE = `  view new ID [--title TITLE]

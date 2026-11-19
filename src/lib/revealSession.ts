@@ -34,16 +34,23 @@ export function sessionPath(dirName: string, fileName: string, deviceId?: string
   return `${prefix}/${encodeURIComponent(dirName)}/${encodeURIComponent(sessionUrlIdFromFileName(dirName, fileName))}`
 }
 
-/** Open a session known only by its id, wherever its transcript is. False when the server finds none the caller may see. */
-export async function revealSessionById(sessionId: string): Promise<boolean> {
+/** Where a session known only by its id keeps its transcript on the active device; null when the server finds none the caller may see. */
+export async function findSessionLocation(sessionId: string): Promise<{ dirName: string; fileName: string } | null> {
   let res: Response
   try {
     res = await authFetch(`/api/find-session/${encodeURIComponent(sessionId)}`)
   } catch {
-    return false
+    return null
   }
   const location = res.ok ? await readJson(res) : null
-  if (typeof location?.dirName !== "string" || typeof location.fileName !== "string") return false
+  if (typeof location?.dirName !== "string" || typeof location.fileName !== "string") return null
+  return { dirName: location.dirName, fileName: location.fileName }
+}
+
+/** Open a session known only by its id, wherever its transcript is. False when the server finds none the caller may see. */
+export async function revealSessionById(sessionId: string): Promise<boolean> {
+  const location = await findSessionLocation(sessionId)
+  if (!location) return false
   revealSessionPath(sessionPath(location.dirName, location.fileName))
   return true
 }

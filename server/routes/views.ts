@@ -5,7 +5,8 @@ import type { SessionAccessLevel } from "../../shared/contracts/sessionAccess"
 import { authorizeHostWide, authorizeSession, itemVisibilityFor, markDecided, sendSessionHidden } from "../edition"
 import { shareGuestSessionId } from "../share/requestGuest"
 import { VIEW_SHELL_HEADERS, VIEW_SHELL_HTML } from "../views/shell"
-import { projectOfCwd, viewStore, viewSummary, ViewStoreError, type ViewRecord, type ViewStore } from "../views/store"
+import { projectOfCwd } from "../../shared/worktreePath"
+import { viewStore, viewSummary, ViewStoreError, type ViewRecord, type ViewStore } from "../views/store"
 
 const VERSION = /^[1-9][0-9]{0,6}$/
 

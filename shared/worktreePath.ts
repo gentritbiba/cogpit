@@ -26,6 +26,11 @@ export function parseWorktreePath(fullPath: string): WorktreeLocation | null {
   return { parentPath: fullPath.slice(0, match.index), worktreeName: match[1] }
 }
 
+/** The project a folder belongs to: a worktree counts as its parent checkout. */
+export function projectOfCwd(cwd: string): string {
+  return parseWorktreePath(cwd)?.parentPath ?? cwd
+}
+
 /** The branch generated along with a worktree, which is removed with it; a branch someone named is kept. */
 export function isGeneratedWorktreeBranch(worktreeName: string, branch: string): boolean {
   return branch === `worktree-${worktreeName}`
