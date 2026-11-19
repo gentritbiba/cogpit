@@ -6,7 +6,7 @@
 import { statSync } from "node:fs"
 import { libraryTabOf, type LibraryCounts, type LibraryItem, type LibraryResponse, type LibraryScope, type LibraryTab } from "../../shared/library/types"
 import { projectOfCwd } from "../../shared/worktreePath"
-import { keptFilePath } from "./keep"
+import { CHANGED_AFTER_MS, keptFilePath } from "./keep"
 import type { ItemRow, ItemScope, LibraryStore } from "./store"
 
 /** Occurrences read per request; far more than anyone scrolls. */
@@ -36,12 +36,11 @@ export interface ListOptions {
 /** The listing for `query`, without the index status the route adds. */
 export async function listLibrary(store: LibraryStore, query: LibraryQuery, options: ListOptions): Promise<Omit<LibraryResponse, "available" | "pendingFiles">> {
   const rows = store.items(itemScope(query), MAX_ROWS)
-  const exists = memoized(isFile)
+  const fileAt = memoized(fileTime)
   const shown = new Map<string, Promise<boolean>>()
   const visibleRows: ItemRow[] = []
   for (const row of rows) {
-    // Without a copy, an image or video shows what its path holds now: nothing, or a later file than the reply showed.
-    if ((row.kind === "image" || row.kind === "video") && !row.kept && (row.keep_state === "changed" || !exists(row.target))) continue
+    if ((row.kind === "image" || row.kind === "video") && !row.kept && !showsShared(row, fileAt(row.target))) continue
     const key = `${row.session_id}\u001f${row.source_file}`
     let visible = shown.get(key)
     if (!visible) shown.set(key, visible = options.visible(row.session_id, row.source_file))
@@ -75,7 +74,7 @@ export async function listLibrary(store: LibraryStore, query: LibraryQuery, opti
   return {
     counts,
     viewIds,
-    items: page.map(({ row, mentions }) => toItem(row, mentions, options.filesDir, exists)),
+    items: page.map(({ row, mentions }) => toItem(row, mentions, options.filesDir, fileAt)),
     next: listed.length > page.length && last ? `${last.shared_ms ?? 0}:${last.id}` : null,
     sessions: Object.fromEntries(store.sessions(sessionIds).map((session) => [session.session_id, { title: session.title, cwd: session.cwd }])),
   }
@@ -104,7 +103,16 @@ function isBefore(row: ItemRow, cursor: { ms: number; id: number }): boolean {
   return ms < cursor.ms || (ms === cursor.ms && row.id < cursor.id)
 }
 
-function toItem(row: ItemRow, mentions: number, filesDir: string, exists: (path: string) => boolean): LibraryItem {
+/**
+ * Without a copy, an image or video shows what its path holds now: only a
+ * file written before the reply that shared it, give or take the same grace
+ * the keep pass allows, is what the reply showed.
+ */
+function showsShared(row: ItemRow, mtimeMs: number | null): boolean {
+  return mtimeMs !== null && (row.shared_ms === null || mtimeMs <= row.shared_ms + CHANGED_AFTER_MS)
+}
+
+function toItem(row: ItemRow, mentions: number, filesDir: string, fileAt: (path: string) => number | null): LibraryItem {
   return {
     id: row.id,
     kind: row.kind,
@@ -117,24 +125,27 @@ function toItem(row: ItemRow, mentions: number, filesDir: string, exists: (path:
     project: row.project,
     keptPath: row.kept && row.ext !== null ? keptFilePath(filesDir, row.kept, row.ext) : null,
     keepState: row.keep_state,
-    present: row.kind === "link" || row.kind === "view" || exists(row.target),
+    present: row.kind === "link" || row.kind === "view" || fileAt(row.target) !== null,
     mentions,
   }
 }
 
-function memoized(check: (path: string) => boolean): (path: string) => boolean {
-  const known = new Map<string, boolean>()
+function memoized<T>(read: (path: string) => T): (path: string) => T {
+  const known = new Map<string, T>()
   return (path) => {
-    let answer = known.get(path)
-    if (answer === undefined) known.set(path, answer = check(path))
-    return answer
+    if (known.has(path)) return known.get(path) as T
+    const value = read(path)
+    known.set(path, value)
+    return value
   }
 }
 
-function isFile(path: string): boolean {
+/** When the regular file at `path` was last written; null when there is none. */
+function fileTime(path: string): number | null {
   try {
-    return statSync(path).isFile()
+    const info = statSync(path)
+    return info.isFile() ? info.mtimeMs : null
   } catch {
-    return false
+    return null
   }
 }

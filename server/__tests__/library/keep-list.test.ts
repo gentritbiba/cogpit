@@ -80,13 +80,14 @@ describe("keepPending", () => {
     expect(states).toEqual({ "changed.png": "changed", "gone.webm": "missing", "big.pdf": "too-large" })
   })
 
-  it("clears copies an earlier process left half made", async () => {
+  it("clears copies an earlier process abandoned, not one another server may still be making", async () => {
     const { root, store, filesDir } = setup()
     mkdirSync(filesDir, { recursive: true })
-    writeFileSync(join(filesDir, ".incoming-stale"), "partial")
+    writeShared(filesDir, ".incoming-abandoned", "partial", Date.now() - 2 * 60 * 60_000)
+    writeShared(filesDir, ".incoming-in-progress", "partial", Date.now())
     store.record([], [occurrence({ kind: "image", target: writeShared(root, "a.png", "a") })], [])
     await keepPending(store, filesDir)
-    expect(readdirSync(filesDir).filter((name) => name.startsWith("."))).toEqual([])
+    expect(readdirSync(filesDir).filter((name) => name.startsWith("."))).toEqual([".incoming-in-progress"])
   })
 
   it("stores identical content once", async () => {
@@ -175,6 +176,19 @@ describe("listLibrary", () => {
     await keepPending(store, filesDir)
     expect(store.items(null, 1)[0]!.keep_state).toBe("changed")
     expect((await listLibrary(store, query({}), { filesDir, visible: everyone })).counts.media).toBe(0)
+  })
+
+  it("leaves out a copy-less image whose path was written again after the reply, whatever the keep pass found", async () => {
+    const { root, store, filesDir } = setup()
+    const path = join(root, "shot.png")
+    store.record([], [
+      occurrence({ kind: "image", target: path, turnId: "missing-then", sharedMs: NOW - 60 * 60_000 }),
+      occurrence({ kind: "video", target: writeShared(root, "big.webm", "x".repeat(64), NOW - 5 * 60_000), turnId: "too-large" }),
+    ], [])
+    await keepPending(store, filesDir, { limits: { ...KEEP_LIMITS, video: 32 } })
+    writeShared(root, "shot.png", "a later screenshot", NOW)
+    const listing = await listLibrary(store, query({}), { filesDir, visible: everyone })
+    expect(listing.items.map((item) => [item.target, item.keepState])).toEqual([[join(root, "big.webm"), "too-large"]])
   })
 
   it("removes an item for good, deleting a copy nothing lists any more", async () => {

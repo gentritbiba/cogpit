@@ -27,7 +27,7 @@ export interface KeepLimits {
 export const KEEP_LIMITS: KeepLimits = Object.freeze({ image: 25 * MB, video: 250 * MB, file: 25 * MB, quota: 2048 * MB })
 
 /** A file written this long after the reply that shared it is not what the reply showed. */
-const CHANGED_AFTER_MS = 2 * 60_000
+export const CHANGED_AFTER_MS = 2 * 60_000
 const BATCH = 50
 const INCOMING = ".incoming-"
 
@@ -41,15 +41,21 @@ export function keptFilePath(filesDir: string, hash: string, ext: string): strin
   return join(filesDir, `${hash}${ext}`)
 }
 
-/** Folders whose copies an earlier process left half made were cleared; once per folder per process. */
+/** Folders whose abandoned copies were cleared; once per folder per process. */
 const swept = new Set<string>()
+/** A copy in progress this old was abandoned; a younger one may belong to another server sharing the folder. */
+const ABANDONED_AFTER_MS = 60 * 60_000
 
-/** Removes copies a process stopped in the middle of; none of this process's is in flight between runs. */
+/** Removes copies a stopped process left half made. */
 async function sweepIncoming(filesDir: string): Promise<void> {
   if (swept.has(filesDir)) return
   swept.add(filesDir)
   const names = await readdir(filesDir).catch(() => [])
-  await Promise.all(names.filter((name) => name.startsWith(INCOMING)).map((name) => rm(join(filesDir, name), { force: true })))
+  for (const name of names.filter((entry) => entry.startsWith(INCOMING))) {
+    const path = join(filesDir, name)
+    const info = await stat(path).catch(() => null)
+    if (info && Date.now() - info.mtimeMs > ABANDONED_AFTER_MS) await rm(path, { force: true }).catch(() => {})
+  }
 }
 
 /** Looks at every local file not yet looked at; answers how many it kept. Runs one at a time. */
