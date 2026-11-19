@@ -23,19 +23,40 @@ export default defineConfig({
     ...(process.platform === "win32" ? { testTimeout: 20_000, hookTimeout: 30_000 } : {}),
     css: { include: [/theme\.css\?raw$/] },
     globals: true,
-    environment: "jsdom",
     setupFiles: ["./src/__tests__/setup.ts"],
-    include: [
-      "src/**/*.test.ts",
-      "src/**/*.test.tsx",
-      "plugins/**/*.test.ts",
-      "plugins/**/*.test.tsx",
-      "server/**/*.test.ts",
-      "electron/**/*.test.ts",
-      "packages/plugin-contracts/**/*.test.ts",
-      "packages/plugin-sdk/**/*.test.ts",
-      "packages/plugin-tools/**/*.test.ts",
-      ...(withTeam ? ["editions/team/tests/**/*.test.{ts,tsx}"] : []),
+    // Server-side suites get Node's environment: building a jsdom window for
+    // each of their files was a third of the suite's time.
+    projects: [
+      {
+        extends: true,
+        test: {
+          name: "dom",
+          environment: "jsdom",
+          include: [
+            "src/**/*.test.ts",
+            "src/**/*.test.tsx",
+            "plugins/**/*.test.ts",
+            "plugins/**/*.test.tsx",
+            ...(withTeam ? ["editions/team/tests/ui/**/*.test.{ts,tsx}"] : []),
+          ],
+        },
+      },
+      {
+        extends: true,
+        test: {
+          name: "node",
+          environment: "node",
+          include: [
+            "server/**/*.test.ts",
+            "electron/**/*.test.ts",
+            "packages/plugin-contracts/**/*.test.ts",
+            "packages/plugin-sdk/**/*.test.ts",
+            "packages/plugin-tools/**/*.test.ts",
+            ...(withTeam ? ["editions/team/tests/**/*.test.{ts,tsx}"] : []),
+          ],
+          exclude: ["**/node_modules/**", ...(withTeam ? ["editions/team/tests/ui/**"] : [])],
+        },
+      },
     ],
     coverage: {
       provider: "v8",

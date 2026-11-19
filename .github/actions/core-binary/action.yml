@@ -1,0 +1,65 @@
+name: Build cogpit-core
+description: >
+  Restores a cogpit-core build of these exact Rust sources from the Actions
+  cache, or builds it (and caches it) when there is none. Most commits change
+  no Rust, so most jobs skip the toolchain and Cargo entirely.
+
+inputs:
+  profile:
+    description: debug (what the test suites spawn) or release (what ships)
+    required: false
+    default: debug
+  target:
+    description: Rust target triple for a release build; the host's when empty
+    required: false
+    default: ""
+
+outputs:
+  dir:
+    description: Directory holding the binary
+    value: ${{ steps.paths.outputs.dir }}
+
+runs:
+  using: composite
+  steps:
+    - id: paths
+      shell: bash
+      run: |
+        if [ -n "${{ inputs.target }}" ]; then
+          echo "dir=target/${{ inputs.target }}/${{ inputs.profile }}" >> "$GITHUB_OUTPUT"
+        else
+          echo "dir=target/${{ inputs.profile }}" >> "$GITHUB_OUTPUT"
+        fi
+
+    # Everything the binary is built from: the workspace, its lockfile and
+    # toolchain, and the media table core-files compiles in.
+    - id: cache
+      uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+      with:
+        path: |
+          ${{ steps.paths.outputs.dir }}/cogpit-core
+          ${{ steps.paths.outputs.dir }}/cogpit-core.exe
+        key: cogpit-core-${{ inputs.profile }}-${{ inputs.target || format('{0}-{1}', runner.os, runner.arch) }}-${{ hashFiles('crates/**', 'Cargo.toml', 'Cargo.lock', 'rust-toolchain.toml', 'shared/mediaTypes.json') }}
+
+    # rust-toolchain.toml pins the version.
+    - name: Install the Rust toolchain
+      if: steps.cache.outputs.cache-hit != 'true'
+      shell: bash
+      run: |
+        rustup toolchain install
+        if [ -n "${{ inputs.target }}" ]; then rustup target add "${{ inputs.target }}"; fi
+
+    - name: Install the musl toolchain
+      if: steps.cache.outputs.cache-hit != 'true' && contains(inputs.target, 'musl')
+      shell: bash
+      run: sudo apt-get update && sudo apt-get install -y musl-tools
+
+    - if: steps.cache.outputs.cache-hit != 'true'
+      uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+      with:
+        key: ${{ inputs.profile }}-${{ inputs.target || 'host' }}
+
+    - name: Build cogpit-core
+      if: steps.cache.outputs.cache-hit != 'true'
+      shell: bash
+      run: cargo build --locked -p cogpit-core ${{ inputs.profile == 'release' && '--release' || '' }} ${{ inputs.target && format('--target {0}', inputs.target) || '' }}

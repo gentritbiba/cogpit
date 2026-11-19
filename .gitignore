@@ -39,3 +39,4 @@ qa-notes.md
 # Rust core build output, and the release builds staged for packaging
 /target
 /core-dist
+.vitest-reports/
