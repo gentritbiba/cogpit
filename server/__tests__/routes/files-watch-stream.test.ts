@@ -11,11 +11,11 @@ import { mkdtempSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 
-const { mockStat, mockOpen, mockWatch, mockIsCopilotTurnActive, mockAgentsRunning } = vi.hoisted(() => ({
+const { mockStat, mockOpen, mockWatch, mockTurnActive, mockAgentsRunning } = vi.hoisted(() => ({
   mockStat: vi.fn(),
   mockOpen: vi.fn(),
   mockWatch: vi.fn(),
-  mockIsCopilotTurnActive: vi.fn(),
+  mockTurnActive: vi.fn(),
   mockAgentsRunning: vi.fn(async (_dirName: string, _sessionId: string) => false),
 }))
 
@@ -56,7 +56,7 @@ vi.mock("../../agents/agentsRunning", () => ({ sessionAgentsRunning: mockAgentsR
 
 vi.mock("../../agents/runtimes", () => ({
   runtimeForDirName: () => ({
-    activity: (sessionId: string) => ({ live: false, running: mockIsCopilotTurnActive(sessionId) }),
+    activity: (sessionId: string) => ({ live: false, running: mockTurnActive(sessionId) }),
   }),
 }))
 
@@ -149,7 +149,7 @@ beforeEach(() => {
     close: vi.fn().mockResolvedValue(undefined),
   })
   mockWatch.mockReturnValue({ on: vi.fn(), close: vi.fn() })
-  mockIsCopilotTurnActive.mockReturnValue(false)
+  mockTurnActive.mockReturnValue(false)
   mockAgentsRunning.mockResolvedValue(false)
 })
 
@@ -285,13 +285,14 @@ describe("/api/watch stream-bus forwarding", () => {
     closeConnection()
   })
 
-  it("keeps an active Copilot turn live across quiet transcript periods", async () => {
+  it.each([
+    ["Claude", `/proj-a/${SESSION}.jsonl`],
+    ["Copilot", `/copilot__proj/${encodeURIComponent(`${SESSION}/events.jsonl`)}`],
+  ])("keeps an active %s turn live across quiet transcript periods", async (_agent, path) => {
     vi.useFakeTimers()
-    mockIsCopilotTurnActive.mockReturnValue(true)
+    mockTurnActive.mockReturnValue(true)
     const handler = getHandler("/api/watch/")
-    const harness = makeReqRes(
-      `/copilot__proj/${encodeURIComponent(`${SESSION}/events.jsonl`)}`,
-    )
+    const harness = makeReqRes(path)
 
     await handler(harness.req as never, harness.res as never, harness.next)
     await Promise.resolve()
@@ -302,6 +303,19 @@ describe("/api/watch stream-bus forwarding", () => {
     const initialCount = activityCount()
     await vi.advanceTimersByTimeAsync(15_000)
     expect(activityCount()).toBeGreaterThan(initialCount)
+
+    harness.closeConnection()
+  })
+
+  it("lets an idle Claude session's stream go quiet instead of claiming a turn runs", async () => {
+    vi.useFakeTimers()
+    mockTurnActive.mockReturnValue(false)
+    const handler = getHandler("/api/watch/")
+    const harness = makeReqRes(`/proj-a/${SESSION}.jsonl`)
+
+    await handler(harness.req as never, harness.res as never, harness.next)
+    await vi.advanceTimersByTimeAsync(15_000)
+    expect(parseFrames(harness.frames).some((event) => event.type === "runtime_activity")).toBe(false)
 
     harness.closeConnection()
   })

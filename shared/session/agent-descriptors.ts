@@ -111,8 +111,6 @@ export interface AgentCapabilities {
    * tail, or the runtime's own turn state for a CLI whose transcript lags it.
    */
   readonly turnLiveness: "transcript" | "runtime"
-  /** Partial assistant output is published on the stream bus while a turn runs. */
-  readonly tokenStreaming: boolean
   /** Branching is a fork RPC on the CLI rather than a copied and cut transcript. */
   readonly nativeFork: boolean
   /** A title can be given to a session when it is created. */
@@ -768,7 +766,6 @@ const claude: AgentDescriptor = {
     toolPermissionRules: true,
     settingsApply: "live",
     turnLiveness: "transcript",
-    tokenStreaming: true,
     nativeFork: false,
     namedSessions: true,
     skipQuestions: true,
@@ -943,7 +940,6 @@ const codex: AgentDescriptor = {
     toolPermissionRules: true,
     settingsApply: "next-turn",
     turnLiveness: "runtime",
-    tokenStreaming: true,
     nativeFork: false,
     // Codex derives its own thread name.
     namedSessions: false,
@@ -1091,7 +1087,6 @@ const copilot: AgentDescriptor = {
     toolPermissionRules: true,
     settingsApply: "next-turn",
     turnLiveness: "runtime",
-    tokenStreaming: false,
     nativeFork: true,
     namedSessions: true,
     skipQuestions: false,
