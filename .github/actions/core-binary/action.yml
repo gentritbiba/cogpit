@@ -22,24 +22,21 @@ outputs:
 runs:
   using: composite
   steps:
+    # Everything the binary is built from: the workspace, its lockfile and
+    # toolchain, and the media table core-files compiles in.
     - id: paths
       shell: bash
       run: |
-        if [ -n "${{ inputs.target }}" ]; then
-          echo "dir=target/${{ inputs.target }}/${{ inputs.profile }}" >> "$GITHUB_OUTPUT"
-        else
-          echo "dir=target/${{ inputs.profile }}" >> "$GITHUB_OUTPUT"
-        fi
+        dir="target/${{ inputs.target && format('{0}/', inputs.target) || '' }}${{ inputs.profile }}"
+        echo "dir=$dir" >> "$GITHUB_OUTPUT"
+        echo "binary=$dir/cogpit-core${{ runner.os == 'Windows' && '.exe' || '' }}" >> "$GITHUB_OUTPUT"
+        echo "key=cogpit-core-${{ inputs.profile }}-${{ inputs.target || format('{0}-{1}', runner.os, runner.arch) }}-${{ hashFiles('crates/**', 'Cargo.toml', 'Cargo.lock', 'rust-toolchain.toml', 'shared/mediaTypes.json') }}" >> "$GITHUB_OUTPUT"
 
-    # Everything the binary is built from: the workspace, its lockfile and
-    # toolchain, and the media table core-files compiles in.
     - id: cache
-      uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+      uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
       with:
-        path: |
-          ${{ steps.paths.outputs.dir }}/cogpit-core
-          ${{ steps.paths.outputs.dir }}/cogpit-core.exe
-        key: cogpit-core-${{ inputs.profile }}-${{ inputs.target || format('{0}-{1}', runner.os, runner.arch) }}-${{ hashFiles('crates/**', 'Cargo.toml', 'Cargo.lock', 'rust-toolchain.toml', 'shared/mediaTypes.json') }}
+        path: ${{ steps.paths.outputs.binary }}
+        key: ${{ steps.paths.outputs.key }}
 
     # rust-toolchain.toml pins the version.
     - name: Install the Rust toolchain
@@ -63,3 +60,10 @@ runs:
       if: steps.cache.outputs.cache-hit != 'true'
       shell: bash
       run: cargo build --locked -p cogpit-core ${{ inputs.profile == 'release' && '--release' || '' }} ${{ inputs.target && format('--target {0}', inputs.target) || '' }}
+
+    # Saved now: rust-cache's post step cleans target/ before a post-step save would run.
+    - if: steps.cache.outputs.cache-hit != 'true'
+      uses: actions/cache/save@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+      with:
+        path: ${{ steps.paths.outputs.binary }}
+        key: ${{ steps.paths.outputs.key }}

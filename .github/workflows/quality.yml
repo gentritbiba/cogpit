@@ -25,10 +25,11 @@ concurrency:
   group: quality-${{ github.workflow }}-${{ github.event_name == 'pull_request' && github.ref || github.sha }}-${{ inputs.edition && 'edition' || 'public' }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
-# Every job is independent, so the run takes as long as its slowest job. The
-# public run leaves the editions/team submodule empty, and its builds prove it
-# by failing if they emit the edition UI chunk; the edition run (release only)
-# checks out the package and checks the build that ships.
+# Every job is independent, so a run takes as long as its slowest job. The
+# account runs at most 20 jobs at once, a release's included, so the shard
+# counts trade runners for minutes. The public run leaves the editions/team
+# submodule empty, and its builds prove it by failing if they emit the edition
+# UI chunk; the edition run (release only) checks the build that ships.
 jobs:
   checks:
     runs-on: ubuntu-latest
@@ -58,17 +59,43 @@ jobs:
           check:architecture check:agents check:codex-protocol check:duplicates
           check:cogpit-memory-sync check:cogpit-skill-sync check:audit
 
+      # rust-toolchain.toml pins the version and components.
+      - name: Install the Rust toolchain
+        if: ${{ !inputs.edition }}
+        run: rustup toolchain install
+
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        if: ${{ !inputs.edition }}
+
+      - name: Check, lint and test Rust
+        if: ${{ !inputs.edition }}
+        run: |
+          cargo fmt --all --check
+          cargo clippy --locked --all-targets -- -D warnings
+          cargo test --locked
+
+      - name: Build the web app with the edition UI and as a public clone
+        if: inputs.edition
+        run: >-
+          bun scripts/run-parallel.ts
+          "COGPIT_EXPECT_EDITION_UI=present build:web"
+          "COGPIT_WITHOUT_TEAM=1 COGPIT_EXPECT_EDITION_UI=absent build:web --outDir $RUNNER_TEMP/public-dist"
+
+      - name: Check the public build carries none of the edition package
+        if: inputs.edition
+        run: bun editions/team/tools/check-public-bundle.ts "$RUNNER_TEMP/public-dist"
+
   # The suite, split across runners. Each shard of the public run records its
   # coverage in a blob; `coverage` merges them and checks the thresholds.
   test:
-    name: test (${{ matrix.shard }}/6)
+    name: test (${{ matrix.shard }}/5)
     runs-on: ubuntu-latest
     timeout-minutes: 15
     environment: ${{ inputs.edition && 'release' || '' }}
     strategy:
       fail-fast: false
       matrix:
-        shard: [1, 2, 3, 4, 5, 6]
+        shard: [1, 2, 3, 4, 5]
 
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
@@ -88,14 +115,14 @@ jobs:
       - name: Test with coverage
         if: ${{ !inputs.edition }}
         run: >-
-          bunx vitest run --shard=${{ matrix.shard }}/6 --reporter=dot --reporter=blob
+          bunx vitest run --shard=${{ matrix.shard }}/5 --reporter=dot --reporter=blob
           --coverage --coverage.reporter=text-summary
           --coverage.thresholds.lines=0 --coverage.thresholds.functions=0
           --coverage.thresholds.statements=0 --coverage.thresholds.branches=0
 
       - name: Test with the edition package
         if: inputs.edition
-        run: bunx vitest run --shard=${{ matrix.shard }}/6 --reporter=dot
+        run: bunx vitest run --shard=${{ matrix.shard }}/5 --reporter=dot
 
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         if: ${{ !inputs.edition }}
@@ -131,31 +158,23 @@ jobs:
         run: bunx vitest run --merge-reports --coverage --reporter=dot
 
   build:
+    if: ${{ !inputs.edition }}
     runs-on: ubuntu-latest
     timeout-minutes: 15
-    environment: ${{ inputs.edition && 'release' || '' }}
 
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           persist-credentials: false
 
-      - uses: ./.github/actions/team-checkout
-        if: inputs.edition
-        with:
-          ssh-key: ${{ secrets.COGPIT_TEAM_DEPLOY_KEY }}
-          require-merged: "true"
-
       # The install-free CLI's package contract starts its server on this core.
       - uses: ./.github/actions/core-binary
-        if: ${{ !inputs.edition }}
 
       - uses: ./.github/actions/setup-js
         with:
-          memory: ${{ !inputs.edition }}
+          memory: "true"
 
       - name: Build the web and Electron apps and check the package contracts
-        if: ${{ !inputs.edition }}
         env:
           COGPIT_EXPECT_EDITION_UI: absent
         run: >-
@@ -164,69 +183,25 @@ jobs:
           "--cwd packages/cogpit-cli test" "--cwd packages/cogpit-memory test"
 
       - name: Build and check the cogpit-memory packages
-        if: ${{ !inputs.edition }}
         working-directory: packages/cogpit-memory
         run: |
           bun run build
           bun run build:npm
           node scripts/test-package-contract.mjs
 
-      - name: Build the web app with the edition UI and as a public clone
-        if: inputs.edition
-        run: >-
-          bun scripts/run-parallel.ts
-          "COGPIT_EXPECT_EDITION_UI=present build:web"
-          "COGPIT_WITHOUT_TEAM=1 COGPIT_EXPECT_EDITION_UI=absent build:web --outDir $RUNNER_TEMP/public-dist"
-
-      - name: Check the public build carries none of the edition package
-        if: inputs.edition
-        run: bun editions/team/tools/check-public-bundle.ts "$RUNNER_TEMP/public-dist"
-
-  rust:
-    if: ${{ !inputs.edition }}
-    name: rust (${{ matrix.os }})
-    runs-on: ${{ matrix.os }}
-    timeout-minutes: 15
-    strategy:
-      fail-fast: false
-      matrix:
-        # On Windows only the tests: the core's stdin-close exit and spawn are what differ there.
-        os: [ubuntu-latest, windows-latest]
-
-    steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
-        with:
-          persist-credentials: false
-
-      # rust-toolchain.toml pins the version and components.
-      - name: Install the Rust toolchain
-        run: rustup toolchain install
-
-      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
-
-      - name: Check Rust formatting
-        if: runner.os == 'Linux'
-        run: cargo fmt --all --check
-
-      - name: Lint Rust
-        if: runner.os == 'Linux'
-        run: cargo clippy --locked --all-targets -- -D warnings
-
-      - name: Test Rust
-        run: cargo test --locked
-
-  # Windows is a release target. The suite runs here too, because POSIX
-  # assumptions (/tmp, /bin/zsh, "/" joins, bare spawn of .cmd shims) only
-  # fail on it. Types and builds do not differ, so they run on Linux only.
+  # Windows is a release target, and POSIX assumptions (/tmp, /bin/zsh, "/"
+  # joins, bare spawn of .cmd shims) only fail on it. Only the suites that
+  # touch the OS run here: the dom project renders React in jsdom and reads
+  # nothing from the machine, and types and builds do not differ either.
   windows:
     if: ${{ !inputs.edition }}
-    name: windows (${{ matrix.shard }}/6)
+    name: windows (${{ matrix.shard }}/4)
     runs-on: windows-latest
     timeout-minutes: 20
     strategy:
       fail-fast: false
       matrix:
-        shard: [1, 2, 3, 4, 5, 6]
+        shard: [1, 2, 3, 4]
 
     defaults:
       run:
@@ -242,7 +217,7 @@ jobs:
       - uses: ./.github/actions/setup-js
 
       - name: Test application and server
-        run: bunx vitest run --shard=${{ matrix.shard }}/6 --reporter=dot
+        run: bunx vitest run --project node --shard=${{ matrix.shard }}/4 --reporter=dot
 
       - name: Verify public plugin packages outside the repository
         if: matrix.shard == 1
@@ -253,10 +228,29 @@ jobs:
         working-directory: packages/cogpit-cli
         run: bun run test
 
+  # The core's stdin-close exit and spawn are what differ on Windows.
+  rust-windows:
+    if: ${{ !inputs.edition }}
+    runs-on: windows-latest
+    timeout-minutes: 15
+
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+
+      - name: Install the Rust toolchain
+        run: rustup toolchain install
+
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+
+      - name: Test Rust
+        run: cargo test --locked
+
   # The one check to require: green only when every job above passed.
   quality:
     if: always()
-    needs: [checks, test, coverage, build, rust, windows]
+    needs: [checks, test, coverage, build, windows, rust-windows]
     runs-on: ubuntu-latest
     timeout-minutes: 5
 

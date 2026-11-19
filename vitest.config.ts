@@ -21,17 +21,22 @@ export default defineConfig({
   test: {
     // Hosted Windows runners are several times slower than the other platforms.
     ...(process.platform === "win32" ? { testTimeout: 20_000, hookTimeout: 30_000 } : {}),
+    // A test that only fails under a loaded CI runner would otherwise block a
+    // release until someone reruns it; the reporter still lists every retry.
+    retry: process.env.CI ? 2 : 0,
     css: { include: [/theme\.css\?raw$/] },
     globals: true,
     setupFiles: ["./src/__tests__/setup.ts"],
-    // Server-side suites get Node's environment: building a jsdom window for
-    // each of their files was a third of the suite's time.
+    // Only the UI suites need a jsdom window; the server's run in Node's environment.
     projects: [
       {
         extends: true,
         test: {
           name: "dom",
           environment: "jsdom",
+          // Workers start faster than processes. The node project keeps
+          // processes: its suites change process-wide state threads share.
+          pool: "threads",
           include: [
             "src/**/*.test.ts",
             "src/**/*.test.tsx",

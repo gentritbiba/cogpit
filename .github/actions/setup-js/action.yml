@@ -20,15 +20,20 @@ runs:
   steps:
     - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
       with:
-        bun-version: 1.3.14
+        bun-version-file: .bun-version
 
     - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
       with:
         node-version: "22.16"
 
+    # Bun links packages from its cache, and only within one drive; Windows
+    # keeps the default cache on C: and the checkout on D:, which made every
+    # install copy each file (69s against 31s).
     - name: Install application dependencies
       shell: bash
-      run: bun install --frozen-lockfile --ignore-scripts
+      run: |
+        echo "BUN_INSTALL_CACHE_DIR=$RUNNER_TEMP/bun-cache" >> "$GITHUB_ENV"
+        BUN_INSTALL_CACHE_DIR="$RUNNER_TEMP/bun-cache" bun install --frozen-lockfile --ignore-scripts
 
     - name: Install cogpit-memory dependencies
       if: inputs.memory == 'true'
