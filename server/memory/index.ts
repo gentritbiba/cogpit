@@ -103,8 +103,10 @@ export async function stopMemoryIndexer(): Promise<void> {
   unsubscribe = null
   const stopping = indexer
   indexer = null
+  // Started first: the indexer's stop waits for its pass, and the pass for the library's read.
+  const library = stopLibrary()
   await stopping?.stop()
-  await stopLibrary()
+  await library
 }
 
 /** The running indexer, or null before the catalog starts and in agent workers. */

@@ -51,7 +51,9 @@ store. It then copies new local files in the background.
 | `~/.cogpit/library/library.db` | Every occurrence (session, turn, time, project) and the kept copies |
 | `~/.cogpit/library/files/` | Kept copies, named by SHA-256 |
 
-`COGPIT_LIBRARY_HOME` moves both. An occurrence stays when its transcript is
+The library sits beside the memory store it is fed from, so a server started
+with its own `COGPIT_MEMORY_DIR` keeps its own library; `COGPIT_LIBRARY_HOME`
+moves it anywhere. An occurrence stays when its transcript is
 rewritten or deleted. Only removing it from the panel takes it out.
 
 `GET /api/library?scope=session|project|all&session=&project=&tab=media|link|file&q=&limit=&before=`

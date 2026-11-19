@@ -1,5 +1,5 @@
 // @vitest-environment node
-import { mkdtempSync, readdirSync, readFileSync, rmSync, utimesSync, writeFileSync } from "node:fs"
+import { mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, utimesSync, writeFileSync } from "node:fs"
 import { DatabaseSync } from "node:sqlite"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
@@ -80,6 +80,15 @@ describe("keepPending", () => {
     expect(states).toEqual({ "changed.png": "changed", "gone.webm": "missing", "big.pdf": "too-large" })
   })
 
+  it("clears copies an earlier process left half made", async () => {
+    const { root, store, filesDir } = setup()
+    mkdirSync(filesDir, { recursive: true })
+    writeFileSync(join(filesDir, ".incoming-stale"), "partial")
+    store.record([], [occurrence({ kind: "image", target: writeShared(root, "a.png", "a") })], [])
+    await keepPending(store, filesDir)
+    expect(readdirSync(filesDir).filter((name) => name.startsWith("."))).toEqual([])
+  })
+
   it("stores identical content once", async () => {
     const { root, store, filesDir } = setup()
     store.record([], [
@@ -157,6 +166,15 @@ describe("listLibrary", () => {
     expect(listing.items.map((item) => item.target)).toEqual([join(root, "here.png")])
     const files = await listLibrary(store, query({ tab: "file" }), { filesDir, visible: everyone })
     expect(files.items.map((item) => [item.target, item.present])).toEqual([[join(root, "gone.pdf"), false]])
+  })
+
+  it("leaves out an image whose path now holds a later file than the reply showed", async () => {
+    const { root, store, filesDir } = setup()
+    const shot = writeShared(root, "shot.png", "later", NOW + 10 * 60_000)
+    store.record([], [occurrence({ kind: "image", target: shot })], [])
+    await keepPending(store, filesDir)
+    expect(store.items(null, 1)[0]!.keep_state).toBe("changed")
+    expect((await listLibrary(store, query({}), { filesDir, visible: everyone })).counts.media).toBe(0)
   })
 
   it("removes an item for good, deleting a copy nothing lists any more", async () => {

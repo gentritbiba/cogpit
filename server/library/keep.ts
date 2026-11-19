@@ -6,7 +6,7 @@
  */
 import { createHash, randomUUID } from "node:crypto"
 import { createReadStream, createWriteStream } from "node:fs"
-import { mkdir, rename, rm, stat } from "node:fs/promises"
+import { mkdir, readdir, rename, rm, stat } from "node:fs/promises"
 import { join } from "node:path"
 import { pipeline } from "node:stream/promises"
 import { extensionOf } from "../../shared/library/extract"
@@ -29,6 +29,7 @@ export const KEEP_LIMITS: KeepLimits = Object.freeze({ image: 25 * MB, video: 25
 /** A file written this long after the reply that shared it is not what the reply showed. */
 const CHANGED_AFTER_MS = 2 * 60_000
 const BATCH = 50
+const INCOMING = ".incoming-"
 
 export interface KeepOptions {
   limits?: KeepLimits
@@ -40,7 +41,18 @@ export function keptFilePath(filesDir: string, hash: string, ext: string): strin
   return join(filesDir, `${hash}${ext}`)
 }
 
-/** Looks at every local file not yet looked at; answers how many it kept. */
+/** Folders whose copies an earlier process left half made were cleared; once per folder per process. */
+const swept = new Set<string>()
+
+/** Removes copies a process stopped in the middle of; none of this process's is in flight between runs. */
+async function sweepIncoming(filesDir: string): Promise<void> {
+  if (swept.has(filesDir)) return
+  swept.add(filesDir)
+  const names = await readdir(filesDir).catch(() => [])
+  await Promise.all(names.filter((name) => name.startsWith(INCOMING)).map((name) => rm(join(filesDir, name), { force: true })))
+}
+
+/** Looks at every local file not yet looked at; answers how many it kept. Runs one at a time. */
 export async function keepPending(store: LibraryStore, filesDir: string, options: KeepOptions = {}): Promise<number> {
   const limits = options.limits ?? KEEP_LIMITS
   let kept = 0
@@ -52,6 +64,7 @@ export async function keepPending(store: LibraryStore, filesDir: string, options
       if (options.signal?.aborted) return kept
       if (!madeDir) {
         await mkdir(filesDir, { recursive: true, mode: 0o700 })
+        await sweepIncoming(filesDir)
         madeDir = true
       }
       if (await keepOne(store, filesDir, item, limits)) kept++
@@ -73,7 +86,7 @@ async function keepOne(store: LibraryStore, filesDir: string, item: PendingKeep,
   if (item.sharedMs !== null && info.mtimeMs > item.sharedMs + CHANGED_AFTER_MS) return mark(store, item, "changed")
 
   const ext = extensionOf(item.target)
-  const incoming = join(filesDir, `.incoming-${randomUUID()}`)
+  const incoming = join(filesDir, `${INCOMING}${randomUUID()}`)
   let copied: { hash: string; size: number }
   try {
     copied = await copyHashed(item.target, incoming, limits[item.kind])
@@ -84,8 +97,9 @@ async function keepOne(store: LibraryStore, filesDir: string, item: PendingKeep,
 
   const existing = store.keptFile(copied.hash)
   if (existing) {
-    await rm(incoming, { force: true })
+    // Recorded before the next await, so a removal meanwhile cannot delete the copy this now points at.
     store.keep(item.id, existing)
+    await rm(incoming, { force: true })
     return true
   }
   if (!(await makeRoom(store, filesDir, copied.size, item.sharedMs ?? 0, limits.quota))) {

@@ -1,13 +1,14 @@
 /**
- * The library on this computer: `~/.cogpit/library` (`COGPIT_LIBRARY_HOME`
- * overrides it) holds `library.db` and the kept copies under `files/`. It is
- * brought up to date after each pass of the memory indexer, one run at a time.
+ * The library on this computer: `library/` beside the memory store it is fed
+ * from (`~/.cogpit/library`; `COGPIT_LIBRARY_HOME` overrides it) holds
+ * `library.db` and the kept copies under `files/`. It is brought up to date
+ * after each pass of the memory indexer, one run at a time.
  */
 import { closeSync, mkdirSync, openSync } from "node:fs"
-import { homedir } from "node:os"
-import { join } from "node:path"
+import { dirname, join } from "node:path"
 import type { SqlDatabase } from "../../shared/memory/database"
 import type { MemoryStore } from "../../shared/memory/store"
+import { memoryDir } from "../memory/paths"
 import { openDatabase } from "../orchestration/database"
 import { keepPending } from "./keep"
 import { LibraryStore } from "./store"
@@ -15,8 +16,9 @@ import { syncLibrary } from "./sync"
 
 export const LIBRARY_HOME_ENV = "COGPIT_LIBRARY_HOME"
 
+/** A server indexing its own memory store keeps its own library too. */
 export function libraryHome(env: NodeJS.ProcessEnv = process.env): string {
-  return env[LIBRARY_HOME_ENV]?.trim() || join(homedir(), ".cogpit", "library")
+  return env[LIBRARY_HOME_ENV]?.trim() || join(dirname(memoryDir(env)), "library")
 }
 
 export function libraryFilesDir(home = libraryHome()): string {
@@ -30,6 +32,7 @@ interface OpenLibrary {
 
 let opened: OpenLibrary | null = null
 let unavailableAt: string | null = null
+let syncing: Promise<unknown> | null = null
 let keeping: Promise<void> | null = null
 let keepAgain = false
 let controller = new AbortController()
@@ -65,8 +68,14 @@ export function libraryStore(): LibraryStore | null {
 export async function syncLibraryFrom(memory: MemoryStore): Promise<void> {
   const store = libraryStore()
   if (!store) return
-  await syncLibrary(memory, store, { pause: yieldToEventLoop, signal: controller.signal })
-  keepCopies(store)
+  const { signal } = controller
+  const run = syncing = syncLibrary(memory, store, { pause: yieldToEventLoop, signal })
+  try {
+    await run
+  } finally {
+    if (syncing === run) syncing = null
+  }
+  if (!signal.aborted) keepCopies(store)
 }
 
 function keepCopies(store: LibraryStore): void {
@@ -85,11 +94,12 @@ function keepCopies(store: LibraryStore): void {
     .finally(() => { keeping = null })
 }
 
-/** Stops copying and closes the store. */
+/** Stops reading and copying at the next file, then closes the store. Call it before awaiting the memory indexer's stop, which waits for the read. */
 export async function stopLibrary(): Promise<void> {
   controller.abort()
-  await keeping
   controller = new AbortController()
+  await syncing?.catch(() => {})
+  await keeping
   opened?.store.close()
   opened = null
   unavailableAt = null

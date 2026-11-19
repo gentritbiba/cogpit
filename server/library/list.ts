@@ -40,8 +40,8 @@ export async function listLibrary(store: LibraryStore, query: LibraryQuery, opti
   const shown = new Map<string, Promise<boolean>>()
   const visibleRows: ItemRow[] = []
   for (const row of rows) {
-    // An image or video with no copy and no file left has nothing to show.
-    if ((row.kind === "image" || row.kind === "video") && !row.kept && !exists(row.target)) continue
+    // Without a copy, an image or video shows what its path holds now: nothing, or a later file than the reply showed.
+    if ((row.kind === "image" || row.kind === "video") && !row.kept && (row.keep_state === "changed" || !exists(row.target))) continue
     const key = `${row.session_id}\u001f${row.source_file}`
     let visible = shown.get(key)
     if (!visible) shown.set(key, visible = options.visible(row.session_id, row.source_file))
