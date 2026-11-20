@@ -477,9 +477,10 @@ jobs:
               echo "$spec was already published."
             fi
           }
-          publish "cogpit@${GITHUB_REF_NAME#v}" "$(ls npm/cogpit-[0-9]*.tgz)"
-          memory=$(ls npm/cogpit-memory-*.tgz)
-          version=${memory#npm/cogpit-memory-}
+          # A path without ./ is a GitHub user/repo spec to npm, not a file.
+          publish "cogpit@${GITHUB_REF_NAME#v}" "$(ls ./npm/cogpit-[0-9]*.tgz)"
+          memory=$(ls ./npm/cogpit-memory-*.tgz)
+          version=${memory#./npm/cogpit-memory-}
           publish "cogpit-memory@${version%.tgz}" "$memory"
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
