@@ -44,12 +44,13 @@ runs:
 
     # What build:generated reads: the plugin packages, the bundled plugins,
     # the view kit, the package checks that digest the bundles, the app
-    # version and the dependencies. The output differs by OS (line endings).
+    # version, the dependencies, Bun and this recipe. The output differs by
+    # OS (line endings).
     - id: paths
       if: inputs.generated == 'true'
       shell: bash
       run: |
-        echo "key=generated-${{ runner.os }}-${{ hashFiles('packages/plugin-*/**', '!packages/plugin-*/dist/**', '!packages/plugin-*/node_modules/**', 'plugins/**', 'src/viewKit/**', 'shared/views/**', 'server/plugins/package.ts', 'server/plugins/json.ts', 'scripts/build-generated.ts', 'scripts/build-runtime-plugins.ts', 'scripts/build-view-kit.ts', 'package.json', 'bun.lock') }}" >> "$GITHUB_OUTPUT"
+        echo "key=generated-${{ runner.os }}-${{ hashFiles('packages/plugin-*/**', '!packages/plugin-*/dist/**', '!packages/plugin-*/node_modules/**', 'plugins/**', 'src/viewKit/**', 'shared/views/**', 'server/plugins/package.ts', 'server/plugins/json.ts', 'scripts/build-generated.ts', 'scripts/build-runtime-plugins.ts', 'scripts/build-view-kit.ts', 'package.json', 'bun.lock', '.bun-version', '.github/actions/setup-js/action.yml') }}" >> "$GITHUB_OUTPUT"
 
     - id: cache
       if: inputs.generated == 'true'

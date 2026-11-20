@@ -155,14 +155,14 @@ jobs:
       - name: Test with coverage
         if: ${{ !inputs.edition }}
         run: >-
-          bunx vitest run --shard=${{ matrix.shard }}/5 --reporter=dot --reporter=blob
+          bunx vitest run --shard=${{ matrix.shard }}/5 --reporter=dot --reporter=github-actions --reporter=blob
           --coverage --coverage.reporter=text-summary
           --coverage.thresholds.lines=0 --coverage.thresholds.functions=0
           --coverage.thresholds.statements=0 --coverage.thresholds.branches=0
 
       - name: Test with the edition package
         if: inputs.edition
-        run: bunx vitest run --shard=${{ matrix.shard }}/5 --reporter=dot
+        run: bunx vitest run --shard=${{ matrix.shard }}/5 --reporter=dot --reporter=github-actions
 
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         if: ${{ !inputs.edition }}
@@ -269,7 +269,7 @@ jobs:
       - uses: ./.github/actions/setup-js
 
       - name: Test application and server
-        run: bunx vitest run --project node --shard=${{ matrix.shard }}/4 --reporter=dot
+        run: bunx vitest run --project node --shard=${{ matrix.shard }}/4 --reporter=dot --reporter=github-actions
 
       - name: Verify public plugin packages outside the repository
         if: matrix.shard == 1

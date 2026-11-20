@@ -23,7 +23,8 @@ export default defineConfig({
     // Hosted Windows runners are several times slower than the other platforms.
     ...(process.platform === "win32" ? { testTimeout: 20_000, hookTimeout: 30_000 } : {}),
     // A test that only fails under a loaded CI runner would otherwise block a
-    // release until someone reruns it; the reporter still lists every retry.
+    // release until someone reruns it; CI's github-actions reporter lists the
+    // tests that passed only on a retry in the job summary.
     retry: process.env.CI ? 2 : 0,
     sequence: { sequencer: DurationSequencer },
     css: { include: [/theme\.css\?raw$/] },
