@@ -15,7 +15,6 @@ permissions:
   contents: read
 
 env:
-  ARCHLINUX_IMAGE: archlinux:base@sha256:fe6972d4dc1f660c0c10f4c41b2de8986bab89e7e2955378f8beadb8ebcd7433 # base-20260712.0.555161
   IS_TAG: ${{ startsWith(github.ref, 'refs/tags/v') }}
 
 # Nothing waits on anything it does not need: the cores, the app builds, the
@@ -259,52 +258,11 @@ jobs:
       edition: true
     secrets: inherit
 
-  # The AUR packages: rendered once the pacman package's checksum is known
-  # (makepkg needs an Arch container), and pushed after the GitHub release
-  # they point at exists. Neither can hold up the GitHub release or npm, and
-  # both rerun on their own.
-  aur-prep:
-    needs: [build]
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    permissions:
-      contents: read
-
-    steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
-        with:
-          persist-credentials: false
-
-      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
-        with:
-          name: release-Linux
-          path: release
-
-      - name: Render the AUR packages
-        run: |
-          set -euo pipefail
-          if [ "$IS_TAG" = true ]; then pkgver="${GITHUB_REF_NAME#v}"; else pkgver=$(node -p "require('./package.json').version"); fi
-          sha256=$(sha256sum release/cogpit-*.pacman | cut -d' ' -f1)
-          mkdir -p aur-out/cogpit aur-out/cogpit-server
-          sed -e "s/%%PKGVER%%/$pkgver/" -e "s/%%SHA256%%/$sha256/" aur/PKGBUILD.template > aur-out/cogpit/PKGBUILD
-          sed -e "s/%%PKGVER%%/$pkgver/" -e "s/%%SHA256%%//" aur/PKGBUILD-server.template > aur-out/cogpit-server/PKGBUILD
-          cp aur/cogpit-server.service aur-out/cogpit-server/
-          docker run --rm -v "$PWD/aur-out:/pkg" "$ARCHLINUX_IMAGE" bash -c \
-            "pacman -Syu --noconfirm pacman-contrib && useradd -m builder && chown -R builder:builder /pkg && su builder -c 'cd /pkg/cogpit && makepkg --printsrcinfo > .SRCINFO && cd /pkg/cogpit-server && makepkg --printsrcinfo > .SRCINFO'"
-          sudo chown -R "$(id -u):$(id -g)" aur-out
-
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
-        with:
-          name: aur
-          path: aur-out
-          include-hidden-files: true
-          if-no-files-found: error
-
   # Every platform's files in one place and the whole set checked, then (on a
   # tag push) the GitHub release and npm, once both quality runs are green;
-  # update-aur follows the GitHub release. It waits for quality itself rather than in a job of its own, which
-  # would hold one of the account's runners for the whole release. The checks
-  # run on dry-runs too, so a broken release shows before a tag.
+  # update-aur follows. It waits for quality itself rather than in a job of its
+  # own, which would hold one of the account's runners for the whole release.
+  # The checks run on dry-runs too, so a broken release shows before a tag.
   publish:
     needs: [build, npm-pack, find-quality, quality, edition-quality]
     if: ${{ !cancelled() && needs.build.result == 'success' && needs.npm-pack.result == 'success' }}
@@ -452,7 +410,6 @@ jobs:
           path: npm
 
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
-        if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
         with:
           node-version: "22.16"
           registry-url: https://registry.npmjs.org
@@ -460,20 +417,23 @@ jobs:
       # cogpit takes the tag's version; cogpit-memory keeps its own 0.x line
       # and ships whatever its package.json declares. A version npm already
       # has is skipped, so publish can rerun: npm refuses it outright, and its
-      # registry can take minutes to list a new one.
+      # registry can take minutes to list a new one. Runs that do not publish
+      # dry-run the same command, so they catch a tarball npm would refuse.
       - name: Publish cogpit and cogpit-memory to npm
-        if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
         run: |
           set -euo pipefail
+          if [ "$GITHUB_EVENT_NAME" = push ] && [ "$IS_TAG" = true ]; then mode=--provenance; else mode=--dry-run; fi
           publish() {
             local spec=$1 tarball=$2
-            if npm view "$spec" version >/dev/null 2>&1; then
+            if [ "$mode" = --provenance ] && npm view "$spec" version >/dev/null 2>&1; then
               echo "$spec is already on npm - skipping."
               return
             fi
-            if ! npm publish "$tarball" --provenance --access public --ignore-scripts 2> npm-error.log; then
-              cat npm-error.log >&2
-              grep -q "previously published" npm-error.log || return 1
+            local status=0
+            npm publish "$tarball" "$mode" --access public --ignore-scripts 2> npm.log || status=$?
+            cat npm.log >&2
+            if [ "$status" -ne 0 ]; then
+              grep -q "previously published" npm.log || return 1
               echo "$spec was already published."
             fi
           }
@@ -485,40 +445,14 @@ jobs:
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
 
+  # Skipped and cancelled jobs upstream (a reused Quality run skips `quality`)
+  # would skip a job that only needs success(), so this names what it needs.
   update-aur:
-    needs: [publish, aur-prep]
-    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
+    needs: [publish]
+    if: ${{ !cancelled() && needs.publish.result == 'success' && github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v') }}
     permissions:
       contents: read
-
-    steps:
-      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
-        with:
-          name: aur
-          path: aur
-
-      - name: Push to the AUR
-        env:
-          AUR_SSH_PRIVATE_KEY: ${{ secrets.AUR_SSH_PRIVATE_KEY }}
-        run: |
-          set -euo pipefail
-          mkdir -p ~/.ssh
-          printf '%s\n' "$AUR_SSH_PRIVATE_KEY" > ~/.ssh/aur
-          chmod 600 ~/.ssh/aur
-          ssh-keyscan aur.archlinux.org >> ~/.ssh/known_hosts 2>/dev/null
-          printf 'Host aur.archlinux.org\n  IdentityFile ~/.ssh/aur\n  User aur\n' >> ~/.ssh/config
-          git config --global user.name "Gentrit Biba"
-          git config --global user.email "gentritbiba@gmail.com"
-          push() {
-            local package=$1; shift
-            git clone "ssh://aur@aur.archlinux.org/$package.git" "aur-repo-$package"
-            for file in "$@"; do cp "aur/$package/$file" "aur-repo-$package/"; done
-            git -C "aur-repo-$package" add "$@"
-            # A rerun after a push finds nothing to commit.
-            git -C "aur-repo-$package" diff --cached --quiet || git -C "aur-repo-$package" commit -m "Update to ${GITHUB_REF_NAME#v}"
-            git -C "aur-repo-$package" push
-          }
-          push cogpit PKGBUILD .SRCINFO
-          push cogpit-server PKGBUILD .SRCINFO cogpit-server.service
+    uses: ./.github/workflows/aur.yml
+    with:
+      tag: ${{ github.ref_name }}
+    secrets: inherit
