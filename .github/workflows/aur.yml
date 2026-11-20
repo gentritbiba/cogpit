@@ -21,11 +21,20 @@ on:
 permissions:
   contents: read
 
+# One push at a time: a dispatch beside a release would fail one of them.
+concurrency:
+  group: aur
+  cancel-in-progress: false
+
 env:
   ARCHLINUX_IMAGE: archlinux:base@sha256:fe6972d4dc1f660c0c10f4c41b2de8986bab89e7e2955378f8beadb8ebcd7433 # base-20260712.0.555161
 
 jobs:
   aur:
+    # A called workflow's job still gets the default success() check, which
+    # a skipped job upstream of the caller (a reused Quality run) would fail;
+    # release.yml already requires a green publish.
+    if: ${{ !cancelled() }}
     runs-on: ubuntu-latest
     timeout-minutes: 10
 
@@ -69,6 +78,12 @@ jobs:
           push() {
             local package=$1; shift
             git clone "ssh://aur@aur.archlinux.org/$package.git" "aur-repo-$package"
+            # Never move the AUR back to an older release.
+            published=$(sed -n 's/^[[:space:]]*pkgver = //p' "aur-repo-$package/.SRCINFO" 2>/dev/null || true)
+            if [ -n "$published" ] && [ "$(printf '%s\n%s\n' "$published" "${TAG#v}" | sort -V | tail -1)" != "${TAG#v}" ]; then
+              echo "::error::The AUR has $package $published, newer than ${TAG#v}"
+              exit 1
+            fi
             for file in "$@"; do cp "aur-out/$package/$file" "aur-repo-$package/"; done
             git -C "aur-repo-$package" add "$@"
             git -C "aur-repo-$package" diff --cached --quiet || git -C "aur-repo-$package" commit -m "Update to ${TAG#v}"

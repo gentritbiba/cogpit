@@ -410,7 +410,6 @@ jobs:
           path: npm
 
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
-        if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
         with:
           node-version: "22.16"
           registry-url: https://registry.npmjs.org
@@ -430,9 +429,11 @@ jobs:
               echo "$spec is already on npm - skipping."
               return
             fi
-            if ! npm publish "$tarball" "$mode" --access public --ignore-scripts 2> npm-error.log; then
-              cat npm-error.log >&2
-              grep -q "previously published" npm-error.log || return 1
+            local status=0
+            npm publish "$tarball" "$mode" --access public --ignore-scripts 2> npm.log || status=$?
+            cat npm.log >&2
+            if [ "$status" -ne 0 ]; then
+              grep -q "previously published" npm.log || return 1
               echo "$spec was already published."
             fi
           }
