@@ -1,0 +1,78 @@
+name: AUR
+
+# Publishes a GitHub release to the AUR packages `cogpit` (the release's
+# pacman package) and `cogpit-server` (built from source). release.yml calls it
+# once the GitHub release exists; dispatch it with a tag to publish or repair
+# one by hand. A rerun with nothing new commits nothing.
+on:
+  workflow_call:
+    inputs:
+      tag:
+        description: Release tag, e.g. v3.7.5
+        type: string
+        required: true
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Release tag, e.g. v3.7.5
+        type: string
+        required: true
+
+permissions:
+  contents: read
+
+env:
+  ARCHLINUX_IMAGE: archlinux:base@sha256:fe6972d4dc1f660c0c10f4c41b2de8986bab89e7e2955378f8beadb8ebcd7433 # base-20260712.0.555161
+
+jobs:
+  aur:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      # The templates as the release had them.
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: ${{ inputs.tag }}
+          persist-credentials: false
+
+      - name: Render the AUR packages
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ inputs.tag }}
+        run: |
+          set -euo pipefail
+          pkgver="${TAG#v}"
+          gh release download "$TAG" --repo "$GITHUB_REPOSITORY" --pattern "cogpit-*.pacman" --dir release
+          sha256=$(sha256sum release/cogpit-*.pacman | cut -d' ' -f1)
+          mkdir -p aur-out/cogpit aur-out/cogpit-server
+          sed -e "s/%%PKGVER%%/$pkgver/" -e "s/%%SHA256%%/$sha256/" aur/PKGBUILD.template > aur-out/cogpit/PKGBUILD
+          sed -e "s/%%PKGVER%%/$pkgver/" -e "s/%%SHA256%%//" aur/PKGBUILD-server.template > aur-out/cogpit-server/PKGBUILD
+          cp aur/cogpit-server.service aur-out/cogpit-server/
+          docker run --rm -v "$PWD/aur-out:/pkg" "$ARCHLINUX_IMAGE" bash -c \
+            "pacman -Syu --noconfirm pacman-contrib && useradd -m builder && chown -R builder:builder /pkg && su builder -c 'cd /pkg/cogpit && makepkg --printsrcinfo > .SRCINFO && cd /pkg/cogpit-server && makepkg --printsrcinfo > .SRCINFO'"
+          sudo chown -R "$(id -u):$(id -g)" aur-out
+
+      - name: Push to the AUR
+        env:
+          AUR_SSH_PRIVATE_KEY: ${{ secrets.AUR_SSH_PRIVATE_KEY }}
+          TAG: ${{ inputs.tag }}
+        run: |
+          set -euo pipefail
+          mkdir -p ~/.ssh
+          printf '%s\n' "$AUR_SSH_PRIVATE_KEY" > ~/.ssh/aur
+          chmod 600 ~/.ssh/aur
+          ssh-keyscan aur.archlinux.org >> ~/.ssh/known_hosts 2>/dev/null
+          printf 'Host aur.archlinux.org\n  IdentityFile ~/.ssh/aur\n  User aur\n' >> ~/.ssh/config
+          git config --global user.name "Gentrit Biba"
+          git config --global user.email "gentritbiba@gmail.com"
+          push() {
+            local package=$1; shift
+            git clone "ssh://aur@aur.archlinux.org/$package.git" "aur-repo-$package"
+            for file in "$@"; do cp "aur-out/$package/$file" "aur-repo-$package/"; done
+            git -C "aur-repo-$package" add "$@"
+            git -C "aur-repo-$package" diff --cached --quiet || git -C "aur-repo-$package" commit -m "Update to ${TAG#v}"
+            git -C "aur-repo-$package" push
+          }
+          push cogpit PKGBUILD .SRCINFO
+          push cogpit-server PKGBUILD .SRCINFO cogpit-server.service

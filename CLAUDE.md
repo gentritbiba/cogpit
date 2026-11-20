@@ -129,6 +129,8 @@ edition package. For the public Quality it waits on the master push's run for
 the tagged commit, and runs its own only when there is none. `publish` checks
 the update manifests, then ships the GitHub release, npm and AUR once both
 quality runs pass; a failed public run gets its failed jobs rerun once first.
+`aur.yml` publishes a release to the AUR after it; dispatch it with a tag to
+publish or repair one by hand.
 `workflow_dispatch` on a branch dry-runs everything up to
 the checks in `publish` with the public edition and publishes nothing. The tag
 must equal `package.json`'s version.
