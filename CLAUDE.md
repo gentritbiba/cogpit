@@ -189,6 +189,11 @@ running its tests, package-contract build and `npm publish`. The release commit
 does not need to keep `packages/cogpit-cli/package.json` synchronized with the
 app version. The tag is the source of truth for the published launcher.
 
+Its `dependencies` are the packages the bundled server imports, each with the
+same spec as the root `package.json`. `bun run --cwd packages/cogpit-cli
+test:contracts` fails on a missing one or a different spec, so bumping one at
+the root means bumping it here too.
+
 The package carries a prebuilt `cogpit-core` per platform in
 `dist/core/<platform>-<arch>/` and starts the server on the one for the
 computer it runs on. `build-npm.mjs` copies them from `COGPIT_CORE_DIST` (the

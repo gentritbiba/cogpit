@@ -33,6 +33,15 @@ for (const name of externals) {
   assert.ok(manifest.dependencies[name], `dist/cli.js imports ${name} but package.json does not declare it`)
 }
 
+// The bundle is built and tested against the app's own dependencies, so it
+// asks for exactly those. A looser range lets npm keep an older copy it finds
+// installed, as npx does in the folder it reuses for cogpit@latest.
+const app = JSON.parse(readFileSync("../../package.json", "utf8"))
+const appSpecs = { ...app.devDependencies, ...app.dependencies }
+for (const [name, spec] of Object.entries(manifest.dependencies)) {
+  assert.equal(spec, appSpecs[name], `package.json asks for ${name}@${spec}, but the app builds with ${appSpecs[name]}`)
+}
+
 const help = spawnSync(process.execPath, ["dist/cli.js", "--help"], { encoding: "utf8" })
 assert.equal(help.status, 0, help.stderr)
 assert.match(help.stdout, /cogpit \[options\]/i)
