@@ -1,0 +1,61 @@
+name: Wait for artifacts from this run
+description: >
+  Waits until other jobs of this run have uploaded the named artifacts, then
+  downloads them. A job that only needs a sibling's files late can start with
+  it instead of after it (no `needs:`), and do its own work meanwhile. Fails as
+  soon as a job matching `producer` fails. Needs `actions: read`.
+
+inputs:
+  names:
+    description: Space-separated artifact names to wait for
+    required: true
+  producer:
+    description: Name prefix of the jobs that upload them, e.g. "core ("
+    required: true
+  path:
+    description: Where to download them; merged into one directory
+    required: true
+  timeout-minutes:
+    description: Give up after this long
+    required: false
+    default: "20"
+
+runs:
+  using: composite
+  steps:
+    - name: Wait for ${{ inputs.names }}
+      id: wait
+      shell: bash
+      env:
+        GH_TOKEN: ${{ github.token }}
+        NAMES: ${{ inputs.names }}
+        PRODUCER: ${{ inputs.producer }}
+        TIMEOUT_MINUTES: ${{ inputs.timeout-minutes }}
+      run: |
+        set -euo pipefail
+        runs="repos/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
+        deadline=$(( $(date +%s) + TIMEOUT_MINUTES * 60 ))
+        while :; do
+          uploaded=$(gh api "$runs/artifacts?per_page=100" --jq '.artifacts[].name' || true)
+          missing=""
+          for name in $NAMES; do
+            grep -qx "$name" <<<"$uploaded" || missing="$missing $name"
+          done
+          if [ -z "$missing" ]; then break; fi
+          failed=$(gh api "$runs/attempts/$GITHUB_RUN_ATTEMPT/jobs?per_page=100" \
+            --jq ".jobs[] | select((.name | startswith(env.PRODUCER)) and (.conclusion == \"failure\" or .conclusion == \"cancelled\")) | .name" || true)
+          if [ -n "$failed" ]; then echo "::error::A producer failed: $failed"; exit 1; fi
+          if [ "$(date +%s)" -ge "$deadline" ]; then echo "::error::Timed out waiting for$missing"; exit 1; fi
+          echo "Waiting for$missing"
+          sleep 5
+        done
+        # download-artifact takes one glob; braces match several names.
+        set -- $NAMES
+        if [ $# -eq 1 ]; then pattern=$1; else pattern="{$(IFS=,; echo "$*")}"; fi
+        echo "pattern=$pattern" >> "$GITHUB_OUTPUT"
+
+    - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+      with:
+        pattern: ${{ steps.wait.outputs.pattern }}
+        path: ${{ inputs.path }}
+        merge-multiple: true

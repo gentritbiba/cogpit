@@ -246,5 +246,8 @@ keeps unsafe code out of every other file.
 - `check:public-clone` shares this checkout's `CARGO_TARGET_DIR` with its
   temporary worktree.
 - A release builds the core per target in `release.yml`'s `core` job: macOS
-  arm64 and x64, Linux x64 and arm64 (static musl, so any glibc works) and
-  Windows x64. The desktop builds and the npm package take them from there.
+  arm64 and x64 (both on Apple silicon), Linux x64 and arm64 (static musl, so
+  any glibc works) and Windows x64. The desktop builds and the npm package
+  take them from there. CI caches each build under a hash of the Rust sources
+  (`.github/actions/core-binary`), so a commit that changes no Rust restores
+  them instead of compiling.

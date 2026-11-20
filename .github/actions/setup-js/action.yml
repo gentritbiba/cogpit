@@ -1,0 +1,79 @@
+name: Set up Bun, Node and the dependencies
+description: >
+  Installs the pinned Bun and Node and the root dependencies, then restores or
+  builds the plugin packages and generated/ once and sets COGPIT_GENERATED_BUILT
+  so the scripts that start with build:generated skip it. The install skips
+  lifecycle scripts: the only one Cogpit needs is its own postinstall, which is
+  that build.
+
+inputs:
+  memory:
+    description: Also install packages/cogpit-memory's dependencies (better-sqlite3 needs its install script)
+    required: false
+    default: "false"
+  generated:
+    description: Build the plugin packages and generated/
+    required: false
+    default: "true"
+
+runs:
+  using: composite
+  steps:
+    - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
+      with:
+        bun-version-file: .bun-version
+
+    - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+      with:
+        node-version: "22.16"
+
+    # Bun links packages from its cache, and only within one drive; Windows
+    # keeps the default cache on C: and the checkout on D:, which made every
+    # install copy each file (69s against 31s).
+    - name: Install application dependencies
+      shell: bash
+      run: |
+        echo "BUN_INSTALL_CACHE_DIR=$RUNNER_TEMP/bun-cache" >> "$GITHUB_ENV"
+        BUN_INSTALL_CACHE_DIR="$RUNNER_TEMP/bun-cache" bun install --frozen-lockfile --ignore-scripts
+
+    - name: Install cogpit-memory dependencies
+      if: inputs.memory == 'true'
+      shell: bash
+      working-directory: packages/cogpit-memory
+      run: bun install --frozen-lockfile
+
+    # What build:generated reads: the plugin packages, the bundled plugins,
+    # the view kit, the package checks that digest the bundles, the app
+    # version, the dependencies, Bun and this recipe. The output differs by
+    # OS (line endings).
+    - id: paths
+      if: inputs.generated == 'true'
+      shell: bash
+      run: |
+        echo "key=generated-${{ runner.os }}-${{ hashFiles('packages/plugin-*/**', '!packages/plugin-*/dist/**', '!packages/plugin-*/node_modules/**', 'plugins/**', 'src/viewKit/**', 'shared/views/**', 'server/plugins/package.ts', 'server/plugins/json.ts', 'scripts/build-generated.ts', 'scripts/build-runtime-plugins.ts', 'scripts/build-view-kit.ts', 'package.json', 'bun.lock', '.bun-version', '.github/actions/setup-js/action.yml') }}" >> "$GITHUB_OUTPUT"
+
+    - id: cache
+      if: inputs.generated == 'true'
+      uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+      with:
+        path: |
+          generated
+          packages/plugin-*/dist
+        key: ${{ steps.paths.outputs.key }}
+
+    - name: Build the plugin packages and generated/
+      if: inputs.generated == 'true' && steps.cache.outputs.cache-hit != 'true'
+      shell: bash
+      run: bun run build:generated
+
+    - if: inputs.generated == 'true' && steps.cache.outputs.cache-hit != 'true'
+      uses: actions/cache/save@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+      with:
+        path: |
+          generated
+          packages/plugin-*/dist
+        key: ${{ steps.paths.outputs.key }}
+
+    - if: inputs.generated == 'true'
+      shell: bash
+      run: echo "COGPIT_GENERATED_BUILT=1" >> "$GITHUB_ENV"

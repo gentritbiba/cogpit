@@ -2,6 +2,11 @@ name: Quality
 
 on:
   workflow_call:
+    inputs:
+      edition:
+        description: Check the release build, which carries the edition package, instead of the public one
+        type: boolean
+        default: false
   push:
     branches:
       - master
@@ -14,120 +19,197 @@ permissions:
   contents: read
 
 concurrency:
-  group: quality-${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
+  # A pull request keeps only its newest run. Every pushed commit keeps its
+  # own, because a release waits on the run for its tag's commit. A called run
+  # shares its caller's workflow name, so `edition` keeps a release's two apart.
+  group: quality-${{ github.workflow }}-${{ github.event_name == 'pull_request' && github.ref || github.sha }}-${{ inputs.edition && 'edition' || 'public' }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
+# Every job is independent, so a run takes as long as its slowest job. The
+# account runs at most 20 jobs at once, a release's included, so the shard
+# counts trade runners for minutes. The public run leaves the editions/team
+# submodule empty, and its builds prove it by failing if they emit the edition
+# UI chunk; the edition run (release only) checks the build that ships.
 jobs:
-  # Public only: the checkout leaves the editions/team submodule empty, and the
-  # builds prove it by failing if they emit the edition UI chunk.
-  quality:
+  # A release commit that only bumps package.json's version changes nothing
+  # Quality checks, so a push of one reuses its parent's green run. That keeps
+  # the runners free for the release that comes with it. Other pushes skip
+  # this job, so it costs them nothing.
+  version-bump:
+    if: "${{ github.event_name == 'push' && !inputs.edition && startsWith(github.event.head_commit.message, 'chore: release') }}"
     runs-on: ubuntu-latest
-    timeout-minutes: 25
+    timeout-minutes: 30
+    # If it cannot tell, everything runs; that is no reason to fail the run.
+    continue-on-error: true
+    permissions:
+      actions: read
+      contents: read
+    outputs:
+      green: ${{ steps.parent.outputs.green }}
+
+    steps:
+      - id: parent
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          parent=$(gh api "repos/$GITHUB_REPOSITORY/commits/$GITHUB_SHA" --jq 'if (.parents | length) == 1 then .parents[0].sha else "" end')
+          [ -n "$parent" ] || exit 0
+          gh api "repos/$GITHUB_REPOSITORY/compare/$parent...$GITHUB_SHA" --jq '.files' > files.json
+          jq -e 'length == 1 and .[0].filename == "package.json" and .[0].additions == 1 and .[0].deletions == 1' files.json > /dev/null || exit 0
+          jq -r '.[0].patch' files.json | grep -E '^[+-]' | grep -qvE '^[+-]  "version": "[^"]+",$' && exit 0
+          run=$(gh api "repos/$GITHUB_REPOSITORY/actions/workflows/quality.yml/runs?head_sha=$parent&event=push&per_page=1" --jq '.workflow_runs[0].id // empty')
+          [ -n "$run" ] || exit 0
+          echo "Only the version changed since $parent; waiting for its run $run"
+          until [ "$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$run" --jq .status)" = completed ]; do sleep 10; done
+          if [ "$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$run" --jq .conclusion)" = success ]; then
+            echo "Its run passed; nothing here needs checking again."
+            echo "green=true" >> "$GITHUB_OUTPUT"
+          fi
+
+  checks:
+    needs: [version-bump]
+    if: ${{ !cancelled() && needs.version-bump.outputs.green != 'true' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    environment: ${{ inputs.edition && 'release' || '' }}
 
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           persist-credentials: false
 
-      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
+      - uses: ./.github/actions/team-checkout
+        if: inputs.edition
         with:
-          bun-version: 1.3.14
+          ssh-key: ${{ secrets.COGPIT_TEAM_DEPLOY_KEY }}
+          require-merged: "true"
 
-      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+      # typecheck:memory needs cogpit-memory's own dependencies.
+      - uses: ./.github/actions/setup-js
         with:
-          node-version: "22.16"
+          memory: "true"
 
-      - name: Install application dependencies
-        run: bun install --frozen-lockfile
-
-      - name: Install cogpit-memory dependencies
-        working-directory: packages/cogpit-memory
-        run: bun install --frozen-lockfile
+      - name: Lint, type-check and check generated files, boundaries and advisories
+        run: >-
+          bun scripts/run-parallel.ts
+          typecheck typecheck:tests lint
+          check:architecture check:agents check:codex-protocol check:duplicates
+          check:cogpit-memory-sync check:cogpit-skill-sync check:audit
 
       # rust-toolchain.toml pins the version and components.
       - name: Install the Rust toolchain
+        if: ${{ !inputs.edition }}
         run: rustup toolchain install
 
       - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        if: ${{ !inputs.edition }}
+
+      - name: Check, lint and test Rust
+        if: ${{ !inputs.edition }}
+        run: |
+          cargo fmt --all --check
+          cargo clippy --locked --all-targets -- -D warnings
+          cargo test --locked
+
+      - name: Build the web app with the edition UI and as a public clone
+        if: inputs.edition
+        run: >-
+          bun scripts/run-parallel.ts
+          "COGPIT_EXPECT_EDITION_UI=present build:web"
+          "COGPIT_WITHOUT_TEAM=1 COGPIT_EXPECT_EDITION_UI=absent build:web --outDir $RUNNER_TEMP/public-dist"
+
+      - name: Check the public build carries none of the edition package
+        if: inputs.edition
+        run: bun editions/team/tools/check-public-bundle.ts "$RUNNER_TEMP/public-dist"
+
+  # The suite, split across runners. Each shard of the public run records its
+  # coverage in a blob; `coverage` merges them and checks the thresholds.
+  test:
+    needs: [version-bump]
+    if: ${{ !cancelled() && needs.version-bump.outputs.green != 'true' }}
+    name: test (${{ matrix.shard }}/5)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    environment: ${{ inputs.edition && 'release' || '' }}
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3, 4, 5]
+
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+
+      - uses: ./.github/actions/team-checkout
+        if: inputs.edition
+        with:
+          ssh-key: ${{ secrets.COGPIT_TEAM_DEPLOY_KEY }}
 
       # The server spawns it; every suite that boots a composition needs it.
-      - name: Build Rust core
-        run: bun run build:core
+      - uses: ./.github/actions/core-binary
 
-      - name: Check dependency advisories
-        run: bun run check:audit
+      - uses: ./.github/actions/setup-js
 
-      - name: Lint
-        run: bun run lint
+      - name: Test with coverage
+        if: ${{ !inputs.edition }}
+        run: >-
+          bunx vitest run --shard=${{ matrix.shard }}/5 --reporter=dot --reporter=github-actions --reporter=blob
+          --coverage --coverage.reporter=text-summary
+          --coverage.thresholds.lines=0 --coverage.thresholds.functions=0
+          --coverage.thresholds.statements=0 --coverage.thresholds.branches=0
 
-      - name: Check architecture boundaries
-        run: bun run check:architecture
+      - name: Test with the edition package
+        if: inputs.edition
+        run: bunx vitest run --shard=${{ matrix.shard }}/5 --reporter=dot --reporter=github-actions
 
-      - name: Check agent-vocabulary containment
-        run: bun run check:agents
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        if: ${{ !inputs.edition }}
+        with:
+          name: vitest-blob-${{ matrix.shard }}
+          path: .vitest-reports
+          include-hidden-files: true
+          retention-days: 1
+          if-no-files-found: error
 
-      - name: Check generated Codex protocol
-        run: bun run check:codex-protocol
+  coverage:
+    if: ${{ !cancelled() && needs.test.result == 'success' && !inputs.edition }}
+    needs: [test]
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
 
-      - name: Check ungoverned duplication
-        run: bun run check:duplicates
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
 
-      - name: Check generated session core
-        run: bun run check:cogpit-memory-sync
+      - uses: ./.github/actions/setup-js
+        with:
+          generated: "false"
 
-      - name: Check generated cogpit skill references
-        run: bun run check:cogpit-skill-sync
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          pattern: vitest-blob-*
+          path: .vitest-reports
+          merge-multiple: true
 
-      - name: Type-check production code
-        run: bun run typecheck
+      - name: Merge the shards' coverage and check the thresholds
+        run: >-
+          bunx vitest run --merge-reports --coverage
+          --reporter=dot --reporter=json --outputFile.json=test-report.json
 
-      - name: Type-check tests
-        run: bun run typecheck:tests
+      # Per-file timings: scripts/update-test-durations.ts reads them to keep
+      # the shards even.
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: test-report
+          path: test-report.json
+          if-no-files-found: error
 
-      - name: Test application and server with coverage
-        run: bun run test:coverage
-
-      - name: Test cogpit-memory
-        working-directory: packages/cogpit-memory
-        run: bun run test
-
-      - name: Test install-free Cogpit CLI
-        working-directory: packages/cogpit-cli
-        run: bun run test
-
-      - name: Build cogpit-memory standalone binary
-        working-directory: packages/cogpit-memory
-        run: bun run build
-
-      - name: Build web application
-        env:
-          COGPIT_EXPECT_EDITION_UI: absent
-        run: bun run build:web
-
-      - name: Build Electron application
-        env:
-          COGPIT_EXPECT_EDITION_UI: absent
-        run: bun run electron:build
-
-      - name: Build cogpit-memory npm package
-        working-directory: packages/cogpit-memory
-        run: bun run build:npm
-
-      - name: Verify cogpit-memory package and CLI contracts
-        working-directory: packages/cogpit-memory
-        run: node scripts/test-package-contract.mjs
-
-      - name: Verify install-free Cogpit package contract
-        working-directory: packages/cogpit-cli
-        env:
-          COGPIT_EXPECT_EDITION_UI: absent
-        run: bun run test:contracts
-
-      - name: Verify public plugin packages outside the repository
-        run: bun run test:contracts:plugins
-
-  # Kept apart from quality, whose Vitest coverage run already sits close to its timeout.
-  rust:
+  build:
+    needs: [version-bump]
+    if: ${{ !cancelled() && needs.version-bump.outputs.green != 'true' && !inputs.edition }}
     runs-on: ubuntu-latest
     timeout-minutes: 15
 
@@ -136,88 +218,101 @@ jobs:
         with:
           persist-credentials: false
 
-      # rust-toolchain.toml pins the version and components.
-      - name: Install the Rust toolchain
-        run: rustup toolchain install
+      # The install-free CLI's package contract starts its server on this core.
+      - uses: ./.github/actions/core-binary
 
-      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+      - uses: ./.github/actions/setup-js
+        with:
+          memory: "true"
 
-      - name: Check Rust formatting
-        run: cargo fmt --all --check
+      - name: Build the web and Electron apps and check the package contracts
+        env:
+          COGPIT_EXPECT_EDITION_UI: absent
+        run: >-
+          bun scripts/run-parallel.ts
+          "--cwd packages/cogpit-cli test:contracts" build:web electron:build test:contracts:plugins
+          "--cwd packages/cogpit-cli test" "--cwd packages/cogpit-memory test"
 
-      - name: Lint Rust
-        run: cargo clippy --locked --all-targets -- -D warnings
+      - name: Build and check the cogpit-memory packages
+        working-directory: packages/cogpit-memory
+        run: |
+          bun run build
+          bun run build:npm
+          node scripts/test-package-contract.mjs
 
-      - name: Test Rust
-        run: cargo test --locked
-
-  # Windows is a release target, but nothing used to exercise it — the win NSIS
-  # config sat unbuilt while POSIX assumptions (/tmp, /bin/zsh, "/" joins, bare
-  # spawn of .cmd shims) accumulated across the server. This job is deliberately
-  # lean: only the checks whose outcome can actually differ by platform.
-  windows-tests:
+  # Windows is a release target, and POSIX assumptions (/tmp, /bin/zsh, "/"
+  # joins, bare spawn of .cmd shims) only fail on it. Only the suites that
+  # touch the OS run here: the dom project renders React in jsdom and reads
+  # nothing from the machine, and types and builds do not differ either.
+  windows:
+    needs: [version-bump]
+    if: ${{ !cancelled() && needs.version-bump.outputs.green != 'true' && !inputs.edition }}
+    name: windows (${{ matrix.shard }}/4)
     runs-on: windows-latest
     timeout-minutes: 20
     strategy:
       fail-fast: false
       matrix:
-        shard: [1, 2]
+        shard: [1, 2, 3, 4]
+
+    defaults:
+      run:
+        shell: bash
 
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           persist-credentials: false
 
-      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
+      - uses: ./.github/actions/core-binary
+
+      - uses: ./.github/actions/setup-js
+
+      - name: Test application and server
+        run: bunx vitest run --project node --shard=${{ matrix.shard }}/4 --reporter=dot --reporter=github-actions
+
+      - name: Verify public plugin packages outside the repository
+        if: matrix.shard == 1
+        run: bun run test:contracts:plugins
+
+      - name: Test install-free Cogpit CLI
+        if: matrix.shard == 2
+        working-directory: packages/cogpit-cli
+        run: bun run test
+
+  # The core's stdin-close exit and spawn are what differ on Windows.
+  rust-windows:
+    needs: [version-bump]
+    if: ${{ !cancelled() && needs.version-bump.outputs.green != 'true' && !inputs.edition }}
+    runs-on: windows-latest
+    timeout-minutes: 15
+
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
-          bun-version: 1.3.14
-
-      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
-        with:
-          node-version: "22.16"
-
-      - name: Install application dependencies
-        run: bun install --frozen-lockfile
-
-      # typecheck includes typecheck:memory, which needs this package's own deps
-      - name: Install cogpit-memory dependencies
-        working-directory: packages/cogpit-memory
-        run: bun install --frozen-lockfile
+          persist-credentials: false
 
       - name: Install the Rust toolchain
         run: rustup toolchain install
 
       - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
 
-      - name: Build Rust core
-        run: bun run build:core
-
-      # The core's stdin-close exit and spawn are what can differ on Windows.
       - name: Test Rust
-        if: ${{ matrix.shard == 1 }}
         run: cargo test --locked
 
-      - name: Type-check production code
-        run: bun run typecheck
-
-      - name: Test application and server
-        run: bun run test --shard=${{ matrix.shard }}/2
-
-      - name: Verify public plugin packages outside the repository
-        if: ${{ matrix.shard == 1 }}
-        run: bun run test:contracts:plugins
-
-      - name: Test install-free Cogpit CLI
-        if: ${{ matrix.shard == 1 }}
-        working-directory: packages/cogpit-cli
-        run: bun run test
-
-  windows:
-    if: ${{ always() }}
-    needs: [windows-tests]
+  # The one check to require: green only when every job above passed.
+  quality:
+    if: always()
+    needs: [checks, test, coverage, build, windows, rust-windows]
     runs-on: ubuntu-latest
+    timeout-minutes: 5
+
     steps:
-      - name: Require both Windows shards
+      - name: Require every job
         env:
-          SHARD_RESULT: ${{ needs.windows-tests.result }}
-        run: test "$SHARD_RESULT" = success
+          RESULTS: ${{ join(needs.*.result, ' ') }}
+        run: |
+          echo "$RESULTS"
+          for result in $RESULTS; do
+            case "$result" in success|skipped) ;; *) exit 1 ;; esac
+          done

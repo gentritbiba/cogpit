@@ -12,10 +12,10 @@ const bundled = ["clickup", "cloudflare", "github", "vercel-deployments", "tts",
 const requested = process.argv.slice(2)
 for (const name of requested) if (!bundled.includes(name)) throw new Error(`Unknown bundled plugin: ${name}`)
 const names = requested.length ? requested : bundled
-const seeds = []
 const mime: Record<string, string> = { ".js": "text/javascript", ".css": "text/css", ".json": "application/json", ".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".webp": "image/webp", ".md": "text/plain", ".txt": "text/plain" }
 
-for (const name of names) {
+// Plugins build side by side; Promise.all keeps the seeds in the bundled order.
+const seeds = await Promise.all(names.map(async (name) => {
   const source = join(root, "plugins", name)
   const output = join(root, "generated/runtime-plugins", name)
   const manifest = parseManifest(JSON.parse(await readFile(join(source, "plugin.json"), "utf8")))
@@ -59,9 +59,9 @@ for (const name of names) {
   files.sort((left, right) => left.path < right.path ? -1 : left.path > right.path ? 1 : 0)
   const payload = Buffer.from(JSON.stringify({ archiveVersion: 1, files }))
   const inspected = inspectPackage(payload, manifest.publisher)
-  seeds.push({ id: manifest.id, publisher: manifest.publisher, targetPath: `${manifest.id}/${manifest.version}.json`, appVersion: app.version, payloadDigest: inspected.digest, payload: payload.toString("base64") })
   console.log(`Built ${manifest.id}@${manifest.version}: ${payload.length} bytes, SHA-256 ${inspected.digest}`)
-}
+  return { id: manifest.id, publisher: manifest.publisher, targetPath: `${manifest.id}/${manifest.version}.json`, appVersion: app.version, payloadDigest: inspected.digest, payload: payload.toString("base64") }
+}))
 if (requested.length) process.exit(0)
 await mkdir(join(root, "generated/runtime-plugin-seeds"), { recursive: true })
 await writeFile(join(root, "generated/runtime-plugin-seeds/index.json"), JSON.stringify(seeds))
