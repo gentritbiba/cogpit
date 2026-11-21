@@ -58,7 +58,7 @@ vi.mock("../AssistantText", () => ({
 }))
 
 vi.mock("../AgentPanel", () => ({
-  AgentPanel: ({ label }: { label: string }) => <div>{label}</div>,
+  AgentPanel: ({ noun }: { noun: string }) => <div>{noun}</div>,
 }))
 
 vi.mock("../CollapsibleToolCalls", () => ({
@@ -396,6 +396,17 @@ describe("TurnSection prompts", () => {
     expect(screen.queryByRole("button", { name: "Restore" })).toBeNull()
   })
 
+  it("gives the time and Restore a line of their own only where something on it is always drawn", () => {
+    const prompted = { ...turn, userMessage: "Do the thing" }
+    const actionRow = () => screen.getByRole("button", { name: "Restore" }).parentElement!.parentElement!
+    const { rerender } = render(<TurnSection turn={prompted} index={0} turnKey="turn" isLast={true} />, { wrapper })
+    expect(actionRow()).toHaveClass("h-2")
+    expect(actionRow()).not.toHaveClass("min-h-6")
+
+    rerender(<TurnSection turn={prompted} index={0} turnKey="turn" isLast={true} branchCount={2} />)
+    expect(actionRow()).toHaveClass("min-h-6")
+  })
+
   it("shows no prompt for one that only carries injected context, keeping the turn's actions", () => {
     const { container } = render(
       <TurnSection turn={{ ...turn, userMessage: "<system-reminder>The date changed.</system-reminder>" }} index={0} turnKey="turn" isLast={true} />,
@@ -570,6 +581,6 @@ describe("TurnSection sessions it started", () => {
     expect(container.querySelector("[data-session-row]")).toBeNull()
     // Rendered by the tool-call group (mocked here to list its calls by name).
     expect(screen.getByText("Task")).toBeInTheDocument()
-    expect(screen.getByText("Sub-agent activity")).toBeInTheDocument()
+    expect(screen.getByText("Sub-agent")).toBeInTheDocument()
   })
 })

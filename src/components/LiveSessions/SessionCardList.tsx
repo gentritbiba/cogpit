@@ -150,7 +150,7 @@ export function SessionCardList({
 
   return (
     <div
-      className="flex flex-col gap-1.5"
+      className="flex flex-col gap-0.5"
       data-session-card-list
       onPointerEnter={() => setFrozen(freezeOrder(ordered.topLevelSessions, ordered.buckets))}
       onPointerLeave={() => setFrozen(null)}
@@ -310,7 +310,7 @@ function RecencyDivider({ label }: { label: string }) {
 
 function PendingSessionRow({ firstMessage }: { firstMessage?: string }) {
   return (
-    <div className="motion-enter relative flex w-full items-center gap-1.5 rounded-lg border border-border/70 bg-accent px-3 py-2.5 text-left">
+    <div className="motion-enter relative flex w-full items-center gap-1.5 rounded-lg bg-accent px-2.5 py-2 text-left">
       <Loader2 className="size-3 shrink-0 animate-spin text-info" />
       <span className="flex-1 truncate text-sm leading-tight text-foreground">
         {firstMessage || "New session"}

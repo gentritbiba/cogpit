@@ -139,17 +139,33 @@ describe("useProjectWorkspace", () => {
     expect(result.current.processPanel.activeProcessId).toBe("terminal-1")
   })
 
-  it("does not request an integrated terminal without a real cwd", () => {
+  it("opens the empty panel instead of requesting a terminal when there is no project", () => {
+    const { result } = renderHook(() => useTestWorkspace({
+      ...baseOptions,
+      sessionCwd: null,
+      pendingPath: null,
+    }))
+    expect(result.current.processPanel.collapsed).toBe(true)
+
+    act(() => result.current.handleToggleIntegratedTerminal())
+
+    expect(result.current.processPanel.collapsed).toBe(false)
+    expect(result.current.launchTerminalRequest).toBe(0)
+
+    act(() => result.current.handleToggleIntegratedTerminal())
+
+    expect(result.current.processPanel.collapsed).toBe(true)
+    expect(result.current.launchTerminalRequest).toBe(0)
+  })
+
+  it("does not request a new integrated terminal without a real cwd", () => {
     const { result } = renderHook(() => useTestWorkspace({
       ...baseOptions,
       sessionCwd: null,
       pendingPath: null,
     }))
 
-    act(() => {
-      result.current.handleToggleIntegratedTerminal()
-      result.current.handleNewIntegratedTerminal()
-    })
+    act(() => result.current.handleNewIntegratedTerminal())
 
     expect(result.current.launchTerminalRequest).toBe(0)
   })

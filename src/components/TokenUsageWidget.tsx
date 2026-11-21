@@ -145,7 +145,7 @@ function TooltipBody({ usage }: { usage: UsageData }) {
 }
 
 /**
- * Quota readout for the top bar — a single quiet number, because its slope is
+ * Quota readout for the rail: a single quiet number, because its slope is
  * what gets sampled. It only takes on colour under real quota pressure.
  * Renders nothing if usage is unavailable.
  */
@@ -159,7 +159,7 @@ export function TokenUsageIndicator({ agentKind = DEFAULT_AGENT_KIND }: { agentK
 
   return (
     <Tooltip>
-      <TooltipTrigger render={<Button type="button" variant="ghost" size="xs" aria-label={`Refresh ${usage.agentKind ? agentShortName(usage.agentKind) : "agent"} usage`} onClick={refresh} disabled={loading} className="mr-1 font-mono" />}>
+      <TooltipTrigger render={<Button type="button" variant="ghost" size="xs" aria-label={`Refresh ${usage.agentKind ? agentShortName(usage.agentKind) : "agent"} usage`} onClick={refresh} disabled={loading} className="h-6 w-9 rounded-md px-0 font-mono text-[10px]" />}>
           <span className={cn(
             "tabular-nums",
             levelColor(primary.pct),
@@ -168,7 +168,7 @@ export function TokenUsageIndicator({ agentKind = DEFAULT_AGENT_KIND }: { agentK
             {primary.text}
           </span>
       </TooltipTrigger>
-      <TooltipContent side="bottom" className="p-3">
+      <TooltipContent side="left" className="p-3">
         <TooltipBody usage={usage} />
       </TooltipContent>
     </Tooltip>

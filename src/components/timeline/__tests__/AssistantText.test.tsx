@@ -30,6 +30,20 @@ describe("AssistantText", () => {
     expect(screen.getByTitle("Reasoning effort: xhigh")).toBeInTheDocument()
   })
 
+  it("draws the model line and the reply's actions over the space under the reply, only when it is pointed at", () => {
+    const { container } = render(<AssistantText text="hi" model="claude-opus-5" effort="xhigh" showMeta />)
+
+    const meta = container.querySelector("[data-reply-meta]")
+    expect(meta).toHaveClass(
+      "pointer-fine:absolute", "pointer-fine:top-full", "pointer-fine:opacity-0", "pointer-fine:group-hover/text:opacity-100", "pointer-fine:focus-within:opacity-100",
+    )
+    // A touch screen, at any width, has no hover to reveal them, so they keep a line of their own.
+    expect(meta).toHaveClass("min-h-7")
+    // Hidden, it lets clicks through to whatever it overlaps; pointed at or focused, it takes them.
+    expect(meta).toHaveClass("pointer-fine:pointer-events-none", "pointer-fine:group-hover/text:pointer-events-auto", "pointer-fine:focus-within:pointer-events-auto")
+    for (const hidden of ["opacity-0", "absolute", "sm:opacity-0", "sm:absolute"]) expect(meta).not.toHaveClass(hidden)
+  })
+
   it("omits the effort label when the turn recorded none", () => {
     render(<AssistantText text="hi" model="claude-opus-5" showMeta />)
 

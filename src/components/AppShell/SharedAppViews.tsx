@@ -55,14 +55,14 @@ interface ShellNavigation {
 interface PrimarySessionBrowserProps {
   navigation: ShellNavigation
   mobile?: boolean
-  header?: ReactNode
+  headerActions?: ReactNode
 }
 
 /** Canonical primary session navigation shared by desktop and mobile shells. */
 export function PrimarySessionBrowser({
   navigation,
   mobile = false,
-  header,
+  headerActions,
 }: PrimarySessionBrowserProps) {
   const { sessionSource, actions } = useSessionControls()
   const { config } = useAppContext()
@@ -85,7 +85,7 @@ export function PrimarySessionBrowser({
       liveSessionsRefreshRef={navigation.liveSessionsRefreshRef}
       onPrefetchSession={navigation.onPrefetchSession}
       isMobile={mobile}
-      header={header}
+      headerActions={headerActions}
     />
   )
 }

@@ -7,7 +7,6 @@ import {
   ChevronRight,
   Folder,
   GitBranch,
-  MessageSquare,
   Play,
   Users,
   X,
@@ -22,7 +21,6 @@ import { SessionBadges } from "@/components/shared/SessionBadges"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
 import { cn } from "@/lib/utils"
 import { formatRelativeTime } from "@/lib/format"
-import { resolveTurnCount } from "@/lib/turnCountCache"
 import { getStatusColor } from "./sessionStatusPresentation"
 import { archivedReasonLabel, isUntitledSession, sessionHeadline } from "./sessionListView"
 import { describeSessionRow } from "./sessionRowState"
@@ -43,7 +41,7 @@ type SessionCardProps = SessionRowProps & {
   /** Where the project's icon comes from; the card falls back to a folder. */
   projectPath?: string
   /**
-   * Print the project above the title. On when the list mixes projects, so
+   * Print the project under the title. On when the list mixes projects, so
    * every card says where it belongs; off when the list is one project, where
    * the preview still names it.
    */
@@ -74,9 +72,10 @@ export interface CardLineage {
 }
 
 /**
- * A session with room to breathe: the sidebar's row expanded into a card with
- * the last prompt and vitals, the same actions as the row, and a hover
- * preview with the full prompts for when that is still not enough.
+ * A session in the sidebar's list: its title, then one quiet line saying
+ * where it lives and what it is doing. The prompts, branch and vitals wait in
+ * the hover preview; pull requests and a crew add a line only when there are
+ * any.
  */
 export const SessionCard = memo(function SessionCard({
   session: s,
@@ -116,7 +115,6 @@ export const SessionCard = memo(function SessionCard({
     isArchived,
     statusLabel,
     dotState,
-    justFinished,
   } = describeSessionRow(s, proc, isNewlyCompleted)
   const [resuming, setResuming] = useState(false)
   const headline = sessionHeadline(s, customName)
@@ -125,9 +123,6 @@ export const SessionCard = memo(function SessionCard({
   const shownDot = crewDot(crew?.counts, dotState)
   const crewIsAhead = crew !== undefined
     && Date.parse(crew.activityAt) > getSessionRecencyMs(s)
-  const lastPrompt = s.lastUserMessage || s.firstUserMessage
-  const showPrompt = Boolean(lastPrompt) && lastPrompt !== headline
-  const turnCount = resolveTurnCount(s.sessionId, s.turnCount)
   const archivedLabel = archivedReasonLabel(s.archivedReason)
   const archiveAction = isArchived
     ? onUnarchiveSession && { label: "Restore from archive", icon: ArchiveRestore, run: () => onUnarchiveSession(s) }
@@ -159,8 +154,8 @@ export const SessionCard = memo(function SessionCard({
       data-session-card
       data-archived={isArchived || undefined}
       className={cn(
-        "motion-list-item list-row-lazy group relative flex flex-col rounded-lg border transition-colors",
-        surface(isActiveSession, justFinished),
+        "motion-list-item list-row-lazy group relative flex flex-col rounded-lg transition-colors",
+        isActiveSession ? "bg-accent" : "hover:bg-accent/60",
         isArchived && "opacity-60 hover:opacity-100 focus-within:opacity-100",
       )}
     >
@@ -170,7 +165,7 @@ export const SessionCard = memo(function SessionCard({
           data-crew-lineage
           onClick={lineage.onOpenParent}
           aria-label={`Open ${lineage.parentTitle}, which started this session`}
-          className="flex min-w-0 items-center gap-1.5 rounded-t-lg px-3 pl-[26px] pt-2.5 text-left text-[11px] leading-tight outline-none hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring"
+          className="flex min-w-0 items-center gap-1.5 rounded-t-lg px-2.5 pl-6 pt-2 text-left text-[11px] leading-tight outline-none hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring"
         >
           <ArrowUp className="size-3 shrink-0 text-muted-foreground" aria-hidden="true" />
           <span className="truncate text-foreground/90">{lineage.parentTitle}</span>
@@ -193,26 +188,13 @@ export const SessionCard = memo(function SessionCard({
               onBlur={onHoverEnd}
               aria-current={isActiveSession ? "true" : undefined}
               className={cn(
-                "flex w-full flex-col gap-1.5 rounded-lg px-3 text-left outline-none focus-visible:ring-2 focus-visible:ring-ring",
-                lineage ? "pt-1" : "pt-2.5",
-                hasFooter || crew ? "pb-1.5" : "pb-2.5",
+                "flex w-full flex-col gap-1 rounded-lg px-2.5 text-left outline-none focus-visible:ring-2 focus-visible:ring-ring",
+                lineage ? "pt-1" : "pt-2",
+                hasFooter || crew ? "pb-1.5" : "pb-2",
               )}
             />
           }
         >
-        {projectEyebrow && (
-          <span
-            data-session-project
-            className="flex items-center gap-1.5 pl-3.5 text-[11px] leading-tight text-muted-foreground"
-          >
-            <ProjectFavicon
-              projectPath={projectPath}
-              fallback={<Folder className="size-3 shrink-0" aria-hidden="true" />}
-              className="size-3"
-            />
-            <span className="truncate">{projectEyebrow}</span>
-          </span>
-        )}
         <span className="flex items-start gap-2">
           <span className="mt-[7px] flex w-1.5 shrink-0 justify-center" aria-hidden="true">
             {shownDot && (
@@ -224,27 +206,31 @@ export const SessionCard = memo(function SessionCard({
           </span>
           <span
             className={cn(
-              "line-clamp-2 flex-1 text-sm leading-snug",
+              "line-clamp-1 flex-1 text-sm leading-snug",
               untitled ? "text-muted-foreground" : "font-medium text-foreground",
             )}
           >
             {headline}
           </span>
         </span>
-        {showPrompt && (
-          <span className="line-clamp-2 pl-3.5 text-xs leading-relaxed text-muted-foreground">
-            {lastPrompt}
-          </span>
-        )}
         <span className="flex flex-wrap items-center gap-x-2 gap-y-1 pl-3.5 text-[11px] text-muted-foreground">
+          {projectEyebrow && (
+            <span data-session-project className="flex min-w-0 items-center gap-1">
+              <ProjectFavicon
+                projectPath={projectPath}
+                fallback={<Folder className="size-3 shrink-0" aria-hidden="true" />}
+                className="size-3"
+              />
+              <span className="truncate">{projectEyebrow}</span>
+            </span>
+          )}
           {isLive && !isDeferred && statusLabel && (
-            <Badge
-              variant="secondary"
+            <span
               data-session-live-state
-              className={cn(isNativeIdle ? "text-success" : getStatusColor(s.agentStatus, s.agentTerminalReason))}
+              className={cn("truncate", isNativeIdle ? "text-success" : getStatusColor(s.agentStatus, s.agentTerminalReason))}
             >
               {statusLabel}
-            </Badge>
+            </span>
           )}
           {isDeferred && (
             <Badge variant="outline" className="border-warning/30 bg-warning/10 text-warning">
@@ -263,18 +249,6 @@ export const SessionCard = memo(function SessionCard({
               <GitBranch data-icon="inline-start" />
               {worktreeName}
             </Badge>
-          )}
-          {s.gitBranch && !worktreeName && (
-            <span className="flex min-w-0 items-center gap-1">
-              <GitBranch className="size-3 shrink-0" aria-hidden="true" />
-              <span className="truncate">{s.gitBranch}</span>
-            </span>
-          )}
-          {turnCount > 0 && (
-            <span className="flex items-center gap-1">
-              <MessageSquare className="size-3 shrink-0" aria-hidden="true" />
-              {turnCount} {turnCount === 1 ? "turn" : "turns"}
-            </span>
           )}
           {isArchived && (
             <span className="flex items-center gap-1">
@@ -311,7 +285,7 @@ export const SessionCard = memo(function SessionCard({
       {statusBoard && <SessionStatusLine board={statusBoard} />}
 
       {hasFooter && (
-        <div className="flex flex-wrap items-center gap-1.5 px-3 pb-2.5 pl-[26px]">
+        <div className="flex flex-wrap items-center gap-1.5 px-2.5 pb-2 pl-6">
           {s.matchedPullRequestNumber ? (
             <Badge variant="outline" className="px-1">
               Matched #{s.matchedPullRequestNumber}
@@ -434,10 +408,4 @@ function crewDot(
   if (counts.needsYou > 0 || own === "attention") return "attention"
   if (counts.working > 0) return "working"
   return own
-}
-
-function surface(isActive: boolean, justFinished: boolean): string {
-  if (isActive) return "border-foreground/15 bg-accent"
-  if (justFinished) return "border-success/30 bg-success/10"
-  return "border-border/70 bg-card hover:border-border hover:bg-accent"
 }

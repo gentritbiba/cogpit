@@ -6,6 +6,8 @@ import { permissionsForAccess } from "@/lib/sessionAccessPermissions"
 const mocks = vi.hoisted(() => ({
   session: null as SessionView | null,
   dirName: null as string | null,
+  isLive: false,
+  stopSession: vi.fn(),
 }))
 
 vi.mock("@/contexts/AppContext", () => ({
@@ -13,19 +15,32 @@ vi.mock("@/contexts/AppContext", () => ({
 }))
 
 vi.mock("@/contexts/SessionContext", () => ({
+  useSessionControls: () => ({
+    sessionSource: mocks.dirName === null
+      ? null
+      : { dirName: mocks.dirName, fileName: "s.jsonl", watchOffset: 0, loadId: 1 },
+    isLive: mocks.isLive,
+    permissions: permissionsForAccess("own"),
+    actions: { handleStopSession: mocks.stopSession },
+  }),
+  useSessionChatContextOptional: () => null,
   useSessionContext: () => ({
     session: mocks.session,
     sessionSource: mocks.dirName === null
       ? null
       : { dirName: mocks.dirName, fileName: "s.jsonl", watchOffset: 0, loadId: 1 },
+    isLive: mocks.isLive,
     permissions: permissionsForAccess("own"),
-    actions: {},
+    actions: { handleStopSession: mocks.stopSession },
   }),
 }))
 
 vi.mock("@/components/SessionInfoBar.mobile", () => ({
-  MobileSessionInfoBar: ({ contextUsage }: { contextUsage: unknown }) => (
-    <div data-testid="context-usage">{contextUsage ? "shown" : "none"}</div>
+  MobileSessionInfoBar: ({ contextUsage, onStopSession }: { contextUsage: unknown; onStopSession?: () => void }) => (
+    <>
+      <div data-testid="context-usage">{contextUsage ? "shown" : "none"}</div>
+      {onStopSession && <button type="button" onClick={onStopSession}>Stop session</button>}
+    </>
   ),
 }))
 
@@ -41,6 +56,7 @@ function makeSession(agentKind: SessionView["agentKind"]): SessionView {
 beforeEach(() => {
   mocks.session = null
   mocks.dirName = null
+  mocks.isLive = false
 })
 
 afterEach(() => {
@@ -78,5 +94,17 @@ describe("SessionInfoBar", () => {
     render(<SessionInfoBar creatingSession={false} onNewSession={vi.fn()} />)
 
     expect(screen.getByTestId("context-usage")).toHaveTextContent("none")
+  })
+
+  it("hands the mobile menu the same Stop session the desktop title menu uses, only while the session runs", () => {
+    mocks.session = makeSession("claude")
+    mocks.dirName = "-tmp-project"
+    const { rerender } = render(<SessionInfoBar creatingSession={false} onNewSession={vi.fn()} />)
+    expect(screen.queryByRole("button", { name: "Stop session" })).not.toBeInTheDocument()
+
+    mocks.isLive = true
+    rerender(<SessionInfoBar creatingSession={false} onNewSession={vi.fn()} />)
+    screen.getByRole("button", { name: "Stop session" }).click()
+    expect(mocks.stopSession).toHaveBeenCalledOnce()
   })
 })

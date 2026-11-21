@@ -103,12 +103,12 @@ function AwaitingAgentsStatus({
     <Collapsible
       open={open}
       onOpenChange={setOpen}
-      className="mx-4 my-3 rounded-lg border border-border/60 bg-muted/20"
+      className="mx-1 my-2"
       data-testid="awaiting-agents"
     >
       <CollapsibleTrigger className="flex w-full min-w-0 items-center gap-2.5 px-3 py-2 text-left">
-        <Bot className="size-4 shrink-0 text-info" />
-        <span className="truncate text-xs font-medium text-foreground">
+        <Bot className="size-3.5 shrink-0 text-info" />
+        <span className="truncate text-xs text-foreground">
           {running < agents.length
             ? `Waiting on ${running} of ${agents.length} agents`
             : `Waiting on ${running} agent${running === 1 ? "" : "s"}`}
@@ -125,7 +125,7 @@ function AwaitingAgentsStatus({
       </CollapsibleTrigger>
       {agents.length > 1 && <BatchProgress agents={agents} />}
       <CollapsibleContent>
-        <ul className="flex flex-col border-t border-border/40 py-1">
+        <ul className="flex flex-col pb-1">
           {agents.map((agent, index) => (
             <BackgroundAgentRow key={agent.toolUseId ?? index} agent={agent} />
           ))}
@@ -199,10 +199,10 @@ function CompletedAgentStatus({
 
   if (fadePhase === "ready") {
     return (
-      <div className="flex items-center gap-2.5 py-3 px-4" data-agent-ready>
-        <CheckCircle2 className="size-4 shrink-0 text-success" />
+      <div className="flex items-center gap-2 py-3 px-4" data-agent-ready>
+        <CheckCircle2 className="size-3.5 shrink-0 text-success" />
         <span className={cn(
-          "text-xs font-medium",
+          "text-xs",
           status.terminalReason ? "text-warning" : "text-muted-foreground",
         )}>
           {status.terminalReason ? getTerminalReasonLabel(status.terminalReason) : "Waiting for your input"}

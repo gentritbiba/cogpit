@@ -4,6 +4,7 @@ import { capabilitiesFor, type AgentKind } from "@/lib/agents"
 import type { TranscriptGoalState } from "../../../shared/session/sessionDigest"
 import { useOpenSession } from "@/contexts/SessionContext"
 import { Button } from "@/components/ui/button"
+import { CHIP_LABEL } from "@/components/ChatInput/settings/PickerShell"
 import { ThreadGoalProvider } from "./ThreadGoalProvider"
 import { TranscriptGoalProvider } from "./TranscriptGoalProvider"
 import { useGoalControls } from "./context"
@@ -49,7 +50,7 @@ export function GoalSection() {
   return useGoalControls().section
 }
 
-/** Compact "Set goal" chip for the composer settings row. */
+/** "Set goal" chip for the composer settings row. */
 export function GoalTrigger() {
   const { canCreate, beginEditing } = useGoalControls()
   if (!canCreate) return null
@@ -62,7 +63,7 @@ export function GoalTrigger() {
       title="Set a long-running goal for this session"
     >
       <Flag data-icon="inline-start" />
-      Set goal
+      <span className={CHIP_LABEL}>Set goal</span>
     </Button>
   )
 }

@@ -27,6 +27,7 @@ interface DesktopWorkspacePanelsProps {
   onClosePanel: () => void
   onTogglePanel: (panelId: string) => void
   actions?: readonly WorkspaceActivityAction[]
+  railFooter?: ReactNode
 }
 
 function mainPanelDefaultSize(panelSize?: string): string {
@@ -45,6 +46,7 @@ export function DesktopWorkspacePanels({
   onClosePanel,
   onTogglePanel,
   actions,
+  railFooter,
 }: DesktopWorkspacePanelsProps) {
   return (
     <>
@@ -85,6 +87,7 @@ export function DesktopWorkspacePanels({
         activePanelId={activePanel?.id ?? null}
         onTogglePanel={onTogglePanel}
         actions={actions}
+        footer={railFooter}
       />
     </>
   )

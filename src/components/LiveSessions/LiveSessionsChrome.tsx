@@ -1,8 +1,16 @@
 import type { ReactNode } from "react"
-import { Activity, AlertTriangle, Archive, Layers, ListTree, LoaderCircle, Plus, RefreshCw, Search, X } from "lucide-react"
+import { Activity, AlertTriangle, Archive, Check, FolderSearch, Layers, ListFilter, ListTree, LoaderCircle, Plus, RefreshCw, Search, X } from "lucide-react"
 
 import { Alert, AlertAction, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import { Button } from "@/components/ui/button"
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuGroup,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu"
 import {
   Empty,
   EmptyDescription,
@@ -17,47 +25,39 @@ import {
   InputGroupInput,
 } from "@/components/ui/input-group"
 import { Skeleton } from "@/components/ui/skeleton"
-import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
-import { cn } from "@/lib/utils"
 
-interface LiveSessionsToolbarProps {
-  loading: boolean
-  isMobile: boolean
+interface SessionSearchFieldProps {
   searchQuery: string
   searchLoading: boolean
-  showArchived: boolean
-  archivedCount: number
-  /** Whether sessions another session started are listed under it. */
-  groupCrews?: boolean
-  onToggleGroupCrews?: () => void
   onSearchQueryChange: (query: string) => void
-  onToggleShowArchived: () => void
-  onRefresh: () => void
+  /** Clears the query and puts the field away: Escape, or its close button. */
+  onClose: () => void
+  /** Focus left the field with nothing typed, so it can go away quietly. */
+  onDismiss: () => void
 }
 
-export function LiveSessionsToolbar({
-  loading,
-  isMobile,
+/** The list's filter, shown only while the user is searching. */
+export function SessionSearchField({
   searchQuery,
   searchLoading,
-  showArchived,
-  archivedCount,
-  groupCrews,
-  onToggleGroupCrews,
   onSearchQueryChange,
-  onToggleShowArchived,
-  onRefresh,
-}: LiveSessionsToolbarProps) {
-  const archivedSummary = archivedCount === 0
-    ? "No archived sessions"
-    : `${archivedCount} archived ${archivedCount === 1 ? "session" : "sessions"}`
+  onClose,
+  onDismiss,
+}: SessionSearchFieldProps) {
   return (
-    <div className="flex shrink-0 items-center gap-2 border-b px-2.5 py-2">
+    <div
+      className="shrink-0 px-2 pb-2"
+      onBlur={(event) => {
+        if (!event.currentTarget.contains(event.relatedTarget) && !searchQuery.trim()) onDismiss()
+      }}
+    >
       <InputGroup>
         <InputGroupInput
           type="search"
+          autoFocus
           value={searchQuery}
           onChange={(event) => onSearchQueryChange(event.target.value)}
+          onKeyDown={(event) => { if (event.key === "Escape") onClose() }}
           placeholder="Search sessions or PRs"
           aria-label="Search sessions by project, branch, title, prompt, PR number, or PR URL"
           aria-busy={searchLoading}
@@ -65,69 +65,101 @@ export function LiveSessionsToolbar({
         <InputGroupAddon align="inline-start">
           {searchLoading ? <LoaderCircle className="animate-spin" /> : <Search />}
         </InputGroupAddon>
-        {searchQuery && (
-          <InputGroupAddon align="inline-end">
-            <InputGroupButton
-              size="icon-xs"
-              onClick={() => onSearchQueryChange("")}
-              aria-label="Clear session search"
-            >
-              <X data-icon="inline-start" />
-            </InputGroupButton>
-          </InputGroupAddon>
-        )}
-      </InputGroup>
-      {onToggleGroupCrews && (
-        <Tooltip>
-          <TooltipTrigger
-            render={
-              <Button
-                variant="ghost"
-                size={isMobile ? "icon-sm" : "icon-xs"}
-                onClick={onToggleGroupCrews}
-                aria-pressed={groupCrews}
-                aria-label={groupCrews ? "List spawned sessions on their own" : "Group spawned sessions"}
-                className={cn(groupCrews && "bg-accent text-accent-foreground")}
-              />
-            }
+        <InputGroupAddon align="inline-end">
+          <InputGroupButton
+            size="icon-xs"
+            onClick={onClose}
+            aria-label="Close session search"
           >
-            <ListTree data-icon="inline-start" />
-          </TooltipTrigger>
-          <TooltipContent side="bottom">
-            {groupCrews
-              ? "Sessions another session started are listed under it"
-              : "Group spawned sessions under the session that started them"}
-          </TooltipContent>
-        </Tooltip>
-      )}
-      <Tooltip>
-        <TooltipTrigger
-          render={
-            <Button
-              variant="ghost"
-              size={isMobile ? "icon-sm" : "icon-xs"}
-              onClick={onToggleShowArchived}
-              aria-pressed={showArchived}
-              aria-label={showArchived ? "Hide archived sessions" : "Show archived sessions"}
-              className={cn(showArchived && "bg-accent text-accent-foreground")}
-            />
-          }
-        >
-          <Archive data-icon="inline-start" />
-        </TooltipTrigger>
-        <TooltipContent side="bottom">
-          {showArchived ? "Hide archived" : "Show archived"} · {archivedSummary}
-        </TooltipContent>
-      </Tooltip>
-      <Button
-        variant="ghost"
-        size={isMobile ? "icon-sm" : "icon-xs"}
-        onClick={onRefresh}
-        aria-label="Refresh sessions"
-      >
-        <RefreshCw data-icon="inline-start" className={cn(loading && "animate-spin")} />
-      </Button>
+            <X data-icon="inline-start" />
+          </InputGroupButton>
+        </InputGroupAddon>
+      </InputGroup>
     </div>
+  )
+}
+
+interface SessionListOptionsProps {
+  loading: boolean
+  showArchived: boolean
+  archivedCount: number
+  /** Whether sessions another session started are listed under it. */
+  groupCrews: boolean
+  onToggleGroupCrews: () => void
+  onToggleShowArchived: () => void
+  onRefresh: () => void
+  /** Starts a session in a folder the list does not show; absent where sessions cannot be started. */
+  onNewInFolder?: () => void
+}
+
+/** How the list is arranged, and the rarer ways to act on it, behind one button. */
+export function SessionListOptions({
+  loading,
+  showArchived,
+  archivedCount,
+  groupCrews,
+  onToggleGroupCrews,
+  onToggleShowArchived,
+  onRefresh,
+  onNewInFolder,
+}: SessionListOptionsProps) {
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger
+        render={(
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon-sm"
+            aria-label="Session list options"
+            title="Session list options"
+            className="shrink-0 text-muted-foreground hover:text-foreground data-popup-open:bg-accent"
+          />
+        )}
+      >
+        {loading ? <LoaderCircle data-icon="inline-start" className="animate-spin" /> : <ListFilter data-icon="inline-start" />}
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="end" className="w-64">
+        <DropdownMenuGroup>
+          <DropdownMenuItem
+            role="menuitemcheckbox"
+            aria-checked={groupCrews}
+            closeOnClick={false}
+            onClick={onToggleGroupCrews}
+          >
+            <ListTree />
+            Group spawned sessions
+            {groupCrews && <Check className="ml-auto" />}
+          </DropdownMenuItem>
+          <DropdownMenuItem
+            role="menuitemcheckbox"
+            aria-checked={showArchived}
+            closeOnClick={false}
+            onClick={onToggleShowArchived}
+          >
+            <Archive />
+            Show archived
+            <span className="ml-auto flex items-center gap-2 text-xs text-muted-foreground tabular-nums">
+              {archivedCount > 0 && archivedCount}
+              {showArchived && <Check className="text-foreground" />}
+            </span>
+          </DropdownMenuItem>
+        </DropdownMenuGroup>
+        <DropdownMenuSeparator />
+        <DropdownMenuGroup>
+          {onNewInFolder && (
+            <DropdownMenuItem onClick={onNewInFolder}>
+              <FolderSearch />
+              New session in another folder…
+            </DropdownMenuItem>
+          )}
+          <DropdownMenuItem onClick={onRefresh}>
+            <RefreshCw />
+            Refresh sessions
+          </DropdownMenuItem>
+        </DropdownMenuGroup>
+      </DropdownMenuContent>
+    </DropdownMenu>
   )
 }
 

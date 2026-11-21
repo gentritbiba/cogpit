@@ -9,8 +9,7 @@ import { FolderBrowserHost } from "@/components/FolderBrowserHost"
 import { MobileNav } from "@/components/MobileNav"
 import type { MobileTab } from "@/hooks/useSessionState"
 import { SessionInfoBar } from "@/components/SessionInfoBar"
-import { ProviderUpdateBanner } from "@/components/ProviderUpdateBanner"
-import { UpdateBanner } from "@/components/UpdateBanner"
+import { UpdatesMenu } from "@/components/UpdatesMenu"
 import { useAppContext } from "@/contexts/AppContext"
 import { useOpenSession, useSessionControls } from "@/contexts/SessionContext"
 import { useEditionUi, useMainView } from "@/edition/hooks"
@@ -64,13 +63,17 @@ export function MobileAppShell({
     },
   })
 
-  const headerAccessory = AccountControl && (
-    <AccountControl
-      mobile
-      onLogout={chrome.onLogout}
-      onOpenMainView={navigation.panels.openMainView}
-      className="ml-auto"
-    />
+  const headerAccessory = (
+    <div className="ml-auto flex items-center gap-1 empty:hidden">
+      <UpdatesMenu side="bottom" className="size-10" />
+      {AccountControl && (
+        <AccountControl
+          mobile
+          onLogout={chrome.onLogout}
+          onOpenMainView={navigation.panels.openMainView}
+        />
+      )}
+    </div>
   )
 
   const changeTab = (tab: MobileTab): void => {
@@ -82,8 +85,6 @@ export function MobileAppShell({
   return (
     <div className="flex h-dvh flex-col bg-canvas text-foreground">
       {chrome.backgroundServers}
-      <UpdateBanner />
-      <ProviderUpdateBanner />
       {!(state.mobileTab === "chat" && hasSession) && (
         <div className="motion-slide-down-in flex h-12 shrink-0 items-center border-b bg-background px-2">
           <DeviceSwitcher compact />

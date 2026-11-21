@@ -1,6 +1,7 @@
 import type { ButtonHTMLAttributes, MouseEvent, MutableRefObject, ReactElement, ReactNode } from "react"
 import { cloneElement, isValidElement } from "react"
 import { act, cleanup, fireEvent, render, screen } from "@testing-library/react"
+import userEvent from "@testing-library/user-event"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import type { ActiveSessionInfo } from "../types"
 import {
@@ -21,6 +22,7 @@ import {
 import { __resetSessionAccessForTest, knownSessionAccess, publishListsStale } from "@/lib/sessionAccess"
 import { __resetEditionUiForTest } from "@/edition/registry"
 import { installStubListFilter } from "@/__tests__/listFilter"
+import { onFolderBrowserRequest } from "@/lib/folders"
 
 /**
  * The inventory (fetching, aborting, caching) moved to SessionInventoryProvider
@@ -667,6 +669,7 @@ describe("LiveSessions archiving", () => {
     })
     expect(screen.queryByRole("button", { name: "Restore old-work" })).not.toBeInTheDocument()
 
+    fireEvent.click(screen.getByRole("button", { name: "Search sessions" }))
     await act(async () => {
       fireEvent.change(screen.getByRole("searchbox"), { target: { value: "old work" } })
     })
@@ -679,7 +682,66 @@ describe("LiveSessions archiving", () => {
     expect(screen.queryByRole("button", { name: "Archive keep" })).not.toBeInTheDocument()
   })
 
-  it("persists the toolbar toggle and lists archived sessions while it is on", async () => {
+  it("keeps the search field away until asked for, and puts it away on Escape", async () => {
+    mocks.authFetch.mockImplementation((input) => {
+      if (input === "/api/running-processes") return Promise.resolve(jsonResponse([]))
+      return new Promise<Response>(() => {})
+    })
+    renderWithSessions("keep")
+    const toggle = screen.getByRole("button", { name: "Search sessions" })
+    expect(toggle).toHaveAttribute("aria-pressed", "false")
+    expect(screen.queryByRole("searchbox")).not.toBeInTheDocument()
+
+    fireEvent.click(toggle)
+    expect(toggle).toHaveAttribute("aria-pressed", "true")
+    const search = screen.getByRole("searchbox")
+    expect(search).toHaveFocus()
+
+    fireEvent.change(search, { target: { value: "keep" } })
+    fireEvent.keyDown(screen.getByRole("searchbox"), { key: "Escape" })
+
+    expect(screen.queryByRole("searchbox")).not.toBeInTheDocument()
+    expect(toggle).toHaveAttribute("aria-pressed", "false")
+    expect(screen.getByRole("button", { name: "Archive keep" })).toBeInTheDocument()
+  })
+
+  it("puts the search away from its toggle, with or without a query, and hands focus back to the toggle", async () => {
+    const user = userEvent.setup()
+    mocks.authFetch.mockImplementation((input) => {
+      if (input === "/api/running-processes") return Promise.resolve(jsonResponse([]))
+      return new Promise<Response>(() => {})
+    })
+    renderWithSessions("keep")
+    const toggle = screen.getByRole("button", { name: "Search sessions" })
+
+    await user.click(toggle)
+    expect(screen.getByRole("searchbox")).toHaveFocus()
+    await user.click(toggle)
+    expect(screen.queryByRole("searchbox")).not.toBeInTheDocument()
+    expect(toggle).toHaveAttribute("aria-pressed", "false")
+    expect(toggle).toHaveFocus()
+
+    await user.click(toggle)
+    await user.type(screen.getByRole("searchbox"), "nothing-matches")
+    expect(screen.queryByRole("button", { name: "Archive keep" })).not.toBeInTheDocument()
+    await user.click(toggle)
+    expect(screen.queryByRole("searchbox")).not.toBeInTheDocument()
+    expect(toggle).toHaveAttribute("aria-pressed", "false")
+    expect(toggle).toHaveFocus()
+    expect(screen.getByRole("button", { name: "Archive keep" })).toBeInTheDocument()
+  })
+
+  it("puts the search field away again when it loses focus empty", () => {
+    mocks.authFetch.mockImplementation(() => new Promise<Response>(() => {}))
+    renderWithSessions("keep")
+
+    fireEvent.click(screen.getByRole("button", { name: "Search sessions" }))
+    fireEvent.blur(screen.getByRole("searchbox"))
+
+    expect(screen.queryByRole("searchbox")).not.toBeInTheDocument()
+  })
+
+  it("persists the archived toggle in the list options and lists archived sessions while it is on", async () => {
     const archivedRow = { ...session("old-work"), archived: true }
     mocks.authFetch.mockImplementation((input) => {
       if (input === "/api/active-sessions?archived=include") {
@@ -699,8 +761,9 @@ describe("LiveSessions archiving", () => {
     expect(mocks.authFetch).not.toHaveBeenCalledWith("/api/active-sessions", expect.anything())
     expect(screen.getByRole("button", { name: "Restore old-work" })).toBeInTheDocument()
 
-    const toggle = screen.getByRole("button", { name: "Hide archived sessions" })
-    expect(toggle).toHaveAttribute("aria-pressed", "true")
+    fireEvent.click(screen.getByRole("button", { name: "Session list options" }))
+    const toggle = screen.getByRole("menuitemcheckbox", { name: /Show archived/ })
+    expect(toggle).toHaveAttribute("aria-checked", "true")
     fireEvent.click(toggle)
     expect(mocks.setShowArchived).toHaveBeenCalledWith(false)
   })
@@ -732,7 +795,7 @@ describe("LiveSessions focused on a project", () => {
     expect(screen.getByTestId("card-lib-1")).toBeInTheDocument()
     expect(screen.queryByTestId("card-app-1")).not.toBeInTheDocument()
     expect(screen.queryByRole("button", { name: "Delete app-1" })).not.toBeInTheDocument()
-    expect(screen.getByRole("button", { name: "Focused on me/lib. Change project" })).toHaveTextContent("1 session")
+    expect(screen.getByRole("button", { name: "Focused on me/lib. Change project" })).toHaveAttribute("title", "1 session")
     expect(screen.getByRole("button", { name: "New session in me/lib" })).toBeInTheDocument()
   })
 
@@ -821,9 +884,40 @@ describe("LiveSessions new session", () => {
     })
 
     const button = screen.getByRole("button", { name: "New session" })
-    expect(button).toHaveTextContent("New")
+    expect(button).toHaveTextContent("")
     expect(screen.queryByRole("button", { name: /^New session in/ })).not.toBeInTheDocument()
     expect(pickerOpen()).toBe("false")
+  })
+
+  it("starts a session in another folder from the list options", async () => {
+    window.history.replaceState(null, "", "/")
+    inventory([{ ...session("app-1"), cwd: "/home/me/app" }])
+    const requested = vi.fn()
+    const stop = onFolderBrowserRequest(requested)
+
+    await act(async () => {
+      renderLive(
+        <LiveSessions activeSessionKey={null} onSelectSession={vi.fn()} onNewSession={vi.fn()} onNewFolder={vi.fn()} defaultAgentKind="claude" />,
+      )
+    })
+    fireEvent.click(screen.getByRole("button", { name: "Session list options" }))
+    fireEvent.click(screen.getByRole("menuitem", { name: "New session in another folder…" }))
+
+    expect(requested).toHaveBeenCalledOnce()
+    stop()
+  })
+
+  it("leaves the folder item out of the list options without the folder handlers", async () => {
+    window.history.replaceState(null, "", "/")
+    inventory([{ ...session("app-1"), cwd: "/home/me/app" }])
+
+    await act(async () => {
+      renderLive(<LiveSessions activeSessionKey={null} onSelectSession={vi.fn()} />)
+    })
+    fireEvent.click(screen.getByRole("button", { name: "Session list options" }))
+
+    expect(screen.queryByRole("menuitem", { name: /another folder/ })).not.toBeInTheDocument()
+    expect(screen.getByRole("menuitem", { name: "Refresh sessions" })).toBeInTheDocument()
   })
 
   it("starts from an empty list through the same picker and offers nothing older", async () => {
@@ -1023,6 +1117,7 @@ describe("LiveSessions conversation matches", () => {
         : new Promise<Response>(() => {}))
       const onOpenQuoteSource = vi.fn(async () => true)
       renderLive(<LiveSessions activeSessionKey={null} onSelectSession={vi.fn()} onOpenQuoteSource={onOpenQuoteSource} />)
+      fireEvent.click(screen.getByRole("button", { name: "Search sessions" }))
       const input = screen.getByRole("searchbox")
       fireEvent.change(input, { target: { value: "release" } })
       expect(screen.queryByTestId("card-local")).not.toBeInTheDocument()

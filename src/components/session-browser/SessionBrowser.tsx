@@ -17,7 +17,7 @@ export const SessionBrowser = memo(function SessionBrowser({
   pendingSession,
   liveSessionsRefreshRef,
   onPrefetchSession,
-  header,
+  headerActions,
 }: SessionBrowserProps): React.ReactElement {
   return (
     <aside
@@ -27,7 +27,6 @@ export const SessionBrowser = memo(function SessionBrowser({
       )}
       aria-label="Session browser"
     >
-      {header}
       <LiveSessions
         activeSessionKey={activeSessionKey}
         onSelectSession={onSelectSession}
@@ -41,6 +40,7 @@ export const SessionBrowser = memo(function SessionBrowser({
         pendingSession={pendingSession}
         refreshRef={liveSessionsRefreshRef}
         onPrefetchSession={onPrefetchSession}
+        headerActions={headerActions}
       />
     </aside>
   )

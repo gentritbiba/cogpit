@@ -33,6 +33,8 @@ interface ProjectScopePickerProps {
   onArchiveIdle?: () => void
   /** Actions beside the picker, such as starting a new session. */
   children?: ReactNode
+  /** Layout for the row the picker heads, which on desktop is also the window's drag strip. */
+  className?: string
 }
 
 function plural(count: number, noun: string): string {
@@ -71,11 +73,12 @@ function waitingElsewhere(options: ProjectScopeOption[], value: string | null): 
 }
 
 /**
- * The sidebar's scope: every project, or one of them. Focused, the trigger
- * becomes that project's masthead — its own icon, its name, and how much of
- * it is live — and the list beneath narrows to its sessions alone. Focus
- * hides the attention strip, so the masthead carries a count of sessions
- * waiting in other projects; opening the picker shows which.
+ * The sidebar's scope, and its one header row: every project, or one of
+ * them. Focused, the trigger carries that project's icon and name, and the
+ * list beneath narrows to its sessions alone; how much of it is live is the
+ * trigger's hover text. Focus hides the attention strip, so the trigger
+ * carries a count of sessions waiting in other projects; opening the picker
+ * shows which.
  */
 export function ProjectScopePicker({
   options,
@@ -88,6 +91,7 @@ export function ProjectScopePicker({
   archivableCount,
   onArchiveIdle,
   children,
+  className,
 }: ProjectScopePickerProps) {
   const [open, setOpen] = useState(false)
   const focusedLabel = focused?.customName ?? value
@@ -103,7 +107,8 @@ export function ProjectScopePicker({
   const trigger = (
     <PopoverTrigger
       aria-label={value === null ? "Choose a project to focus on" : `Focused on ${focusedLabel}. Change project`}
-      className="flex h-11 min-w-0 flex-1 items-center gap-2.5 rounded-lg px-2 text-left outline-none transition-colors hover:bg-accent focus-visible:ring-2 focus-visible:ring-ring data-popup-open:bg-accent"
+      title={summary}
+      className="electron-no-drag flex h-8 min-w-0 items-center gap-2 rounded-lg px-2 text-left outline-none transition-colors hover:bg-accent focus-visible:ring-2 focus-visible:ring-ring data-popup-open:bg-accent"
     >
       {value === null ? (
         <Layers className="size-4 shrink-0 text-muted-foreground" aria-hidden="true" />
@@ -111,16 +116,11 @@ export function ProjectScopePicker({
         <ProjectFavicon
           projectPath={focused?.cwd ?? null}
           fallback={<Folder className="size-4 shrink-0 text-muted-foreground" aria-hidden="true" />}
-          className="size-5"
+          className="size-4"
         />
       )}
-      <span className="flex min-w-0 flex-1 flex-col">
-        <span className="truncate text-sm font-medium leading-tight text-foreground">
-          {value === null ? "All projects" : focusedLabel}
-        </span>
-        <span className="truncate text-[11px] leading-tight text-muted-foreground">
-          {summary}
-        </span>
+      <span className="truncate text-sm font-medium text-foreground">
+        {value === null ? "All projects" : focusedLabel}
       </span>
       {elsewhere > 0 && (
         <WaitingCount
@@ -136,13 +136,13 @@ export function ProjectScopePicker({
   )
 
   return (
-    <div className="flex shrink-0 items-center gap-1 border-b px-2 py-1.5">
+    <div className={cn("flex h-12 shrink-0 items-center gap-0.5 px-2", className)}>
       <Popover open={open} onOpenChange={setOpen}>
         {focused && onRenameProject ? (
           <ProjectContextMenu
             projectLabel={focused.key}
             customName={focused.customName}
-            className="flex min-w-0 flex-1"
+            className="flex min-w-0"
             archivableCount={archivableCount}
             onArchiveIdle={onArchiveIdle}
             onRename={(name) => onRenameProject(focused.dirName, name)}
@@ -150,7 +150,7 @@ export function ProjectScopePicker({
             {trigger}
           </ProjectContextMenu>
         ) : trigger}
-        <PopoverContent className="w-(--anchor-width) min-w-72 p-0">
+        <PopoverContent className="w-72 p-0">
           <Command>
             <CommandInput placeholder="Find a project" autoFocus />
             <CommandList>
@@ -212,6 +212,7 @@ export function ProjectScopePicker({
           </Command>
         </PopoverContent>
       </Popover>
+      <div className="flex-1" />
       {children}
     </div>
   )

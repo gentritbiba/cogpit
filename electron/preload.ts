@@ -8,9 +8,6 @@ contextBridge.exposeInMainWorld("electronUpdater", {
     return () => { ipcRenderer.removeListener("update:state", listener) }
   },
   install: () => ipcRenderer.invoke("update:install"),
-  dismissVersion: (version: string) => {
-    ipcRenderer.send("update:dismiss", version)
-  },
 })
 
 contextBridge.exposeInMainWorld("electronPerformance", {

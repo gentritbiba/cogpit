@@ -34,18 +34,22 @@ export function LeakIndicator({ onReview }: { onReview: () => void }) {
       <TooltipTrigger render={
         <Button
           variant={hasLeaks ? "destructive" : "ghost"}
-          size="xs"
+          size="icon-sm"
           aria-label={hasLeaks
             ? `Review ${leaks.length} flagged ${leaks.length === 1 ? "process" : "processes"}`
             : "Leak monitor. No flagged processes"}
           onClick={onReview}
-          className={cn("mr-1 font-mono", !hasLeaks && "text-muted-foreground")}
+          className={cn("relative rounded-md", !hasLeaks && "text-muted-foreground")}
         />
       }>
         <Flame data-icon="inline-start" />
-        <span className="tabular-nums">{leaks.length}</span>
+        {hasLeaks && (
+          <span className="absolute -right-1 -top-1 min-w-4 rounded-full bg-background px-1 font-mono text-[9px] leading-4 text-destructive tabular-nums">
+            {leaks.length}
+          </span>
+        )}
       </TooltipTrigger>
-      <TooltipContent side="bottom" className="p-3">
+      <TooltipContent side="left" className="p-3">
         {hasLeaks ? (
           <div className="flex min-w-56 flex-col gap-2">
             <div className="text-xs font-medium">

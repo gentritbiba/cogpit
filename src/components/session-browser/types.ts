@@ -25,6 +25,6 @@ export interface SessionBrowserProps {
   onDeleteSession?: DeleteSession
   liveSessionsRefreshRef?: React.MutableRefObject<(() => void) | null>
   onPrefetchSession?: (dirName: string, fileName: string) => void
-  /** Desktop-only row above the session list (home, search, collapse). */
-  header?: ReactNode
+  /** Desktop-only: closes the list's header row (collapse the sidebar). */
+  headerActions?: ReactNode
 }

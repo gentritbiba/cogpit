@@ -69,17 +69,26 @@ beforeEach(() => {
 afterEach(cleanup)
 
 describe("ProcessPanel", () => {
-  it("keeps the terminal controls visible when there are no processes", () => {
+  it("renders nothing on desktop while collapsed with no processes", () => {
+    const { container } = render(
+      <ProcessPanel {...defaultProps} collapsed projectDir="/project" />,
+    )
+
+    expect(container).toBeEmptyDOMElement()
+    expect(screen.queryByRole("button", { name: "Expand terminal panel" })).not.toBeInTheDocument()
+  })
+
+  it("keeps the terminal controls visible on mobile when there are no processes", () => {
     const onToggleCollapse = vi.fn()
-    const onRequestTerminal = vi.fn()
 
     render(
       <ProcessPanel
         {...defaultProps}
         collapsed
+        mobile
         projectDir="/project"
         onToggleCollapse={onToggleCollapse}
-        onRequestTerminal={onRequestTerminal}
+        onRequestTerminal={vi.fn()}
       />,
     )
 
@@ -88,6 +97,15 @@ describe("ProcessPanel", () => {
     expect(onToggleCollapse).toHaveBeenCalledOnce()
     expect(screen.getByRole("button", { name: "New terminal" })).toBeEnabled()
     expect(screen.queryByRole("region", { name: "Scripts" })).not.toBeInTheDocument()
+  })
+
+  it("shows the empty panel on desktop once it is expanded with no processes", () => {
+    render(
+      <ProcessPanel {...defaultProps} collapsed={false} projectDir="/project" onRequestTerminal={vi.fn()} />,
+    )
+
+    expect(screen.getByRole("button", { name: "Collapse terminal panel" })).toBeInTheDocument()
+    expect(screen.getAllByRole("button", { name: "New terminal" })[0]).toBeEnabled()
   })
 
   it("shows project scripts on the left side of the expanded terminal panel", () => {

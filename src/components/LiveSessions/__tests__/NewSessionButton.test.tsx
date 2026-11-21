@@ -4,7 +4,6 @@ import { cleanup, fireEvent, render, screen } from "@testing-library/react"
 import { afterEach, describe, expect, it, vi } from "vitest"
 
 import { NewSessionButton } from "../NewSessionButton"
-import { onFolderBrowserRequest } from "@/lib/folders"
 
 const mocks = vi.hoisted(() => ({
   useProjectList: vi.fn((_enabled: boolean) => [] as unknown[]),
@@ -55,11 +54,12 @@ function renderButton(overrides: Partial<Parameters<typeof NewSessionButton>[0]>
 }
 
 describe("NewSessionButton across every project", () => {
-  it("shows a labelled New button that opens the project picker", () => {
+  it("shows an icon-only New session button that opens the project picker", () => {
     const props = renderButton()
 
     const button = screen.getByRole("button", { name: "New session" })
-    expect(button).toHaveTextContent("New")
+    expect(button).toHaveTextContent("")
+    expect(button.querySelector("svg")).not.toBeNull()
     expect(button.getAttribute("title")).toMatch(/^Start a new session \(.+\)$/)
     expect(screen.getByTestId("project-list")).toBeInTheDocument()
     expect(mocks.pickerProps?.defaultAgentKind).toBe("claude")
@@ -106,11 +106,12 @@ describe("NewSessionButton across every project", () => {
 describe("NewSessionButton focused on a project", () => {
   const project = { dirName: "-work-app", cwd: "/work/app", label: "App" }
 
-  it("starts in the focused project in one click, with a visible label and tooltip", () => {
+  it("starts in the focused project in one click, from an icon named for the project", () => {
     const props = renderButton({ project })
 
     const button = screen.getByRole("button", { name: "New session in App" })
-    expect(button).toHaveTextContent("New")
+    expect(button).toHaveTextContent("")
+    expect(button.querySelector("svg")).not.toBeNull()
     expect(button).toHaveAttribute("title", "New session in App")
     fireEvent.click(button)
 
@@ -118,22 +119,18 @@ describe("NewSessionButton focused on a project", () => {
     expect(screen.queryByTestId("project-list")).not.toBeInTheDocument()
   })
 
-  it("keeps a folder button for starting anywhere else", () => {
-    const requested = vi.fn()
-    const stop = onFolderBrowserRequest(requested)
+  it("leaves starting anywhere else to the list options", () => {
     renderButton({ project })
 
-    const folder = screen.getByRole("button", { name: "New session in another folder" })
-    expect(folder).toHaveAttribute("title", "New session in another folder")
-    fireEvent.click(folder)
-
-    expect(requested).toHaveBeenCalledOnce()
-    stop()
+    expect(screen.getAllByRole("button")).toHaveLength(1)
+    expect(screen.queryByRole("button", { name: /another folder/ })).not.toBeInTheDocument()
   })
 
-  it("disables both buttons while a session is being created", () => {
+  it("is disabled with a spinner while a session is being created", () => {
     renderButton({ project, creatingSession: true })
-    expect(screen.getByRole("button", { name: "New session in App" })).toBeDisabled()
-    expect(screen.getByRole("button", { name: "New session in another folder" })).toBeDisabled()
+
+    const button = screen.getByRole("button", { name: "New session in App" })
+    expect(button).toBeDisabled()
+    expect(button.querySelector(".animate-spin")).not.toBeNull()
   })
 })

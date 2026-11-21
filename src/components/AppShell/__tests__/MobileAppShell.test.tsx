@@ -29,8 +29,9 @@ vi.mock("@/components/DeviceSwitcher", () => ({ DeviceSwitcher: () => null }))
 vi.mock("@/components/SessionInfoBar", () => ({
   SessionInfoBar: ({ headerAccessory }: { headerAccessory?: ReactNode }) => <>{headerAccessory}</>,
 }))
-vi.mock("@/components/ProviderUpdateBanner", () => ({ ProviderUpdateBanner: () => null }))
-vi.mock("@/components/UpdateBanner", () => ({ UpdateBanner: () => null }))
+vi.mock("@/components/UpdatesMenu", () => ({
+  UpdatesMenu: ({ side }: { side?: string }) => <button data-side={side}>Updates</button>,
+}))
 vi.mock("../SharedAppViews", () => ({
   PrimarySessionBrowser: () => <div>Session list</div>,
   MissionControlView: () => null,
@@ -145,6 +146,16 @@ describe("mobile shell header", () => {
     expect(values.navigation.panels.openMainView).toHaveBeenCalledWith("reports")
   })
 
+  it("carries the updates menu, opening downward, beside the account control", () => {
+    __installEditionUiForTest({ AccountControl })
+    mocks.tab = "sessions"
+    render(<MobileAppShell {...props()} />)
+
+    const updates = screen.getByRole("button", { name: "Updates" })
+    expect(updates).toHaveAttribute("data-side", "bottom")
+    expect(updates.parentElement).toContainElement(screen.getByRole("button", { name: "Account" }))
+  })
+
   it("carries no account control without an edition", () => {
     mocks.tab = "sessions"
     render(<MobileAppShell {...props()} />)
@@ -154,6 +165,12 @@ describe("mobile shell header", () => {
 })
 
 describe("mobile chat header", () => {
+  it("keeps the updates menu within reach while a chat is open", () => {
+    render(<MobileAppShell {...props()} />)
+
+    expect(screen.getByRole("button", { name: "Updates" })).toBeInTheDocument()
+  })
+
   it("keeps the account control within reach while a chat is open", () => {
     __installEditionUiForTest({ AccountControl })
     const values = props()

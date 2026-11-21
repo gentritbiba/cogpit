@@ -189,9 +189,10 @@ export const ChatArea = memo(function ChatArea({
 
         {/* Scroll-to-bottom FAB */}
         <Button
-          size="icon"
+          variant="outline"
+          size="icon-sm"
           className={cn(
-            "absolute rounded-full shadow-sm transition-[opacity,transform] duration-200 ease-out active:scale-95",
+            "absolute rounded-full bg-background text-muted-foreground shadow-sm transition-[opacity,transform] duration-200 ease-out hover:text-foreground active:scale-95",
             canScrollDown ? "opacity-100 scale-100" : "opacity-0 scale-75 pointer-events-none",
             isMobile ? "right-3 bottom-3" : "right-5",
           )}

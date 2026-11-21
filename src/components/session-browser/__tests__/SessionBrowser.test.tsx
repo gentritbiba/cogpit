@@ -5,12 +5,17 @@ import { SessionBrowser } from "../SessionBrowser"
 vi.mock("@/components/LiveSessions", () => ({
   LiveSessions: ({
     onSelectSession,
+    headerActions,
   }: {
     onSelectSession: (dirName: string, fileName: string) => void
+    headerActions?: React.ReactNode
   }) => (
-    <button type="button" onClick={() => onSelectSession("project", "session.jsonl")}>
-      Live sessions
-    </button>
+    <div data-testid="live-sessions">
+      <button type="button" onClick={() => onSelectSession("project", "session.jsonl")}>
+        Live sessions
+      </button>
+      {headerActions}
+    </div>
   ),
 }))
 
@@ -49,16 +54,19 @@ describe("SessionBrowser", () => {
     expect(container.firstElementChild).not.toHaveClass("w-80")
   })
 
-  it("renders the header slot above the sessions list", () => {
+  it("hands header actions to the session list's header row instead of stacking a row above it", () => {
     const { container } = render(
       <SessionBrowser
         activeSessionKey={null}
         onSelectSession={vi.fn()}
-        header={<div data-testid="sidebar-header" />}
+        headerActions={<button type="button">Hide sidebar</button>}
       />,
     )
 
     const aside = container.firstElementChild
-    expect(aside?.firstElementChild).toBe(screen.getByTestId("sidebar-header"))
+    const list = screen.getByTestId("live-sessions")
+    expect(aside?.children).toHaveLength(1)
+    expect(aside?.firstElementChild).toBe(list)
+    expect(list).toContainElement(screen.getByRole("button", { name: "Hide sidebar" }))
   })
 })

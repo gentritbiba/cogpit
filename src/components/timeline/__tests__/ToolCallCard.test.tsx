@@ -754,6 +754,83 @@ describe("ToolCallCard Bash input rendering", () => {
     expect(screen.queryByRole("region", { name: "Bash command" })).toBeNull()
   })
 
+  it("leaves the cd into the session's own folder off a command's line, and only that one", () => {
+    const { rerender } = render(<ToolCallCard toolCall={makeToolCall("Bash", { command: "cd /repo && bun run test" })} />)
+    expect(screen.getByTitle("bun run test")).toBeInTheDocument()
+
+    rerender(<ToolCallCard toolCall={makeToolCall("Bash", { command: "cd '/repo/'; bun run lint" })} />)
+    expect(screen.getByTitle("bun run lint")).toBeInTheDocument()
+
+    rerender(<ToolCallCard toolCall={makeToolCall("Bash", { command: "cd /repo/packages/cli && bun test" })} />)
+    expect(screen.getByTitle("cd /repo/packages/cli && bun test")).toBeInTheDocument()
+
+    rerender(<ToolCallCard toolCall={makeToolCall("Bash", { command: "cd /repo" })} />)
+    expect(screen.getByTitle("cd /repo")).toBeInTheDocument()
+  })
+
+  it.each([
+    // A `;` that begins another operator is not a separator after the cd.
+    ["cd /repo;& bun test", "cd /repo;& bun test"],
+    ["cd /repo;; bun test", "cd /repo;; bun test"],
+    // A path the session does not own, or one only part of the word names.
+    ["cd /repo2 && bun test", "cd /repo2 && bun test"],
+    ["cd /repo/../elsewhere && bun test", "cd /repo/../elsewhere && bun test"],
+    // Anything the shell would expand stays as written.
+    ["cd \"$HOME\" && bun test", "cd \"$HOME\" && bun test"],
+    ["cd /repo || exit 1", "cd /repo || exit 1"],
+    // A newline ends the cd, so what follows is a command of its own.
+    ["cd\n/repo && bun test", "cd /repo && bun test"],
+  ])("keeps %s whole", (command, shown) => {
+    render(<ToolCallCard toolCall={makeToolCall("Bash", { command })} />)
+    expect(screen.getByTitle(shown)).toBeInTheDocument()
+  })
+
+  it("keeps a cd whose bare folder the shell would expand, even when it spells the session's own", () => {
+    const cwd = mockSession.cwd
+    mockSession.cwd = "/work/[ab]"
+    try {
+      const { rerender } = render(<ToolCallCard toolCall={makeToolCall("Bash", { command: "cd /work/[ab] && bun test" })} />)
+      expect(screen.getByTitle("cd /work/[ab] && bun test")).toBeInTheDocument()
+
+      rerender(<ToolCallCard toolCall={makeToolCall("Bash", { command: "cd '/work/[ab]' && bun test" })} />)
+      expect(screen.getByTitle("bun test")).toBeInTheDocument()
+    } finally {
+      mockSession.cwd = cwd
+    }
+  })
+
+  it("strips a quoted folder with spaces when it is the session's own", () => {
+    const cwd = mockSession.cwd
+    mockSession.cwd = "/work/My Project"
+    try {
+      const { rerender } = render(<ToolCallCard toolCall={makeToolCall("Bash", { command: 'cd "/work/My Project" && bun test' })} />)
+      expect(screen.getByTitle("bun test")).toBeInTheDocument()
+
+      rerender(<ToolCallCard toolCall={makeToolCall("Bash", { command: "cd '/work/My Project/'; bun run lint" })} />)
+      expect(screen.getByTitle("bun run lint")).toBeInTheDocument()
+
+      // The line folds whitespace, so a folder that differs only in its spacing must not pass for the session's.
+      rerender(<ToolCallCard toolCall={makeToolCall("Bash", { command: 'cd "/work/My  Project" && bun test' })} />)
+      expect(screen.getByTitle('cd "/work/My Project" && bun test')).toBeInTheDocument()
+    } finally {
+      mockSession.cwd = cwd
+    }
+  })
+
+  it.each([
+    ["one that reads like a command", "cd /repo; then test"],
+    ["one identical to the command", "cd /repo && bun test"],
+  ])("leaves a command's own description as written, even %s", (_case, description) => {
+    render(<ToolCallCard toolCall={makeToolCall("Bash", { command: "cd /repo && bun test", description })} />)
+    expect(screen.getByTitle(description)).toBeInTheDocument()
+  })
+
+  it("keeps the whole command, cd included, in the opened card", () => {
+    render(<ToolCallCard toolCall={makeToolCall("Bash", { command: "cd /repo && bun run test" })} expandToolPayloads />)
+
+    expect(screen.getByRole("region", { name: "Bash command" })).toHaveTextContent("cd /repo && bun run test")
+  })
+
   it("renders Bash input as a readable command card", () => {
     const toolCall: ToolCall = {
       ...makeToolCall("Bash", {

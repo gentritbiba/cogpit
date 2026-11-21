@@ -298,11 +298,11 @@ const TurnSectionInner = memo(function TurnSectionInner({
       data-turn-key={turnKey}
       className={cn(
         "group relative",
-        isMobile ? "px-0 py-4" : "px-4 py-4",
+        isMobile ? "px-0 py-3" : "px-4 py-2",
         isActive && "rounded-lg ring-1 ring-ring/40",
       )}
     >
-      <div className="flex flex-col gap-2.5">
+      <div className="flex flex-col gap-1.5">
         {turn.userMessage ? (
           <TurnPrompt
             index={index}
@@ -324,7 +324,7 @@ const TurnSectionInner = memo(function TurnSectionInner({
           />
         )}
 
-        <WindowedItems id="blocks" items={items} pinned={pinned} className="flex flex-col gap-2.5" />
+        <WindowedItems id="blocks" items={items} pinned={pinned} className="flex flex-col gap-1.5" />
 
         {isTurnDone && hasFileChanges && (
           <div data-scroll-anchor="">
@@ -355,13 +355,17 @@ interface TurnActionProps {
 /** Restore and branches, for a turn; shown under its prompt, on hover where there is hover. */
 function TurnActions({ index, branchCount, isMobile, onRestoreToHere, onOpenBranches, time }: TurnActionProps & { time?: string }) {
   const clock = time ? clockLabel(time) : ""
-  if (!onRestoreToHere && !(branchCount > 0 && onOpenBranches) && !clock) return null
+  const hasBranches = branchCount > 0 && Boolean(onOpenBranches)
+  if (!onRestoreToHere && !hasBranches && !clock) return null
+  // Only branches are always drawn, so only they keep a line; the rest appears over the gap it leaves.
+  const inFlow = isMobile || hasBranches
   return (
-    <div className="flex min-h-6 items-center justify-end gap-1 text-xs text-muted-foreground">
+    <div className={cn("flex items-center justify-end gap-1 text-xs text-muted-foreground", inFlow ? "min-h-6" : "relative z-10 h-2 items-start")}>
       <span
         className={cn(
           "flex items-center gap-1 transition-opacity",
           !isMobile && "opacity-0 group-hover:opacity-100 group-focus-within:opacity-100",
+          !inFlow && "rounded-md bg-background/90 backdrop-blur",
         )}
       >
         {clock && <time className="px-1 tabular-nums" dateTime={time}>{clock}</time>}
@@ -379,10 +383,10 @@ function TurnActions({ index, branchCount, isMobile, onRestoreToHere, onOpenBran
           </Button>
         )}
       </span>
-      {branchCount > 0 && onOpenBranches && (
+      {hasBranches && (
         <BranchIndicator
           branchCount={branchCount}
-          onClick={() => onOpenBranches(index)}
+          onClick={() => onOpenBranches!(index)}
         />
       )}
     </div>
@@ -612,7 +616,7 @@ const TextRun = memo(function TextRun({
   // so streaming another paragraph into this block never moves the group to
   // a different element and remounts it.
   return (
-    <div data-scroll-anchor="" className="flex min-w-0 flex-col gap-2.5">
+    <div data-scroll-anchor="" className="flex min-w-0 flex-col gap-1.5">
       {block.text.map((text, ti) => (
         <DisclosureScope key={ti} id={String(ti)}>
           <AssistantText
@@ -751,8 +755,7 @@ function contentItems(blocks: TurnContentBlock[], keyFor: KeyFor, {
             <AgentPanel
               messages={block.messages}
               expandAll={activity.expandAll}
-              label={block.kind === "sub_agent" ? "Sub-agent activity" : "Background agent activity"}
-              countLabel={block.kind === "sub_agent" ? "subagents active" : "agents active"}
+              noun={block.kind === "sub_agent" ? "Sub-agent" : "Background agent"}
               liveOnCallRow={liveOnCallRow}
             />
           </div>

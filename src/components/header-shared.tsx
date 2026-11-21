@@ -7,16 +7,11 @@ import {
   TooltipTrigger,
   TooltipContent,
 } from "@/components/ui/tooltip"
-import { Badge } from "@/components/ui/badge"
 import { cn } from "@/lib/utils"
 import { formatTokenCount } from "@/lib/format"
+import { capabilitiesForDirName } from "@/lib/agents"
 import type { ContextUsage } from "../../shared/session/contextWindow"
-
-/**
- * The one surface for everything that floats over the chat pane now that
- * there is no top bar. Callers add their own height (`h-8` / `size-8`).
- */
-export const FLOATING_PILL = "rounded-full border bg-popover shadow-sm"
+import type { SessionView } from "../../shared/session/sessionDigest"
 
 // ── LiveIndicator ────────────────────────────────────────────────────────────
 
@@ -89,14 +84,7 @@ export const HeaderIconButton = memo(function HeaderIconButton({
   )
 })
 
-// ── ContextBadge ─────────────────────────────────────────────────────────────
-
-interface ContextBadgeProps {
-  usage: ContextUsage | null
-  showRemaining?: boolean
-  showTooltip?: boolean
-  warnOnly?: boolean
-}
+// ── Context pressure ─────────────────────────────────────────────────────────
 
 type ContextPressure = "critical" | "warning" | "healthy"
 
@@ -113,51 +101,82 @@ export const CONTEXT_STYLES: Record<ContextPressure, string> = {
   healthy: "text-muted-foreground",
 }
 
+function ContextDetail({ ctx }: { ctx: ContextUsage }) {
+  const remaining = Math.max(0, ctx.compactAt - ctx.used)
+  const pctLeft = Math.max(0, 100 - ctx.percent)
+  return (
+    <>
+      <div className="font-medium">Context before auto-compact</div>
+      <div>{formatTokenCount(remaining)} remaining ({pctLeft.toFixed(1)}%)</div>
+      <div className="text-muted-foreground">
+        {formatTokenCount(ctx.used)} / {formatTokenCount(ctx.limit)} tokens used ({ctx.percentAbsolute.toFixed(1)}%)
+      </div>
+    </>
+  )
+}
+
 /**
- * Compact badge showing context window usage percentage.
- * Renders nothing if context usage data is unavailable.
+ * How full the session's context is. Usage is read out of the transcript, so
+ * an agent whose records carry no token accounting has none.
  */
-export const ContextBadge = memo(function ContextBadge({
-  usage: ctx,
-  showRemaining = false,
-  showTooltip = false,
-  warnOnly = false,
-}: ContextBadgeProps) {
+export function sessionContextUsage(session: SessionView, dirName: string | undefined): ContextUsage | null {
+  return capabilitiesForDirName(dirName).contextWindow ? session.digest.contextUsage : null
+}
+
+// ── ContextMeter ─────────────────────────────────────────────────────────────
+
+const METER_TEXT: Record<ContextPressure, string> = {
+  critical: "text-destructive",
+  warning: "text-warning",
+  healthy: "text-muted-foreground",
+}
+
+const RING_RADIUS = 5.5
+const RING_LENGTH = 2 * Math.PI * RING_RADIUS
+
+/**
+ * How much context is left, always in view beside the model: a ring that
+ * fills as the window does, and the share still free. Quiet until it runs
+ * low. Renders nothing if context usage data is unavailable.
+ */
+export const ContextMeter = memo(function ContextMeter({ usage: ctx }: { usage: ContextUsage | null }) {
   if (!ctx) return null
 
   const pctLeft = Math.max(0, 100 - ctx.percent)
-  const pressure = contextPressure(pctLeft)
-  if (warnOnly && pressure === "healthy") return null
-  const remaining = Math.max(0, ctx.compactAt - ctx.used)
-
-  const label = showRemaining
-    ? `${pctLeft.toFixed(0)}% \u00b7 ${formatTokenCount(remaining)}`
-    : `${pctLeft.toFixed(0)}%`
-
-  const badge = (
-    <Badge
-      variant="outline"
-      className={cn(
-        "shrink-0 tabular-nums",
-        CONTEXT_STYLES[pressure],
-        showRemaining && "gap-1",
-      )}
-    >
-      {label}
-    </Badge>
-  )
-
-  if (!showTooltip) return badge
+  const used = Math.min(1, Math.max(0, ctx.percent / 100))
 
   return (
     <Tooltip>
-      <TooltipTrigger render={badge} />
-      <TooltipContent className="flex flex-col gap-1 text-xs">
-        <div className="font-medium">Context before auto-compact</div>
-        <div>{formatTokenCount(remaining)} remaining ({pctLeft.toFixed(1)}%)</div>
-        <div className="text-muted-foreground">
-          {formatTokenCount(ctx.used)} / {formatTokenCount(ctx.limit)} tokens used ({ctx.percentAbsolute.toFixed(1)}%)
-        </div>
+      <TooltipTrigger
+        render={(
+          <span
+            data-context-meter
+            aria-label={`${pctLeft.toFixed(0)}% of context left`}
+            className={cn(
+              "flex shrink-0 cursor-default items-center gap-1.5 px-1.5 text-xs tabular-nums",
+              METER_TEXT[contextPressure(pctLeft)],
+            )}
+          />
+        )}
+      >
+        <svg viewBox="0 0 14 14" className="size-3.5 -rotate-90" aria-hidden="true">
+          <circle cx="7" cy="7" r={RING_RADIUS} fill="none" stroke="currentColor" strokeWidth="1.5" opacity="0.25" />
+          <circle
+            cx="7"
+            cy="7"
+            r={RING_RADIUS}
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="1.5"
+            strokeLinecap="round"
+            strokeDasharray={RING_LENGTH}
+            strokeDashoffset={RING_LENGTH * (1 - used)}
+          />
+        </svg>
+        {pctLeft.toFixed(0)}%
+      </TooltipTrigger>
+      <TooltipContent side="top" className="flex flex-col gap-1 text-xs">
+        <ContextDetail ctx={ctx} />
       </TooltipContent>
     </Tooltip>
   )

@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react"
-import { ChevronDown, Play, X } from "lucide-react"
+import { ChevronDown, ChevronRight, Play, X } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Tooltip, TooltipTrigger, TooltipContent } from "@/components/ui/tooltip"
@@ -9,6 +9,7 @@ import { getStatusLabel } from "../../../shared/session/sessionStatus"
 import { agentKindForDirName } from "@/lib/agents"
 import { isExternallyDrivenSession } from "@/lib/sessionControl"
 import { useListedPermissions } from "@/hooks/useListedPermissions"
+import { useLocalStorage } from "@/hooks/useLocalStorage"
 import type { ActiveSessionInfo, RunningProcess } from "./types"
 import type { AttentionGroups, AttentionItem } from "./attentionGroups"
 import { workingChip } from "./attentionGroups"
@@ -114,15 +115,11 @@ function StripRow({
   return (
     <div
       className={cn(
-        "group relative w-full rounded-md text-left transition-colors",
-        compact ? "px-2.5 py-2" : "border px-2 py-2",
+        "group relative w-full rounded-lg px-2.5 py-1.5 text-left transition-colors",
         cardClassName,
-        isActiveSession && !compact && "ring-1 ring-ring",
+        isActiveSession && "bg-accent",
       )}
     >
-      {compact && isActiveSession && (
-        <span className="absolute inset-y-2 left-0 w-0.5 rounded-full bg-primary" aria-hidden="true" />
-      )}
       <Tooltip>
         <TooltipTrigger
           render={
@@ -136,7 +133,7 @@ function StripRow({
               onBlur={onHoverEnd}
               className={cn(
                 "w-full rounded-sm text-left outline-none focus-visible:ring-2 focus-visible:ring-ring",
-                canResume && "pr-20",
+                canResume && "pb-7",
               )}
             />
           }
@@ -154,10 +151,9 @@ function StripRow({
             </Badge>
             {!compact && <TimeSince iso={since ?? (s.lastActivityAt || s.lastModified)} />}
           </span>
-          <span className="mt-1 block truncate pl-3 text-xs text-muted-foreground">{projectLabel}</span>
         </TooltipTrigger>
         <TooltipContent side="right" className="max-w-[280px]">
-          <SessionPreview session={s} proc={proc} statusLabel={statusLabel} customName={customName} />
+          <SessionPreview session={s} proc={proc} statusLabel={statusLabel} customName={customName} projectLabel={projectLabel} />
         </TooltipContent>
       </Tooltip>
 
@@ -222,9 +218,10 @@ interface AttentionStripProps {
 
 /**
  * Cross-project triage at the top of the sidebar: sessions that are blocked
- * on the user ("Needs you") and agents currently running ("Working"). The
- * project tree below stays the browsing surface; this answers "where should
- * I look right now?" at a glance.
+ * on the user ("Needs you"), and a count of the agents currently running
+ * ("Working") that unfolds into their roll call. The list below stays the
+ * browsing surface; this answers "where should I look right now?" at a
+ * glance.
  */
 export function AttentionStrip({
   groups,
@@ -239,6 +236,8 @@ export function AttentionStrip({
   onPrefetchSession,
 }: AttentionStripProps) {
   const permissionsOf = useListedPermissions()
+  // Every working session is in the list below with its status, so the roll call stays folded until asked for.
+  const [workingOpen, setWorkingOpen] = useLocalStorage<boolean>("live-sessions-working-open", false)
   const [showAllWorking, setShowAllWorking] = useState(false)
   const visibleWorking = showAllWorking ? groups.working : groups.working.slice(0, WORKING_VISIBLE)
   const hiddenWorking = groups.working.length - visibleWorking.length
@@ -282,7 +281,7 @@ export function AttentionStrip({
               chip={chipFor(item)}
               since={reason === "crew" ? item.crew?.longestWaitSince : undefined}
               dotClassName={REASON_DOT[reason]}
-              cardClassName="border-warning/20 bg-warning/5 hover:bg-warning/10"
+              cardClassName="hover:bg-accent/60"
               onResume={
                 reason === "deferred" && onResumeSession && permissionsOf(s.access).send
                   ? () => onResumeSession(s.sessionId, s.cwd, s.dirName)
@@ -296,26 +295,35 @@ export function AttentionStrip({
 
       {groups.working.length > 0 && (
         <div className="flex flex-col gap-1">
-          <div className="flex items-center justify-between px-1">
+          <button
+            type="button"
+            onClick={() => setWorkingOpen(!workingOpen)}
+            aria-expanded={workingOpen}
+            className="flex items-center gap-1.5 rounded-md px-0.5 text-left outline-none hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring"
+          >
+            <span className={cn("size-1.5 rounded-full", STATUS_DOT.working)} aria-hidden="true" />
             <span className="text-xs font-medium text-muted-foreground">Working</span>
             <span className="text-xs tabular-nums text-muted-foreground">{groups.working.length}</span>
-          </div>
-          <div
-            data-working-list
-            className="flex flex-col gap-0.5 overflow-hidden rounded-lg border bg-background p-0.5"
-          >
+            <ChevronRight
+              className={cn("ml-auto size-3 text-muted-foreground transition-transform duration-150", workingOpen && "rotate-90")}
+              aria-hidden="true"
+            />
+          </button>
+          {workingOpen && (
+          <div data-working-list className="flex flex-col gap-0.5">
             {visibleWorking.map((s) => (
               <StripRow
                 key={`${s.dirName}/${s.fileName}`}
                 {...rowShared(s)}
                 chip={{ label: workingLabel(s, groups), className: "" }}
                 dotClassName={STATUS_DOT.working}
-                cardClassName="hover:bg-accent/50"
+                cardClassName="hover:bg-accent/60"
                 compact
               />
             ))}
           </div>
-          {hiddenWorking > 0 && (
+          )}
+          {workingOpen && hiddenWorking > 0 && (
             <Button
               type="button"
               variant="ghost"

@@ -50,6 +50,25 @@ describe("command details", () => {
     expect(screen.getByText(/output 12/)).toBeInTheDocument()
   })
 
+  it("lets a long command scroll in place instead of pushing its result away", () => {
+    render(<BashCommandCard toolCall={commandCall("bun run test")} />)
+
+    expect(screen.getByText("bun run test")).toHaveClass("max-h-64", "overflow-y-auto")
+  })
+
+  it("names only the options that depart from a plain run, beside the heading", () => {
+    const { rerender } = render(
+      <BashCommandCard toolCall={{ ...commandCall("bun run test"), input: { command: "bun run test", timeout: 300_000, run_in_background: false } }} />,
+    )
+    expect(screen.getByText("Command").parentElement).toHaveTextContent("Command5 min timeout")
+    expect(screen.queryByText("Foreground")).toBeNull()
+
+    rerender(
+      <BashCommandCard toolCall={{ ...commandCall("bun run dev"), input: { command: "bun run dev", run_in_background: true } }} />,
+    )
+    expect(screen.getByText("Background")).toBeInTheDocument()
+  })
+
   it("copies the original complete command", async () => {
     const command = "echo ---SOURCE; cat src/example.ts; echo ---TEST; bun run test"
     render(<BashCommandCard toolCall={commandCall(command, "---SOURCE\nsource\n---TEST\npassed")} />)

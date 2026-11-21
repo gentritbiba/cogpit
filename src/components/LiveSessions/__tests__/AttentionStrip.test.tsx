@@ -1,6 +1,6 @@
 import * as React from "react"
-import { fireEvent, render, screen } from "@testing-library/react"
-import { describe, expect, it, vi } from "vitest"
+import { cleanup, fireEvent, render, screen } from "@testing-library/react"
+import { afterEach, describe, expect, it, vi } from "vitest"
 import { AttentionStrip } from "../AttentionStrip"
 import type { ActiveSessionInfo, RunningProcess } from "../types"
 
@@ -26,26 +26,96 @@ function makeSession(overrides: Partial<ActiveSessionInfo> = {}): ActiveSessionI
   }
 }
 
-describe("AttentionStrip working list", () => {
-  it("shows compact working details without relative time", () => {
-    const session = makeSession()
-    const { container } = render(
-      <AttentionStrip
-        groups={{ needsYou: [], working: [session] }}
-        activeSessionKey="agent-window/session.jsonl"
-        procBySession={new Map()}
-        killingPids={new Set()}
-        sessionNames={{}}
-        projectNames={{ "agent-window": "gentritbiba/agent-window" }}
-        onSelectSession={vi.fn()}
-      />,
-    )
+const WORKING_OPEN_KEY = "live-sessions-working-open"
 
-    expect(screen.getByText("Working")).toBeInTheDocument()
-    expect(screen.getByText("Thinking")).toBeInTheDocument()
-    expect(screen.getByText("gentritbiba/agent-window")).toBeInTheDocument()
+afterEach(() => {
+  cleanup()
+  localStorage.clear()
+})
+
+function renderWorking(working: ActiveSessionInfo[], extra: Partial<Parameters<typeof AttentionStrip>[0]> = {}) {
+  return render(
+    <AttentionStrip
+      groups={{ needsYou: [], working }}
+      activeSessionKey="agent-window/session.jsonl"
+      procBySession={new Map()}
+      killingPids={new Set()}
+      sessionNames={{}}
+      projectNames={{ "agent-window": "gentritbiba/agent-window" }}
+      onSelectSession={vi.fn()}
+      {...extra}
+    />,
+  )
+}
+
+describe("AttentionStrip working list", () => {
+  it("folds the roll call by default and says how many are working", () => {
+    const { container } = renderWorking([makeSession()])
+
+    const toggle = screen.getByRole("button", { name: /Working/ })
+    expect(toggle).toHaveTextContent("Working")
+    expect(toggle).toHaveTextContent("1")
+    expect(toggle).toHaveAttribute("aria-expanded", "false")
+    expect(container.querySelector("[data-working-list]")).toBeNull()
+    expect(screen.queryByText("Thinking")).not.toBeInTheDocument()
+  })
+
+  it("unfolds the roll call on click as one line per session, without time or project", () => {
+    const onSelectSession = vi.fn()
+    const { container } = renderWorking([makeSession()], { onSelectSession })
+
+    const toggle = screen.getByRole("button", { name: /Working/ })
+    fireEvent.click(toggle)
+
+    expect(toggle).toHaveAttribute("aria-expanded", "true")
     expect(container.querySelector("[data-working-list]")).toBeInTheDocument()
+    expect(screen.getByText("Thinking")).toBeInTheDocument()
+    expect(screen.getByText("Clean up the working section")).toBeInTheDocument()
+    expect(screen.queryByText("gentritbiba/agent-window")).not.toBeInTheDocument()
     expect(container.querySelector("[data-relative-time]")).toBeNull()
+
+    fireEvent.click(container.querySelector("[data-working-list] [data-attention-session]")!)
+    expect(onSelectSession).toHaveBeenCalledWith("agent-window", "session.jsonl")
+
+    fireEvent.click(toggle)
+    expect(container.querySelector("[data-working-list]")).toBeNull()
+  })
+
+  it("remembers whether the roll call is open", () => {
+    renderWorking([makeSession()])
+    fireEvent.click(screen.getByRole("button", { name: /Working/ }))
+    expect(localStorage.getItem(WORKING_OPEN_KEY)).toBe("true")
+    cleanup()
+
+    const { container } = renderWorking([makeSession()])
+    expect(screen.getByRole("button", { name: /Working/ })).toHaveAttribute("aria-expanded", "true")
+    expect(container.querySelector("[data-working-list]")).toBeInTheDocument()
+  })
+
+  it("shows the first rows of a long roll call and the rest on request", () => {
+    const sessions = Array.from({ length: 8 }, (_, i) => makeSession({
+      sessionId: `s${i}`,
+      fileName: `s${i}.jsonl`,
+      firstUserMessage: `Task ${i}`,
+    }))
+    const { container } = renderWorking(sessions)
+
+    fireEvent.click(screen.getByRole("button", { name: /Working/ }))
+    expect(container.querySelectorAll("[data-working-list] [data-attention-session]")).toHaveLength(6)
+
+    fireEvent.click(screen.getByRole("button", { name: "Show 2 more" }))
+    expect(container.querySelectorAll("[data-working-list] [data-attention-session]")).toHaveLength(8)
+  })
+
+  it("keeps needs-you rows visible while the roll call is folded", () => {
+    const waiting = makeSession({ sessionId: "w", fileName: "w.jsonl", firstUserMessage: "Approve the plan" })
+    renderWorking([makeSession()], {
+      groups: { needsYou: [{ session: waiting, reason: "plan" }], working: [makeSession()] },
+    })
+
+    expect(screen.getByText("Approve the plan")).toBeInTheDocument()
+    expect(screen.getByText("Review plan")).toBeInTheDocument()
+    expect(screen.queryByText("Thinking")).not.toBeInTheDocument()
   })
 
   it("opens a session that needs Copilot plan review", () => {
@@ -168,6 +238,7 @@ describe("AttentionStrip crews", () => {
         onSelectSession={vi.fn()}
       />,
     )
+    fireEvent.click(screen.getByRole("button", { name: /Working/ }))
     expect(screen.getByText("2 in crew")).toBeInTheDocument()
   })
 })

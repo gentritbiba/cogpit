@@ -91,11 +91,14 @@ export const AssistantText = memo(function AssistantText({
         </CogpitBlockScope.Provider>
       </div>
       {actions && (showMeta ? (
-        <div data-reply-meta className="mt-1 flex min-h-7 items-center gap-1 text-xs text-muted-foreground">
+        <div
+          data-reply-meta
+          className="flex items-center gap-1 text-xs text-muted-foreground mt-1 min-h-7 transition-opacity pointer-fine:mt-0 pointer-fine:min-h-0 pointer-fine:absolute pointer-fine:right-0 pointer-fine:top-full pointer-fine:z-10 pointer-fine:rounded-md pointer-fine:bg-background/90 pointer-fine:pl-2 pointer-fine:pointer-events-none pointer-fine:opacity-0 pointer-fine:shadow-sm pointer-fine:ring-1 pointer-fine:ring-border/60 pointer-fine:backdrop-blur pointer-fine:group-hover/text:pointer-events-auto pointer-fine:group-hover/text:opacity-100 pointer-fine:focus-within:pointer-events-auto pointer-fine:focus-within:opacity-100"
+        >
           {meta.length > 0 && (
             <span className="pr-1 tabular-nums" title={effort ? `Reasoning effort: ${effort}` : undefined}>{meta.join(" · ")}</span>
           )}
-          <span className="flex items-center gap-0.5 transition-opacity sm:opacity-0 sm:group-hover/text:opacity-100 sm:focus-within:opacity-100">{actions}</span>
+          <span className="flex items-center gap-0.5">{actions}</span>
         </div>
       ) : (
         <div className="absolute -top-1 right-0 flex items-center rounded-md bg-background/90 opacity-0 shadow-sm ring-1 ring-border/60 backdrop-blur transition-opacity focus-within:opacity-100 group-hover/text:opacity-100">

@@ -259,6 +259,9 @@ export const ProcessPanel = memo(function ProcessPanel({
   const activeProcess = activeProcessId ? processes.get(activeProcessId) : null
   const processList = [...processes.values()]
 
+  // With nothing running there is nothing to show; the rail's terminal button opens it.
+  if (!mobile && collapsed && processList.length === 0) return null
+
   return (
     <Tabs
       value={activeProcessId}

@@ -4,7 +4,7 @@ import { Button } from "@/components/ui/button"
 import { Popover, PopoverTrigger } from "@/components/ui/popover"
 import { cn } from "@/lib/utils"
 import { serverMonogram, splitServerName } from "./mcpNames"
-import { PickerChip, PickerPanel, PickerSectionLabel, pickerSideFor } from "./PickerShell"
+import { CHIP_LABEL, PickerChip, PickerPanel, PickerSectionLabel, pickerSideFor } from "./PickerShell"
 import type { McpServer } from "../../../../shared/contracts/projectTools"
 
 /** Past this many servers a filter box is worth its row. */
@@ -48,9 +48,9 @@ export function McpPicker({
 
   return (
     <Popover modal={false} onOpenChange={(open) => { if (!open) setFilter("") }}>
-      <PopoverTrigger render={<PickerChip aria-label={chipLabel} />}>
+      <PopoverTrigger render={<PickerChip aria-label={chipLabel} title={chipLabel} />}>
         <Plug data-icon="inline-start" />
-        <span className="truncate">{chipLabel}</span>
+        <span className={CHIP_LABEL}>{chipLabel}</span>
         {discovering && <RefreshCw className="size-3 animate-spin" aria-hidden />}
       </PopoverTrigger>
       <PickerPanel side={pickerSideFor(isNewSession)} aria-label="MCP servers" className="w-[23rem]">

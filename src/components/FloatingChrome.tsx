@@ -1,88 +1,57 @@
 import { memo, useMemo, useState, type ComponentProps } from "react"
 import type { LucideIcon } from "lucide-react"
-import {
-  Activity,
-  ArrowRightLeft,
-  BookOpen,
-  Bug,
-  ChartColumn,
-  ChevronRight,
-  Globe,
-  Keyboard,
-  MoreHorizontal,
-  PanelLeftOpen,
-  Settings,
-  Skull,
-  Workflow as WorkflowIcon,
-} from "lucide-react"
-import { toast } from "sonner"
+import { ChevronRight, PanelLeftOpen, Workflow as WorkflowIcon } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
-import { DisabledHint } from "@/components/ui/disabled-hint"
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuGroup,
-  DropdownMenuItem,
-  DropdownMenuLabel,
-  DropdownMenuSeparator,
-  DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu"
 import {
   Tooltip,
   TooltipContent,
   TooltipTrigger,
 } from "@/components/ui/tooltip"
 import { CrewParentPill } from "@/components/CrewParentPill"
-import { DeviceSwitcher } from "@/components/DeviceSwitcher"
-import { LeakIndicator } from "@/components/LeakIndicator"
-import { PowerMonitor } from "@/components/PowerMonitor"
-import { SessionPill } from "@/components/SessionPill"
+import { SessionTitle } from "@/components/SessionTitle"
 import { ShareButton } from "@/components/ShareButton"
-import { TokenUsageIndicator } from "@/components/TokenUsageWidget"
-import { UsageCostDialog } from "@/components/UsageCostDialog"
-import { FLOATING_PILL } from "@/components/header-shared"
-import { useAppContext } from "@/contexts/AppContext"
+import { sessionHeadline, isUntitledSession } from "@/components/LiveSessions/sessionListView"
 import { useOpenSession, useSessionControls } from "@/contexts/SessionContext"
 import { useSessionInventoryOptional } from "@/contexts/SessionInventoryContext"
 import { useEditionUi } from "@/edition/hooks"
-import { useCapability } from "@/hooks/useCapability"
 import { useCopyWithFeedback } from "@/hooks/useCopyWithFeedback"
 import { useInboxSync } from "@/hooks/useInboxSync"
 import { useSessionArchiveToggle } from "@/hooks/useSessionArchive"
+import { useSessionNames } from "@/hooks/useSessionNames"
+import { useStopSession } from "@/hooks/useStopSession"
 import { can } from "@/lib/capabilities"
 import { parseSubAgentPath } from "@/lib/format"
 import { agentKindForDirName, capabilitiesFor, getResumeCommand } from "@/lib/agents"
-import { cn, copyToClipboard } from "@/lib/utils"
-import { DOCUMENTATION_URL, REPORT_ISSUE_URL } from "../../shared/helpLinks"
+import { cn } from "@/lib/utils"
 import { extractPullRequests, mergePullRequests, type SessionPullRequest } from "../../shared/session/prLinks"
 
-type OpenSessionPillProps = Omit<ComponentProps<typeof SessionPill>, "session" | "pullRequests"> & {
+type OpenSessionTitleProps = Omit<ComponentProps<typeof SessionTitle>, "session" | "pullRequests" | "onStopSession"> & {
   scannedPullRequests: SessionPullRequest[] | undefined
 }
 
-/** The pill shows the session as it streams; the chrome around it does not re-render with it. */
-function OpenSessionPill({ scannedPullRequests, ...pill }: OpenSessionPillProps) {
+/** The title's menu shows the session as it streams; the chrome around it does not re-render with it. */
+function OpenSessionTitle({ scannedPullRequests, ...title }: OpenSessionTitleProps) {
   const session = useOpenSession((open) => open)
+  const onStopSession = useStopSession()
   const turns = session?.turns
   const pullRequests = useMemo(
     () => mergePullRequests(extractPullRequests(turns ?? []), scannedPullRequests),
     [turns, scannedPullRequests],
   )
-  return session && <SessionPill session={session} pullRequests={pullRequests} {...pill} />
+  return session && <SessionTitle session={session} pullRequests={pullRequests} onStopSession={onStopSession} {...title} />
 }
 
 interface FloatingChromeProps {
-  /** Whether the sidebar is toggled on — decides if the expand pill is offered. */
+  /** Whether the sidebar is toggled on — decides if the expand button is offered. */
   showSidebar: boolean
   /**
    * Whether a sidebar is actually on screen. Config view replaces it with its
-   * own rail, and without a sidebar the pills have to clear the traffic lights
-   * themselves.
+   * own rail, and without a sidebar the title has to clear the traffic lights
+   * itself.
    */
   sidebarRendered?: boolean
   sidebarShortcut: string
-  killing: boolean
   creatingSession: boolean
   onNewSession: (dirName: string, cwd?: string) => void
   onDuplicateSession?: () => void
@@ -91,26 +60,23 @@ interface FloatingChromeProps {
   onShowWorkflows?: () => void
   workflowCount?: number
   onToggleSidebar: () => void
-  onKillAll: () => void
-  onOpenSettings: () => void
-  onOpenKeyboardShortcuts: () => void
-  onLogout: () => void
-  /** Opens an edition main view, from the account control. */
-  onOpenMainView: (id: string) => void
+  /** Receives the element the sticky prompt renders into, between the title and the session's actions. */
+  promptSlotRef?: (element: HTMLElement | null) => void
+  /** Off on views that are not the conversation, where the open session's line would describe something else. */
+  showSession?: boolean
 }
 
-const PILL_ROW = "flex h-8 items-center px-0.5"
-
 /**
- * Everything that used to live in the top bar, floating over the chat pane:
- * session pill on the left, status pills and the overflow menu on the right.
- * Content scrolls underneath; the pane reserves its own top padding.
+ * The one line above the conversation: the session's title, which is also its
+ * menu, and beside it only what the session is doing right now (the session
+ * that started it, running workflows, an open share). Everything about the app
+ * lives in the rail. Content scrolls underneath; the pane reserves its own top
+ * padding.
  */
 export const FloatingChrome = memo(function FloatingChrome({
   showSidebar,
   sidebarRendered = showSidebar,
   sidebarShortcut,
-  killing,
   creatingSession,
   onNewSession,
   onDuplicateSession,
@@ -119,68 +85,60 @@ export const FloatingChrome = memo(function FloatingChrome({
   onShowWorkflows,
   workflowCount,
   onToggleSidebar,
-  onKillAll,
-  onOpenSettings,
-  onOpenKeyboardShortcuts,
-  onLogout,
-  onOpenMainView,
+  promptSlotRef,
+  showSession = true,
 }: FloatingChromeProps) {
-  const { config: { networkUrl, defaultAgentKind } } = useAppContext()
   const { sessionSource, isLive, permissions, actions } = useSessionControls()
-  const sessionId = useOpenSession((open) => open?.sessionId ?? null)
+  const openId = useOpenSession((open) => open?.sessionId ?? null)
+  const sessionId = showSession ? openId : null
   const sessionCwd = useOpenSession((open) => open?.cwd)
+  const sessionSlug = useOpenSession((open) => open?.slug)
   const inventory = useSessionInventoryOptional()
-  const { AccountControl, SessionHeaderActions } = useEditionUi()
-  const canViewUsage = useCapability("viewUsage")
+  const { names: sessionNames } = useSessionNames()
+  const { SessionHeaderActions } = useEditionUi()
   useInboxSync()
-  const [usageOpen, setUsageOpen] = useState(false)
-  const [monitorOpen, setMonitorOpen] = useState(false)
+  const [shareOpen, setShareOpen] = useState(false)
   const [cmdCopied, copyCmd] = useCopyWithFeedback()
 
-  const scanned = inventory?.sessions.find(
+  const listed = inventory?.sessions.find(
     (candidate) => candidate.sessionId === sessionId,
-  )?.pullRequests
+  )
   const archiveToggle = useSessionArchiveToggle(sessionId ?? "", isLive, permissions.archive)
-  const activeAgentKind = sessionSource
-    ? sessionSource.agentKind ?? agentKindForDirName(sessionSource.dirName)
-    : defaultAgentKind
   const isSubAgent = sessionSource ? parseSubAgentPath(sessionSource.fileName) !== null : false
+  const agentKind = sessionSource?.agentKind ?? agentKindForDirName(sessionSource?.dirName ?? null)
+  const canShare = capabilitiesFor(agentKind).sharing && can("share")
+  const customName = sessionId !== null ? sessionNames[sessionId] : undefined
+  const title = sessionId !== null && (listed && !isUntitledSession(listed, customName)
+    ? sessionHeadline(listed, customName)
+    : customName || sessionSlug || sessionId.slice(0, 8))
 
   function handleCopyResumeCmd(): void {
     if (sessionId === null) return
-    const agentKind = sessionSource?.agentKind ?? agentKindForDirName(sessionSource?.dirName ?? null)
     copyCmd(getResumeCommand(agentKind, sessionId, sessionCwd))
-  }
-
-  function handleCopyNetworkUrl(): void {
-    if (!networkUrl) return
-    void copyToClipboard(networkUrl).then((ok) => {
-      if (ok) toast.success("Copied network URL")
-    })
   }
 
   return (
     <>
-      {/* Stands in for the removed title bar. It ships with the pills so the
+      {/* Stands in for the removed title bar. It ships with the title so the
           two always share a stacking context: the session view nests the
           chrome inside a resizable panel, where a pane-owned strip would paint
-          over the pills and swallow their clicks. */}
+          over the title and swallow its clicks. */}
       <div aria-hidden className="drag-strip absolute inset-x-0 top-0 z-10 h-10" />
-      {/* Content scrolls under the pills, so it has to fade out rather than
-          collide with them. */}
+      {/* Content scrolls under the title, so it has to fade out rather than
+          collide with it. */}
       <div
         aria-hidden
         className="pointer-events-none absolute inset-x-0 top-0 z-20 h-16 bg-gradient-to-b from-background from-50% to-transparent"
       />
-      <div className="pointer-events-none absolute inset-x-0 top-0 z-30 flex items-start justify-between gap-3 px-3 pt-2">
+      <div className="pointer-events-none absolute inset-x-0 top-0 z-30 flex items-start justify-between gap-3 px-2 pt-2">
         <div
           className={cn(
-            "electron-no-drag pointer-events-auto flex min-w-0 items-center gap-1.5",
+            "electron-no-drag pointer-events-auto flex min-w-0 shrink-0 items-center gap-1 max-w-[70%]",
             !sidebarRendered && "window-inset-start",
           )}
         >
           {!showSidebar && (
-            <PillIconButton
+            <ChromeIconButton
               icon={PanelLeftOpen}
               label={`Show sidebar (${sidebarShortcut})`}
               onClick={onToggleSidebar}
@@ -193,24 +151,28 @@ export const FloatingChrome = memo(function FloatingChrome({
               variant="ghost"
               size="xs"
               onClick={onBackToMain}
-              className={cn(FLOATING_PILL, "h-8 shrink-0 px-2.5 text-xs text-muted-foreground")}
+              className="h-8 shrink-0 rounded-lg px-2 text-xs text-muted-foreground"
             >
               <ChevronRight className="size-3 rotate-180" />
               Main
             </Button>
           )}
 
-          {sessionId !== null && (
-            <OpenSessionPill
+          {title && (
+            <OpenSessionTitle
               sessionSource={sessionSource}
+              title={title}
               isLive={isLive}
-              scannedPullRequests={scanned}
+              scannedPullRequests={listed?.pullRequests}
               copied={cmdCopied}
               creatingSession={creatingSession}
               onCopyResume={handleCopyResumeCmd}
               onNewSession={onNewSession}
               onDuplicateSession={onDuplicateSession}
               onOpenTerminal={onOpenTerminal}
+              onShare={canShare ? () => setShareOpen(true) : undefined}
+              onHandoff={!isSubAgent && permissions.send ? actions.handleProviderHandoff : undefined}
+              archive={isSubAgent ? null : archiveToggle}
             />
           )}
 
@@ -220,10 +182,7 @@ export const FloatingChrome = memo(function FloatingChrome({
             <Button
               variant="ghost"
               size="xs"
-              className={cn(
-                FLOATING_PILL,
-                "h-8 shrink-0 gap-1 px-2.5 text-[11px] text-muted-foreground hover:text-foreground",
-              )}
+              className="h-8 shrink-0 gap-1 rounded-lg px-2 text-[11px] text-muted-foreground hover:text-foreground"
               onClick={onShowWorkflows}
             >
               <WorkflowIcon className="size-3" />
@@ -235,155 +194,29 @@ export const FloatingChrome = memo(function FloatingChrome({
           )}
         </div>
 
-        <div className="electron-no-drag window-inset-end pointer-events-auto flex shrink-0 items-center gap-1.5">
-          <div className={cn(FLOATING_PILL, PILL_ROW, "empty:hidden")}>
-            {/* The scan sees every agent process on the machine; before any session it can only be another app's. */}
-            {(!inventory || inventory.sessions.length > 0) && <LeakIndicator onReview={() => setMonitorOpen(true)} />}
-          </div>
-          <div className={cn(FLOATING_PILL, PILL_ROW, "empty:hidden")}>
-            <TokenUsageIndicator agentKind={activeAgentKind} />
-          </div>
-          <div className={cn(FLOATING_PILL, PILL_ROW, "empty:hidden")}>
-            <DeviceSwitcher />
-          </div>
-          {sessionId !== null && capabilitiesFor(activeAgentKind).sharing && can("share") && (
-            <div className={cn(FLOATING_PILL, PILL_ROW)}>
-              <ShareButton sessionId={sessionId} />
-            </div>
+        <div
+          ref={promptSlotRef}
+          className="electron-no-drag pointer-events-auto flex min-w-0 flex-1 justify-end overflow-hidden empty:pointer-events-none"
+        />
+
+        <div className="electron-no-drag window-inset-end pointer-events-auto flex shrink-0 items-center gap-1 empty:hidden">
+          {sessionId !== null && canShare && (
+            <ShareButton sessionId={sessionId} open={shareOpen} onOpenChange={setShareOpen} />
           )}
           {sessionId !== null && !isSubAgent && SessionHeaderActions && (
-            <div className={cn(FLOATING_PILL, PILL_ROW, "empty:hidden")}>
-              <SessionHeaderActions sessionId={sessionId} />
-            </div>
-          )}
-          {sessionId !== null && !isSubAgent && archiveToggle && (
-            <PillIconButton
-              icon={archiveToggle.icon}
-              label={archiveToggle.label}
-              disabledReason={archiveToggle.disabledReason}
-              onClick={archiveToggle.toggle}
-            />
-          )}
-
-          <div className={cn(FLOATING_PILL, PILL_ROW)}>
-            <DropdownMenu>
-              <DropdownMenuTrigger
-                render={<Button variant="ghost" size="icon-sm" aria-label="More actions" />}
-              >
-                <MoreHorizontal data-icon="inline-start" />
-              </DropdownMenuTrigger>
-              <DropdownMenuContent align="end" sideOffset={6} className="w-64">
-                {sessionId !== null && !isSubAgent && permissions.send && actions.handleProviderHandoff && (
-                  <>
-                    <DropdownMenuGroup>
-                      <DropdownMenuItem onClick={actions.handleProviderHandoff}>
-                        <ArrowRightLeft />
-                        Continue with another provider…
-                      </DropdownMenuItem>
-                    </DropdownMenuGroup>
-                    <DropdownMenuSeparator />
-                  </>
-                )}
-                <DropdownMenuGroup>
-                  {canViewUsage && (
-                    <DropdownMenuItem onClick={() => setUsageOpen(true)}>
-                      <ChartColumn />
-                      Usage &amp; cost…
-                    </DropdownMenuItem>
-                  )}
-                  <DropdownMenuItem onClick={() => setMonitorOpen(true)}>
-                    <Activity />
-                    Server monitor…
-                  </DropdownMenuItem>
-                  {networkUrl && (
-                    <DropdownMenuItem onClick={handleCopyNetworkUrl}>
-                      <Globe className="text-success" />
-                      Copy network URL
-                      <span className="ml-auto truncate pl-2 font-mono text-[11px] text-muted-foreground">
-                        {networkUrl}
-                      </span>
-                    </DropdownMenuItem>
-                  )}
-                </DropdownMenuGroup>
-                <DropdownMenuSeparator />
-                <DropdownMenuGroup>
-                  <DropdownMenuItem onClick={onOpenSettings}>
-                    <Settings />
-                    Settings
-                  </DropdownMenuItem>
-                </DropdownMenuGroup>
-                <DropdownMenuSeparator />
-                <DropdownMenuGroup>
-                  <DropdownMenuLabel>Help &amp; docs</DropdownMenuLabel>
-                  <DropdownMenuItem onClick={() => window.open(DOCUMENTATION_URL, "_blank", "noopener,noreferrer")}>
-                    <BookOpen />
-                    Documentation
-                  </DropdownMenuItem>
-                  <DropdownMenuItem onClick={onOpenKeyboardShortcuts}>
-                    <Keyboard />
-                    Keyboard shortcuts
-                  </DropdownMenuItem>
-                  <DropdownMenuItem onClick={() => window.open(REPORT_ISSUE_URL, "_blank", "noopener,noreferrer")}>
-                    <Bug />
-                    Report an issue
-                  </DropdownMenuItem>
-                </DropdownMenuGroup>
-                {can("killAny") && (
-                  <>
-                    <DropdownMenuSeparator />
-                    <DropdownMenuGroup>
-                      <DropdownMenuItem
-                        variant="destructive"
-                        onClick={onKillAll}
-                        disabled={killing}
-                      >
-                        <Skull />
-                        {killing ? "Stopping processes…" : "Stop all agent processes"}
-                      </DropdownMenuItem>
-                    </DropdownMenuGroup>
-                  </>
-                )}
-              </DropdownMenuContent>
-            </DropdownMenu>
-          </div>
-          {AccountControl && (
-            <div className={cn(FLOATING_PILL, PILL_ROW, "empty:hidden")}>
-              <AccountControl onLogout={onLogout} onOpenMainView={onOpenMainView} />
-            </div>
+            <SessionHeaderActions sessionId={sessionId} />
           )}
         </div>
       </div>
-
-      {canViewUsage && <UsageCostDialog open={usageOpen} onOpenChange={setUsageOpen} />}
-      <PowerMonitor open={monitorOpen} onOpenChange={setMonitorOpen} />
     </>
   )
 })
 
-interface PillIconButtonProps {
+function ChromeIconButton({ icon: Icon, label, onClick }: {
   icon: LucideIcon
   label: string
   onClick: () => void
-  /** Why the button is greyed out; shown instead of the label while disabled. */
-  disabledReason?: string
-}
-
-function PillIconButton({ icon: Icon, label, onClick, disabledReason }: PillIconButtonProps) {
-  if (disabledReason) {
-    return (
-      <DisabledHint reason={disabledReason}>
-        <Button
-          variant="ghost"
-          size="icon-sm"
-          disabled
-          aria-label={label}
-          className={cn(FLOATING_PILL, "size-8 shrink-0")}
-        >
-          <Icon data-icon="inline-start" />
-        </Button>
-      </DisabledHint>
-    )
-  }
+}) {
   return (
     <Tooltip>
       <TooltipTrigger
@@ -393,7 +226,7 @@ function PillIconButton({ icon: Icon, label, onClick, disabledReason }: PillIcon
             size="icon-sm"
             onClick={onClick}
             aria-label={label}
-            className={cn(FLOATING_PILL, "size-8 shrink-0")}
+            className="size-8 shrink-0 rounded-lg text-muted-foreground hover:text-foreground"
           />
         }
       >

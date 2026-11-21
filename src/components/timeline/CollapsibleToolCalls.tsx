@@ -91,7 +91,7 @@ export const CollapsibleToolCalls = memo(function CollapsibleToolCalls({
     <div className="min-w-0" data-tool-activity="" data-scroll-anchor="">
       <button
         type="button"
-        className="group/tool flex min-h-8 w-full min-w-0 items-center gap-2 rounded-md px-2 py-1 text-left text-[13px] leading-5 transition-colors hover:bg-muted/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+        className="group/tool flex min-h-8 pointer-fine:min-h-7 w-full min-w-0 items-center gap-2 rounded-md px-2 py-0.5 text-left text-[13px] leading-5 transition-colors hover:bg-muted/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
         aria-label={`${isOpen ? "Collapse" : "Expand"} ${title}: ${sentence}`}
         aria-expanded={isOpen}
         aria-controls={panelId}
@@ -111,7 +111,7 @@ export const CollapsibleToolCalls = memo(function CollapsibleToolCalls({
           {summary.awaitingReview > 0 && <span className="text-muted-foreground">{summary.awaitingReview} awaiting review</span>}
           {summary.unavailable > 0 && <span className="text-muted-foreground">{summary.unavailable} no result</span>}
         </span>
-        <ChevronRight className={cn("size-3.5 shrink-0 text-muted-foreground transition-transform", isOpen && "rotate-90")} aria-hidden="true" />
+        <ChevronRight className={cn("size-3.5 shrink-0 text-muted-foreground transition-[transform,opacity] pointer-fine:opacity-0 pointer-fine:group-hover/tool:opacity-100 pointer-fine:group-focus-visible/tool:opacity-100", isOpen && "rotate-90 pointer-fine:opacity-100")} aria-hidden="true" />
       </button>
       <Collapsible open={isOpen}>
         <CollapsibleContent id={panelId}>

@@ -8,7 +8,6 @@ interface ElectronUpdaterAPI {
   getState: () => Promise<ElectronUpdateState>
   onState: (cb: (state: ElectronUpdateState) => void) => () => void
   install: () => Promise<void>
-  dismissVersion: (version: string) => void
 }
 
 interface Window {

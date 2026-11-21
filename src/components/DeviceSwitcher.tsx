@@ -68,8 +68,9 @@ export function DeviceSwitcher({ compact = false }: { compact?: boolean }) {
   )
 
   // With no remote devices this only ever reads "This machine". Desktop keeps
-  // device management in the command palette; the compact (mobile) variant has
-  // no palette behind it, so it stays put as the only way in.
+  // device management in the command palette and shows an icon in the rail,
+  // which names the machine on hover; the compact (mobile) variant has no
+  // palette behind it, so it stays put as the only way in.
   if (!compact && devices.length === 0 && !activeIsRemote) return null
 
   return (
@@ -79,21 +80,26 @@ export function DeviceSwitcher({ compact = false }: { compact?: boolean }) {
           render={
             <Button
               variant="ghost"
-              size={compact ? "sm" : "xs"}
+              size={compact ? "sm" : "icon-sm"}
               aria-label="Switch device"
+              title={compact ? undefined : activeName}
               className={cn(
-                "max-w-40 justify-start",
-                compact && "h-10",
+                compact ? "h-10 max-w-40 justify-start" : "rounded-md",
+                !compact && activeIsRemote && "bg-primary/15 text-primary hover:bg-primary/25",
               )}
             />
           }
         >
           {activeIsRemote ? <Server data-icon="inline-start" /> : <Laptop data-icon="inline-start" />}
-          <span className="truncate">{activeName}</span>
-          <ChevronDown data-icon="inline-end" className="opacity-60" />
+          {compact && (
+            <>
+              <span className="truncate">{activeName}</span>
+              <ChevronDown data-icon="inline-end" className="opacity-60" />
+            </>
+          )}
         </DropdownMenuTrigger>
 
-        <DropdownMenuContent align="end" sideOffset={6} className="w-64">
+        <DropdownMenuContent side={compact ? "bottom" : "left"} align="end" sideOffset={6} className="w-64">
           <DropdownMenuGroup>
             <DropdownMenuLabel>Devices</DropdownMenuLabel>
 

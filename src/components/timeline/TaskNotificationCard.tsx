@@ -35,11 +35,19 @@ export function TaskNotificationCard({ notification }: { notification: TaskNotif
     <>
       <StatusIcon className={cn("size-3.5 shrink-0", statusStyle.color)} />
       <span className="min-w-0 flex-1 truncate text-foreground/90" title={notification.summary}>{notification.summary}</span>
-      <span className={cn("shrink-0 text-xs", statusStyle.color)}>{statusStyle.label}</span>
-      {hasDetail && <ChevronRight aria-hidden="true" className={cn("size-3.5 shrink-0 text-muted-foreground transition-transform", expanded && "rotate-90")} />}
+      <span className={cn("shrink-0 text-xs", statusStyle.color, notification.status === "completed" && "sr-only")}>{statusStyle.label}</span>
+      {hasDetail && (
+        <ChevronRight
+          aria-hidden="true"
+          className={cn(
+            "size-3.5 shrink-0 text-muted-foreground transition-[transform,opacity] pointer-fine:opacity-0 pointer-fine:group-hover/task:opacity-100 pointer-fine:group-focus-visible/task:opacity-100",
+            expanded && "rotate-90 pointer-fine:opacity-100",
+          )}
+        />
+      )}
     </>
   )
-  const rowClass = "flex min-h-8 w-full min-w-0 items-center gap-2 rounded-md px-2 py-1 text-left text-[13px] leading-5"
+  const rowClass = "flex min-h-8 pointer-fine:min-h-7 w-full min-w-0 items-center gap-2 rounded-md px-2 py-0.5 text-left text-[13px] leading-5"
 
   if (!hasDetail) return <div data-task-notification className={rowClass}>{row}</div>
 
@@ -50,7 +58,7 @@ export function TaskNotificationCard({ notification }: { notification: TaskNotif
           <button
             type="button"
             aria-label={`${expanded ? "Hide detail" : "Show detail"}: ${notification.summary}`}
-            className={cn(rowClass, "transition-colors hover:bg-muted/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring")}
+            className={cn(rowClass, "group/task transition-colors hover:bg-muted/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring")}
           />
         )}
       >

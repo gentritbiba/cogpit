@@ -171,16 +171,16 @@ export const UserMessage = memo(function UserMessage({ content, timestamp, onEdi
   }
 
   return (
-    <div className="group">
+    <div className="group relative">
       <div className="flex-1 min-w-0">
         {hasTags && (
-          <div className="mb-1 flex items-center gap-2">
+          <div className="flex items-center transition-opacity mb-1 pointer-fine:mb-0 pointer-fine:absolute pointer-fine:bottom-full pointer-fine:right-0 pointer-fine:z-10 pointer-fine:rounded-md pointer-fine:bg-background/90 pointer-fine:pointer-events-none pointer-fine:opacity-0 pointer-fine:backdrop-blur pointer-fine:group-hover:pointer-events-auto pointer-fine:group-hover:opacity-100 pointer-fine:focus-within:pointer-events-auto pointer-fine:focus-within:opacity-100">
             <Button
               type="button"
               variant="ghost"
               size="xs"
               onClick={() => setShowRaw(!showRaw)}
-              className="-ml-2 text-muted-foreground"
+              className="-ml-2 text-muted-foreground pointer-fine:ml-0"
             >
               {showRaw ? (
                 <>

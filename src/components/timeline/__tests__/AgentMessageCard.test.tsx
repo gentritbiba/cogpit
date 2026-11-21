@@ -138,9 +138,11 @@ describe("AgentMessageCard", () => {
     expect(preview).toContain("const x = 1")
   })
 
-  it("shows the body size on the expand affordance", () => {
+  it("keeps the body size on the expand affordance's tooltip, off the line", () => {
     render(<AgentMessageCard sender="w" body={"x".repeat(1579)} timestamp="" />)
-    expect(screen.getByRole("button", { name: /expand/i }).textContent).toContain("1,579")
+    const expand = screen.getByRole("button", { name: /expand/i })
+    expect(expand).toHaveTextContent(/^\s*Expand$/)
+    expect(expand).toHaveAttribute("title", "1,579 characters")
   })
 
   it("renders the expanded body as markdown", () => {
@@ -387,7 +389,7 @@ describe("AgentMessageCard", () => {
     it("keeps the expand affordance when the state line is gone", () => {
       render(<AgentMessageCard sender="w" body={REPORT} timestamp={ASKED} />)
       const expand = screen.getByRole("button", { name: /expand/i })
-      expect(expand.textContent).toContain(String(REPORT.length))
+      expect(expand).toHaveAttribute("title", `${REPORT.length} characters`)
       fireEvent.click(expand)
       expect(screen.getByTestId("agent-message-body")).toBeInTheDocument()
     })
