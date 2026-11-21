@@ -1,12 +1,10 @@
 import { useMemo } from "react"
 import { ArrowUp } from "lucide-react"
 import { Button } from "@/components/ui/button"
-import { FLOATING_PILL } from "@/components/header-shared"
 import { crewSessionTitle } from "@/components/LiveSessions/crew"
 import { useSessionInventoryOptional } from "@/contexts/SessionInventoryContext"
 import { useSessionNames } from "@/hooks/useSessionNames"
 import { revealSessionById, revealSessionPath, sessionPath } from "@/lib/revealSession"
-import { cn } from "@/lib/utils"
 
 /**
  * For a session another session started through Cogpit: who it reports to,
@@ -39,11 +37,8 @@ export function CrewParentPill({ sessionId }: { sessionId: string }) {
       onClick={open}
       aria-label={`Reports to ${title}`}
       title={`Open ${title}, which started this session`}
-      className={cn(
-        FLOATING_PILL,
-        // Gives way before the session's own pill: capped, and quicker to shrink.
-        "h-8 min-w-12 max-w-56 shrink-[4] gap-1.5 px-2.5 text-xs text-muted-foreground hover:text-foreground",
-      )}
+      // Gives way before the session's own title: capped, and quicker to shrink.
+      className="h-8 min-w-12 max-w-56 shrink-[4] gap-1.5 rounded-lg px-2 text-xs text-muted-foreground hover:text-foreground"
     >
       <ArrowUp className="size-3 shrink-0" aria-hidden="true" />
       <span className="shrink-0 max-[1200px]:hidden">Reports to</span>

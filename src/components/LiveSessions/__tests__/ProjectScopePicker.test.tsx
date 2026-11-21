@@ -33,7 +33,7 @@ describe("ProjectScopePicker", () => {
 
     const trigger = screen.getByRole("button", { name: "Choose a project to focus on" })
     expect(trigger).toHaveTextContent("All projects")
-    expect(trigger).toHaveTextContent("2 projects, 15 sessions")
+    expect(trigger).toHaveAttribute("title", "2 projects, 15 sessions")
 
     const list = within(screen.getByTestId("popover"))
     const app = list.getByText("App").closest("[cmdk-item]")!
@@ -46,7 +46,7 @@ describe("ProjectScopePicker", () => {
     expect(onChange).toHaveBeenCalledWith("work/app")
   })
 
-  it("becomes the focused project's masthead with its actions beside it", () => {
+  it("becomes the focused project's header row with its actions beside it", () => {
     const onChange = vi.fn()
     render(
       <ProjectScopePicker
@@ -63,8 +63,10 @@ describe("ProjectScopePicker", () => {
 
     const trigger = screen.getByRole("button", { name: "Focused on App. Change project" })
     expect(trigger).toHaveTextContent("App")
-    expect(trigger).toHaveTextContent("12 sessions, 2 live")
-    expect(screen.getByRole("button", { name: "New" })).toBeInTheDocument()
+    expect(trigger).toHaveAttribute("title", "12 sessions, 2 live")
+    expect(trigger).not.toHaveTextContent("12 sessions")
+    const action = screen.getByRole("button", { name: "New" })
+    expect(trigger.compareDocumentPosition(action) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
 
     fireEvent.click(within(screen.getByTestId("popover")).getByText("All projects"))
     expect(onChange).toHaveBeenCalledWith(null)
@@ -87,6 +89,22 @@ describe("ProjectScopePicker", () => {
     render(<ProjectScopePicker options={options} value="work/gone" focused={null} totalSessions={15} onChange={vi.fn()} />)
 
     const trigger = screen.getByRole("button", { name: "Focused on work/gone. Change project" })
-    expect(trigger).toHaveTextContent("No sessions listed")
+    expect(trigger).toHaveAttribute("title", "No sessions listed")
+  })
+
+  it("is one row: the trigger, a spacer, then the actions, in the layout it is given", () => {
+    const { container } = render(
+      <ProjectScopePicker options={options} value={null} focused={null} totalSessions={15} onChange={vi.fn()} className="electron-drag">
+        <button type="button">New</button>
+      </ProjectScopePicker>,
+    )
+
+    const row = container.firstElementChild as HTMLElement
+    expect(row).toHaveClass("electron-drag")
+    const parts = Array.from(row.children).filter((child) => child.getAttribute("data-testid") !== "popover")
+    expect(parts).toHaveLength(3)
+    expect(parts[0]).toBe(screen.getByRole("button", { name: "Choose a project to focus on" }))
+    expect(parts[1]).toHaveClass("flex-1")
+    expect(parts[2]).toBe(screen.getByRole("button", { name: "New" }))
   })
 })

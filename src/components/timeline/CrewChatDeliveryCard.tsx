@@ -36,7 +36,7 @@ export function CrewChatDeliveryCard({ delivery }: { delivery: CrewChatDeliveryP
   }
 
   return (
-    <article aria-label={`Crew chat message from ${delivery.author}`} className="grid grid-cols-[1.5rem_minmax(0,1fr)] gap-x-2.5" title={`Crew chat message ${delivery.sequence}`}>
+    <article aria-label={`Crew chat message from ${delivery.author}`} className="group/crew grid grid-cols-[1.5rem_minmax(0,1fr)] gap-x-2.5" title={`Crew chat message ${delivery.sequence}`}>
       <CrewAvatar role={role} sessionId={authorId} kinds={kinds} tints={tints} className="row-span-2 mt-px" />
       <div className="flex min-w-0 items-center gap-1.5 leading-6">
         <span className="truncate text-[13px] font-medium">{delivery.author}</span>
@@ -55,7 +55,7 @@ export function CrewChatDeliveryCard({ delivery }: { delivery: CrewChatDeliveryP
             {open ? "Hide message" : "Show message"}
           </Button>
         ) : (
-          <span className="ml-auto flex shrink-0 items-center gap-1 pl-2 text-xs text-muted-foreground">
+          <span className="ml-auto flex shrink-0 items-center gap-1 pl-2 text-xs text-muted-foreground transition-opacity pointer-fine:opacity-0 pointer-fine:group-hover/crew:opacity-100">
             <MessagesSquare aria-hidden="true" className="size-3.5" />
             Crew chat
           </span>

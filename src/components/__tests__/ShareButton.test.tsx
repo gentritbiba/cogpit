@@ -1,3 +1,4 @@
+import { useState } from "react"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { cleanup, render, screen } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
@@ -40,6 +41,21 @@ function makeShare(overrides: Partial<HostShare> = {}): HostShare {
   }
 }
 
+/** The session menu's "Share session…" item stands in for whatever opens the popover. */
+function SharedSession({ onOpenChange }: { onOpenChange?: (open: boolean) => void }) {
+  const [open, setOpen] = useState(false)
+  function change(next: boolean): void {
+    setOpen(next)
+    onOpenChange?.(next)
+  }
+  return (
+    <>
+      <button type="button" onClick={() => change(true)}>Share session…</button>
+      <ShareButton sessionId="s1" open={open} onOpenChange={change} />
+    </>
+  )
+}
+
 /** Minimal stand-in for the parts of Response the share hook reads. */
 function jsonResponse(status: number, body: unknown): Response {
   return { ok: status < 400, status, json: async () => body } as unknown as Response
@@ -53,8 +69,8 @@ function shareUrl(): string {
 
 async function openPopover(user: ReturnType<typeof userEvent.setup>): Promise<void> {
   const trigger =
-    screen.queryByRole("button", { name: "Share session" }) ??
-    screen.getByRole("button", { name: "Session is shared" })
+    screen.queryByRole("button", { name: "Session is shared" }) ??
+    screen.getByRole("button", { name: "Share session…" })
   await user.click(trigger)
 }
 
@@ -97,9 +113,33 @@ describe("ShareButton", () => {
     vi.clearAllMocks()
   })
 
+  it("shows no button while the session is unshared and the popover closed", async () => {
+    const user = userEvent.setup()
+    const onOpenChange = vi.fn()
+    render(<SharedSession onOpenChange={onOpenChange} />)
+    await vi.waitFor(() => expect(mocks.authFetch).toHaveBeenCalledWith("/api/shares", undefined))
+    expect(screen.queryByRole("button", { name: "Share session" })).not.toBeInTheDocument()
+
+    await openPopover(user)
+    expect(screen.getByRole("button", { name: "Share session" })).toBeInTheDocument()
+
+    await user.keyboard("{Escape}")
+    expect(onOpenChange).toHaveBeenLastCalledWith(false)
+    await vi.waitFor(() =>
+      expect(screen.queryByRole("button", { name: "Share session" })).not.toBeInTheDocument())
+  })
+
+  it("keeps an existing share visible while closed", async () => {
+    server.shares = [makeShare()]
+    render(<SharedSession />)
+
+    expect(await screen.findByRole("button", { name: "Session is shared" })).toBeInTheDocument()
+    expect(screen.queryByRole("menu")).not.toBeInTheDocument()
+  })
+
   it("enables sharing from the off state and shows the passphrase once", async () => {
     const user = userEvent.setup()
-    render(<ShareButton sessionId="s1" />)
+    render(<SharedSession />)
 
     await openPopover(user)
     expect(await screen.findByText(/join this session/i)).toBeInTheDocument()
@@ -116,7 +156,7 @@ describe("ShareButton", () => {
 
   it("masks the passphrase on any later open and offers a regenerate", async () => {
     const user = userEvent.setup()
-    render(<ShareButton sessionId="s1" />)
+    render(<SharedSession />)
 
     await openPopover(user)
     await enableSharing(user)
@@ -134,7 +174,7 @@ describe("ShareButton", () => {
 
   it("returns to the off state after stop sharing", async () => {
     const user = userEvent.setup()
-    render(<ShareButton sessionId="s1" />)
+    render(<SharedSession />)
 
     await openPopover(user)
     await enableSharing(user)
@@ -147,7 +187,7 @@ describe("ShareButton", () => {
 
   it("copies the link and the passphrase together", async () => {
     const user = userEvent.setup()
-    render(<ShareButton sessionId="s1" />)
+    render(<SharedSession />)
 
     await openPopover(user)
     await enableSharing(user)
@@ -160,7 +200,7 @@ describe("ShareButton", () => {
 
   it("notes that the link is local-only while network access is off", async () => {
     const user = userEvent.setup()
-    render(<ShareButton sessionId="s1" />)
+    render(<SharedSession />)
 
     await openPopover(user)
     await screen.findByRole("button", { name: "Enable sharing" })
@@ -169,7 +209,7 @@ describe("ShareButton", () => {
     await user.keyboard("{Escape}")
     cleanup()
     mocks.networkAccessDisabled = true
-    render(<ShareButton sessionId="s1" />)
+    render(<SharedSession />)
 
     await openPopover(user)
     expect(await screen.findByText(/only works on this machine/i)).toBeInTheDocument()
@@ -178,7 +218,7 @@ describe("ShareButton", () => {
   it("surfaces the server's refusal inline when sharing is not allowed", async () => {
     const user = userEvent.setup()
     server.refusesToShare = true
-    render(<ShareButton sessionId="s1" />)
+    render(<SharedSession />)
 
     await openPopover(user)
     await user.click(await screen.findByRole("button", { name: "Enable sharing" }))
@@ -190,7 +230,7 @@ describe("ShareButton", () => {
   it("reports how many guests are connected", async () => {
     const user = userEvent.setup()
     server.shares = [makeShare({ guests: 2 })]
-    render(<ShareButton sessionId="s1" />)
+    render(<SharedSession />)
 
     await openPopover(user)
 
@@ -203,7 +243,7 @@ describe("ShareButton", () => {
       activeDevice: { name: "omarchy", host: "omarchy.cogpit.dev", port: 443, tls: true },
     }
     const user = userEvent.setup()
-    render(<ShareButton sessionId="s1" />)
+    render(<SharedSession />)
 
     await openPopover(user)
     await enableSharing(user)
@@ -218,7 +258,7 @@ describe("ShareButton", () => {
       activeDevice: { name: "agentbox", host: "192.168.10.232", port: 19384 },
     }
     const user = userEvent.setup()
-    render(<ShareButton sessionId="s1" />)
+    render(<SharedSession />)
 
     await openPopover(user)
 
@@ -228,7 +268,7 @@ describe("ShareButton", () => {
   it("withholds a device's link until the device list has loaded", async () => {
     mocks.devices = { activeDeviceId: "dev_1", activeDevice: undefined }
     const user = userEvent.setup()
-    render(<ShareButton sessionId="s1" />)
+    render(<SharedSession />)
 
     await openPopover(user)
     await enableSharing(user)

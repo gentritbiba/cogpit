@@ -15,6 +15,8 @@ interface WorkspaceActivityBarProps {
   activePanelId: string | null
   onTogglePanel: (panelId: string) => void
   actions?: readonly WorkspaceActivityAction[]
+  /** Pinned to the rail's bottom: what belongs to the app rather than a panel. */
+  footer?: ReactNode
 }
 
 export interface WorkspaceActivityAction {
@@ -51,7 +53,9 @@ function ActivityBarButton({
             onClick={onClick}
             className={cn(
               "relative rounded-md",
-              active && "bg-sidebar-primary text-sidebar-primary-foreground hover:bg-sidebar-primary/90 hover:text-sidebar-primary-foreground",
+              active
+                ? "bg-sidebar-primary text-sidebar-primary-foreground hover:bg-sidebar-primary/90 hover:text-sidebar-primary-foreground"
+                : "text-muted-foreground hover:text-foreground",
             )}
           />
         )}
@@ -77,9 +81,10 @@ export function WorkspaceActivityBar({
   activePanelId,
   onTogglePanel,
   actions = [],
+  footer,
 }: WorkspaceActivityBarProps) {
   const available = availableWorkspacePanels(panels, context)
-  if (available.length === 0 && actions.length === 0) return null
+  if (available.length === 0 && actions.length === 0 && !footer) return null
 
   return (
     <aside
@@ -122,6 +127,10 @@ export function WorkspaceActivityBar({
           </ActivityBarButton>
         )
       })}
+
+      {footer && (
+        <div className="mt-auto flex flex-col items-center gap-1 text-muted-foreground">{footer}</div>
+      )}
     </aside>
   )
 }

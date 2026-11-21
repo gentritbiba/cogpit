@@ -27,8 +27,8 @@ export function clockLabel(at: string | number): string {
   return `${date.toLocaleDateString([], { month: "short", day: "numeric" })}, ${time}`
 }
 
-/** The provider's mark in a disc, in its brand color where it has one, with the session's state as a dot on its edge. */
-function SessionAvatar({ kind, state }: { kind: AgentKind | null; state: SessionRowState }) {
+/** The provider's mark, in its brand color where it has one, with the session's state as a dot on its edge. */
+function SessionMark({ kind, state }: { kind: AgentKind | null; state: SessionRowState }) {
   const Icon = kind ? agentIcon(kind) : Bot
   const { dot } = STATES[state]
   const brand = kind ? agentMarkColor(kind) : null
@@ -36,15 +36,10 @@ function SessionAvatar({ kind, state }: { kind: AgentKind | null; state: Session
     <span
       aria-hidden="true"
       style={brand ? { "--mark": brand } as CSSProperties : undefined}
-      className={cn(
-        "relative flex size-8 shrink-0 items-center justify-center rounded-full",
-        brand
-          ? "bg-[color-mix(in_oklab,var(--mark)_16%,transparent)] text-[var(--mark)] ring-1 ring-[color-mix(in_oklab,var(--mark)_35%,transparent)]"
-          : "bg-muted text-foreground/85 ring-1 ring-border/70",
-      )}
+      className={cn("relative flex size-4 shrink-0 items-center justify-center", brand ? "text-[var(--mark)]" : "text-muted-foreground")}
     >
       <Icon className="size-4" />
-      {dot && <span data-session-dot={state} className={cn("absolute -bottom-0.5 -right-0.5 size-2.5 rounded-full ring-2 ring-background", dot)} />}
+      {dot && <span data-session-dot={state} className={cn("absolute -bottom-0.5 -right-1 size-2 rounded-full ring-2 ring-background", dot)} />}
     </span>
   )
 }
@@ -53,7 +48,7 @@ interface SessionRowProps {
   kind: AgentKind | null
   state: SessionRowState
   title: string
-  /** One line under the title: what it reported, or what it was asked. */
+  /** Beside the title, as far as the line allows: what it reported, or what it was asked. */
   preview?: string
   /** Replaces the state's own word, such as a live "Using Bash". */
   statusLabel?: string
@@ -81,24 +76,27 @@ export function SessionRow({ kind, state, title, preview, statusLabel, time, onO
 
   const body = (
     <>
-      <SessionAvatar kind={kind} state={state} />
-      <span className="flex min-w-0 flex-1 flex-col">
-        <span className="truncate text-sm font-medium text-foreground">{title}</span>
-        {preview && <span className="truncate text-xs leading-5 text-muted-foreground">{preview}</span>}
+      <SessionMark kind={kind} state={state} />
+      <span className="flex min-w-0 flex-1 items-baseline gap-2">
+        <span className="max-w-[60%] shrink-0 truncate text-sm font-medium text-foreground">{title}</span>
+        {preview && <span className="min-w-0 truncate text-xs text-muted-foreground">{preview}</span>}
       </span>
-      <span className="flex shrink-0 items-center gap-2.5 text-xs">
+      <span className="flex shrink-0 items-center gap-2 text-xs">
+        {clock && <span className="hidden tabular-nums text-muted-foreground transition-opacity pointer-fine:opacity-0 pointer-fine:group-hover/session:opacity-100 sm:inline">{clock}</span>}
         <span className={cn("max-w-40 truncate", text)}>{status}</span>
-        {clock && <span className="hidden tabular-nums text-muted-foreground sm:inline">{clock}</span>}
       </span>
       {(unfolds || onOpen) && (
         <ChevronRight
           aria-hidden="true"
-          className={cn("size-4 shrink-0 text-muted-foreground transition-transform duration-150 motion-reduce:transition-none", unfolds && open && "rotate-90")}
+          className={cn(
+            "size-3.5 shrink-0 text-muted-foreground transition-[transform,opacity] duration-150 motion-reduce:transition-none pointer-fine:opacity-0 pointer-fine:group-hover/session:opacity-100",
+            unfolds && open && "rotate-90 pointer-fine:opacity-100",
+          )}
         />
       )}
     </>
   )
-  const rowClass = "flex min-w-0 flex-1 items-center gap-3 rounded-xl px-2 py-2 text-left outline-none transition-colors hover:bg-muted/50 focus-visible:ring-2 focus-visible:ring-ring"
+  const rowClass = "flex min-h-8 pointer-fine:min-h-7 min-w-0 flex-1 items-center gap-2.5 rounded-lg px-1.5 py-0.5 text-left outline-none transition-colors hover:bg-muted/50 focus-visible:ring-2 focus-visible:ring-ring"
 
   return (
     <div data-session-row={state} className="group/session min-w-0">
@@ -138,7 +136,7 @@ export function SessionRow({ kind, state, title, preview, statusLabel, time, onO
       {unfolds && (
         <Collapsible open={open}>
           <CollapsibleContent id={detailId}>
-            <div className="mb-2 ml-[52px] mr-2 min-w-0">{detail}</div>
+            <div className="mb-2 ml-8 mr-2 min-w-0">{detail}</div>
           </CollapsibleContent>
         </Collapsible>
       )}

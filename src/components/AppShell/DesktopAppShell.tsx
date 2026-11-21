@@ -1,5 +1,3 @@
-import { ProviderUpdateBanner } from "@/components/ProviderUpdateBanner"
-import { UpdateBanner } from "@/components/UpdateBanner"
 import { DesktopOverlays } from "./DesktopOverlays"
 import { DesktopWorkspace } from "./DesktopWorkspace"
 import type { DesktopAppShellProps } from "./desktopTypes"
@@ -14,8 +12,6 @@ export function DesktopAppShell({
   return (
     <div className="flex h-dvh flex-col bg-canvas text-foreground">
       {chrome.backgroundServers}
-      <UpdateBanner />
-      <ProviderUpdateBanner />
 
       <DesktopWorkspace
         navigation={navigation}

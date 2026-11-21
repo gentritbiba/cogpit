@@ -8,6 +8,7 @@ import {
   FileCode2,
   MoreHorizontal,
   Plus,
+  Power,
   Search,
   Workflow as WorkflowIcon,
 } from "lucide-react"
@@ -25,7 +26,7 @@ import {
 import { Separator } from "@/components/ui/separator"
 import { Spinner } from "@/components/ui/Spinner"
 import { DeviceSwitcher } from "@/components/DeviceSwitcher"
-import { ContextBadge, LiveIndicator } from "@/components/header-shared"
+import { ContextMeter, LiveIndicator } from "@/components/header-shared"
 import { useSessionArchiveToggle } from "@/hooks/useSessionArchive"
 import type { SessionSource } from "@/lib/sessionSource"
 import { projectName } from "@/lib/format"
@@ -55,6 +56,8 @@ interface MobileSessionInfoBarProps extends SessionInfoBarProps {
   isLive: boolean
   canArchive: boolean
   onProviderHandoff?: () => void
+  /** Absent while there is no running process to stop. */
+  onStopSession?: () => void
   /** Shown only for an agent whose transcript reports its context window. */
   contextUsage: ContextUsage | null
 }
@@ -66,6 +69,7 @@ export function MobileSessionInfoBar({
   isLive,
   canArchive,
   onProviderHandoff,
+  onStopSession,
   contextUsage,
   headerAccessory,
   creatingSession,
@@ -103,7 +107,7 @@ export function MobileSessionInfoBar({
 
       <DeviceSwitcher compact />
       <Separator orientation="vertical" className="h-4" />
-      <ContextBadge usage={contextUsage} warnOnly />
+      <ContextMeter usage={contextUsage} />
 
       <div className="flex min-w-0 flex-1 items-center justify-center gap-1.5">
         <span className="truncate text-xs font-medium text-muted-foreground">
@@ -195,6 +199,17 @@ export function MobileSessionInfoBar({
               </DropdownMenuItem>
             )}
           </DropdownMenuGroup>
+          {onStopSession && (
+            <>
+              <DropdownMenuSeparator />
+              <DropdownMenuGroup>
+                <DropdownMenuItem variant="destructive" onClick={onStopSession}>
+                  <Power />
+                  <span>Stop session</span>
+                </DropdownMenuItem>
+              </DropdownMenuGroup>
+            </>
+          )}
         </DropdownMenuContent>
       </DropdownMenu>
     </header>

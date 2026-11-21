@@ -2,7 +2,7 @@ import { app, BrowserWindow, ipcMain, net } from "electron"
 import pkg from "electron-updater"
 const { autoUpdater } = pkg
 import { join } from "node:path"
-import { readFileSync, writeFileSync, existsSync } from "node:fs"
+import { readFileSync, existsSync } from "node:fs"
 import { DEFAULT_FEED_URL, fetchFeed, isNewer, pickMacArchive } from "./updateFeed.ts"
 import { replaceableAppPath, stageMacUpdate, swapAfterExit, type StagedMacUpdate } from "./macBundleUpdate.ts"
 
@@ -21,26 +21,12 @@ type Installer = "mac" | "nsis" | "appimage" | "pacman" | "notify"
 
 const CHECK_INTERVAL_MS = 6 * 60 * 60 * 1000
 const RELEASES_URL = "https://github.com/gentritbiba/cogpit/releases"
-const PREFS_FILE = "update-preferences.json"
 
 let state: UpdateState = { status: "idle" }
 
 function setState(next: UpdateState): void {
   state = next
   for (const window of BrowserWindow.getAllWindows()) window.webContents.send("update:state", state)
-}
-
-function prefsPath(): string {
-  return join(app.getPath("userData"), PREFS_FILE)
-}
-
-function dismissedVersion(): string | null {
-  if (!existsSync(prefsPath())) return null
-  try {
-    return JSON.parse(readFileSync(prefsPath(), "utf-8")).dismissedVersion ?? null
-  } catch {
-    return null
-  }
 }
 
 function installerFor(): Installer {
@@ -57,8 +43,8 @@ function releaseUrl(version: string): string {
   return `${RELEASES_URL}/tag/v${version}`
 }
 
+/** A release Cogpit cannot install itself. The renderer lists it in the app menu and never prompts for it. */
 function announce(version: string, via: "download" | "package-manager"): void {
-  if (dismissedVersion() === version) return
   setState({ status: "available", version, url: releaseUrl(version), via })
 }
 
@@ -130,9 +116,6 @@ function startNotifier(feedUrl: string): () => Promise<unknown> {
 
 export function initUpdater(): void {
   ipcMain.handle("update:get-state", () => state)
-  ipcMain.on("update:dismiss", (_event, version: string) => {
-    writeFileSync(prefsPath(), JSON.stringify({ dismissedVersion: version }, null, 2))
-  })
   if (!app.isPackaged) return
 
   // Points every installer at a generic feed instead of the GitHub release, e.g. a mirror or a local QA server.

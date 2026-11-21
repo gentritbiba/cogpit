@@ -69,23 +69,48 @@ describe("SessionCard", () => {
     expect(cardBody().getByText("Badge: view")).toBeInTheDocument()
   })
 
-  it("shows the whole title, the last prompt, branch, turns and selects on click", () => {
+  it("shows the whole title and selects on click", () => {
     const title = "A title long enough that the compact row would have cut it off before the end"
-    const { onSelectSession } = renderCard({
-      aiTitle: title,
+    const { onSelectSession } = renderCard({ aiTitle: title })
+
+    const body = cardBody()
+    expect(body.getByText(title)).toBeInTheDocument()
+
+    fireEvent.click(body.getByText(title))
+    expect(onSelectSession).toHaveBeenCalledWith("-work-app", "s.jsonl")
+  })
+
+  it("keeps the last prompt, branch and turn count off the card and in the preview", () => {
+    renderCard({
+      aiTitle: "Sidebar focus",
       lastUserMessage: "Please finish the sidebar",
       gitBranch: "feature/focus",
       turnCount: 7,
     })
 
     const body = cardBody()
-    expect(body.getByText(title)).toBeInTheDocument()
-    expect(body.getByText("Please finish the sidebar")).toBeInTheDocument()
-    expect(body.getByText("feature/focus")).toBeInTheDocument()
-    expect(body.getByText("7 turns")).toBeInTheDocument()
+    expect(body.queryByText("Please finish the sidebar")).not.toBeInTheDocument()
+    expect(body.queryByText("feature/focus")).not.toBeInTheDocument()
+    expect(body.queryByText("7 turns")).not.toBeInTheDocument()
+    const preview = screen.getByTestId("preview")
+    expect(preview).toHaveTextContent("Please finish the sidebar")
+    expect(preview).toHaveTextContent("feature/focus")
+    expect(preview).toHaveTextContent("7 turns")
+  })
 
-    fireEvent.click(body.getByText(title))
-    expect(onSelectSession).toHaveBeenCalledWith("-work-app", "s.jsonl")
+  it("says what a live session is doing as plain text on its meta line", () => {
+    renderCard({ agentStatus: "tool_use", agentToolName: "Bash" }, { proc: proc() })
+
+    const state = document.querySelector("[data-session-live-state]")
+    expect(state).toHaveTextContent("Using Bash")
+    expect(state?.closest("button")).toBe(document.querySelector("[data-live-session]"))
+    expect(state?.closest("[data-session-card]")?.querySelector("[data-slot=badge]")).toBeNull()
+  })
+
+  it("prints no live state for a session that is not live", () => {
+    renderCard({ agentStatus: "completed", lastModified: "2026-01-01T10:00:00Z" })
+
+    expect(document.querySelector("[data-session-live-state]")).toBeNull()
   })
 
   it("previews the project and the full first prompt on hover", () => {

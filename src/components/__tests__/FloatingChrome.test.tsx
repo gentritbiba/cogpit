@@ -1,17 +1,16 @@
+import type { ComponentProps } from "react"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
-import { computeSessionDigest, EMPTY_SESSION_DIGEST, type SessionView } from "../../../shared/session/sessionDigest"
-import { cleanup, fireEvent, render, screen } from "@testing-library/react"
+import { cleanup, render, screen, within } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { FloatingChrome } from "@/components/FloatingChrome"
-import type { AccountControlProps } from "@/edition/contract"
 import { __installEditionUiForTest, __resetEditionUiForTest } from "@/edition/registry"
 import { setMe, __resetCapabilitiesForTest } from "@/lib/capabilities"
 import { getResumeCommand, type AgentKind } from "@/lib/agents"
 import { permissionsForAccess, type SessionAccessState } from "@/lib/sessionAccessPermissions"
 import { NO_CAPABILITIES } from "../../../shared/contracts/identity"
-import { DOCUMENTATION_URL, REPORT_ISSUE_URL } from "../../../shared/helpLinks"
 import type { ActiveSessionInfo } from "@/components/LiveSessions/types"
-import type { Turn } from "../../../shared/session/types"
+import type { RawMessage, Turn } from "../../../shared/session/types"
+import { computeSessionDigest, EMPTY_SESSION_DIGEST, type SessionView } from "../../../shared/session/sessionDigest"
 import { showSession } from "@/__tests__/sessionContextMock"
 
 const mocks = vi.hoisted(() => ({
@@ -30,8 +29,8 @@ const mocks = vi.hoisted(() => ({
   isLive: false,
   level: "own" as SessionAccessState,
   handoff: vi.fn(),
+  stopSession: vi.fn(),
   copy: vi.fn(),
-  copyToClipboard: vi.fn(),
   dispatch: vi.fn(),
   authFetch: vi.fn(),
   jsonFetch: vi.fn(),
@@ -47,11 +46,12 @@ vi.mock("@/contexts/AppContext", () => ({
   useAppContext: () => ({ config: mocks.config, dispatch: mocks.dispatch }),
 }))
 vi.mock("@/contexts/SessionContext", async () => (await import("@/__tests__/sessionContextMock")).withSessionHooks({
+  useSessionChatContextOptional: () => null,
   useSessionContext: () => ({
     sessionSource: mocks.sessionSource,
     isLive: mocks.isLive,
     permissions: permissionsForAccess(mocks.level),
-    actions: { handleProviderHandoff: mocks.handoff },
+    actions: { handleProviderHandoff: mocks.handoff, handleStopSession: mocks.stopSession },
   }),
 }))
 vi.mock("@/contexts/SessionInventoryContext", () => ({
@@ -66,32 +66,17 @@ vi.mock("@/contexts/SessionInventoryContext", () => ({
 vi.mock("@/hooks/useCopyWithFeedback", () => ({
   useCopyWithFeedback: () => [false, mocks.copy],
 }))
-vi.mock("@/hooks/useCapability", () => ({ useCapability: () => true }))
 vi.mock("@/lib/auth", () => ({
   authFetch: mocks.authFetch,
   jsonFetch: mocks.jsonFetch,
 }))
-vi.mock("@/lib/utils", async (importOriginal) => ({
-  ...(await importOriginal<typeof import("@/lib/utils")>()),
-  copyToClipboard: mocks.copyToClipboard,
-}))
 vi.mock("sonner", () => ({
   toast: Object.assign(mocks.toast, { success: mocks.toastSuccess, error: mocks.toastError }),
-}))
-vi.mock("@/components/TokenUsageWidget", () => ({ TokenUsageIndicator: () => null }))
-vi.mock("@/components/LeakIndicator", () => ({ LeakIndicator: () => <span>Leak monitor</span> }))
-vi.mock("@/components/DeviceSwitcher", () => ({ DeviceSwitcher: () => null }))
-vi.mock("@/components/PowerMonitor", () => ({
-  PowerMonitor: ({ open }: { open: boolean }) => (open ? <div data-testid="power-monitor" /> : null),
-}))
-vi.mock("@/components/UsageCostDialog", () => ({
-  UsageCostDialog: ({ open }: { open: boolean }) => (open ? <div data-testid="usage-dialog" /> : null),
 }))
 
 const PROPS = {
   showSidebar: true,
-  sidebarShortcut: "\u2318B",
-  killing: false,
+  sidebarShortcut: "⌘B",
   creatingSession: false,
   onNewSession: vi.fn(),
   onDuplicateSession: vi.fn(),
@@ -100,11 +85,6 @@ const PROPS = {
   onShowWorkflows: vi.fn(),
   workflowCount: 0,
   onToggleSidebar: vi.fn(),
-  onKillAll: vi.fn(),
-  onOpenSettings: vi.fn(),
-  onOpenKeyboardShortcuts: vi.fn(),
-  onLogout: vi.fn(),
-  onOpenMainView: vi.fn(),
 }
 
 function prTurn(id: string, command: string, result: string): Turn {
@@ -128,6 +108,21 @@ function prTurn(id: string, command: string, result: string): Turn {
     tokenUsage: null,
     model: null,
   }
+}
+
+function usage(model: string, inputTokens: number): RawMessage {
+  return {
+    type: "assistant",
+    message: {
+      model,
+      usage: {
+        input_tokens: inputTokens,
+        output_tokens: 1_000,
+        cache_creation_input_tokens: 10_000,
+        cache_read_input_tokens: 5_000,
+      },
+    },
+  } as RawMessage
 }
 
 function makeSession(overrides: Partial<SessionView> = {}): SessionView {
@@ -173,36 +168,47 @@ function withScannedSession(
   }]
 }
 
-function renderChrome(overrides: Partial<typeof PROPS> = {}): ReturnType<typeof render> {
+function renderChrome(overrides: Partial<ComponentProps<typeof FloatingChrome>> = {}): ReturnType<typeof render> {
   return render(<FloatingChrome {...PROPS} {...overrides} />)
 }
 
-function sessionPill(): HTMLElement {
-  return screen.getByRole("button", { name: /my-session/ })
+function sessionTitle(): HTMLElement {
+  return screen.getByRole("button", { name: /Session menu$/ })
 }
 
-async function openSessionDetails(
-  user: ReturnType<typeof userEvent.setup>,
-): Promise<HTMLElement> {
-  await user.hover(sessionPill())
-  return screen.findByRole("tooltip")
+type User = ReturnType<typeof userEvent.setup>
+
+async function openSessionMenu(user: User): Promise<HTMLElement> {
+  await user.click(sessionTitle())
+  return screen.findByRole("menu")
+}
+
+async function openSessionDetails(user: User): Promise<HTMLElement> {
+  const menu = await openSessionMenu(user)
+  const details = menu.querySelector<HTMLElement>("[data-session-details]")
+  expect(details).not.toBeNull()
+  return details as HTMLElement
+}
+
+function resetSession(): void {
+  mocks.config = { networkUrl: null, defaultAgentKind: "claude", networkAccessDisabled: false }
+  showSession(makeSession())
+  mocks.sessionSource = {
+    dirName: "-tmp-project",
+    fileName: "test-session-id.jsonl",
+    watchOffset: 0, loadId: 1,
+    agentKind: "claude",
+  }
+  mocks.isLive = false
+  mocks.level = "own"
+  mocks.inventorySessions = []
+  mocks.authFetch.mockResolvedValue({ ok: true, status: 200, json: async () => [] })
+  mocks.jsonFetch.mockResolvedValue({ ok: true, status: 200, json: async () => ({}) })
 }
 
 describe("FloatingChrome", () => {
   beforeEach(() => {
-    mocks.config = { networkUrl: null, defaultAgentKind: "claude", networkAccessDisabled: false }
-    showSession(makeSession())
-    mocks.sessionSource = {
-      dirName: "-tmp-project",
-      fileName: "test-session-id.jsonl",
-      watchOffset: 0, loadId: 1,
-      agentKind: "claude",
-    }
-    mocks.isLive = false
-    mocks.level = "own"
-    mocks.inventorySessions = []
-    mocks.authFetch.mockResolvedValue({ ok: true, status: 200, json: async () => [] })
-    mocks.jsonFetch.mockResolvedValue({ ok: true, status: 200, json: async () => ({}) })
+    resetSession()
     window.history.replaceState({}, "", "/")
   })
 
@@ -213,21 +219,22 @@ describe("FloatingChrome", () => {
     __resetEditionUiForTest()
   })
 
-  it("keeps the machine-wide leak badge away until the user has a session", () => {
-    const { unmount } = renderChrome()
-    expect(screen.queryByText("Leak monitor")).not.toBeInTheDocument()
-    unmount()
-
-    withScannedSession("test-session-id", [])
+  it("names the session by project and title, falling back to its slug", () => {
     renderChrome()
-    expect(screen.getByText("Leak monitor")).toBeInTheDocument()
+    expect(sessionTitle()).toHaveAccessibleName("project / my-session. Session menu")
   })
 
-  it("keeps provider handoff inside the overflow menu", async () => {
+  it("names the session by its real title once the inventory has one", () => {
+    withScannedSession("test-session-id", [], { aiTitle: "Tidy the header" })
+    renderChrome()
+    expect(sessionTitle()).toHaveAccessibleName("project / Tidy the header. Session menu")
+  })
+
+  it("keeps provider handoff inside the session menu", async () => {
     const user = userEvent.setup()
     renderChrome()
     expect(screen.queryByText("Continue with another provider…")).not.toBeInTheDocument()
-    await user.click(screen.getByRole("button", { name: "More actions" }))
+    await openSessionMenu(user)
     await user.click(await screen.findByRole("menuitem", { name: "Continue with another provider…" }))
     expect(mocks.handoff).toHaveBeenCalledOnce()
   })
@@ -236,49 +243,64 @@ describe("FloatingChrome", () => {
     mocks.level = level
     const user = userEvent.setup()
     renderChrome()
-    await user.click(screen.getByRole("button", { name: "More actions" }))
+    await openSessionMenu(user)
     expect(screen.queryByRole("menuitem", { name: "Continue with another provider…" })).not.toBeInTheDocument()
   })
 
-  it("owns the window-drag strip and paints it under the pills", () => {
+  it("owns the window-drag strip and paints it under the title row", () => {
     const { container } = renderChrome()
 
-    // The strip has to be a sibling of the pill row, and lower: anywhere else
+    // The strip has to be a sibling of the title row, and lower: anywhere else
     // (a resizable panel, say) it lands in its own stacking context and covers
-    // the pills instead of sitting behind them.
+    // the title instead of sitting behind it.
     const strip = container.querySelector(".drag-strip")
-    const pillRow = sessionPill().closest(".pointer-events-auto")?.parentElement
+    const titleRow = sessionTitle().closest(".pointer-events-auto")?.parentElement
     expect(strip).toBeInTheDocument()
     expect(strip).toHaveClass("z-10")
-    expect(pillRow).toHaveClass("z-30")
-    expect(strip?.parentElement).toBe(pillRow?.parentElement)
-    expect(strip?.compareDocumentPosition(pillRow as Node))
+    expect(titleRow).toHaveClass("z-30")
+    expect(strip?.parentElement).toBe(titleRow?.parentElement)
+    expect(strip?.compareDocumentPosition(titleRow as Node))
       .toBe(Node.DOCUMENT_POSITION_FOLLOWING)
   })
 
-  it("copies the resume command from the project/session breadcrumb", () => {
+  it("hands the sticky prompt a slot between the title and the session's actions", () => {
+    const promptSlotRef = vi.fn()
+    renderChrome({ promptSlotRef })
+
+    const slot = promptSlotRef.mock.calls.at(-1)?.[0] as HTMLElement
+    expect(slot).toBeInstanceOf(HTMLElement)
+    expect(sessionTitle().compareDocumentPosition(slot)).toBe(Node.DOCUMENT_POSITION_FOLLOWING)
+  })
+
+  it("copies the resume command from the session menu", async () => {
+    const user = userEvent.setup()
     renderChrome()
 
-    fireEvent.click(screen.getByRole("button", { name: /my-session/ }))
+    await openSessionMenu(user)
+    await user.click(screen.getByRole("menuitem", { name: "Copy resume command" }))
 
     expect(mocks.copy).toHaveBeenCalledWith(
       getResumeCommand("claude", "test-session-id", "/tmp/project"),
     )
-    expect(screen.getByText("project")).toBeInTheDocument()
-    expect(screen.queryByRole("button", { name: "Copy resume command" })).not.toBeInTheDocument()
   })
 
-  it("opens all six session operations from the breadcrumb context menu", async () => {
+  it("opens every session and project operation from the title", async () => {
+    const user = userEvent.setup()
     renderChrome()
 
-    fireEvent.contextMenu(screen.getByRole("button", { name: /my-session/ }))
+    await openSessionMenu(user)
 
-    expect(await screen.findByRole("menuitem", { name: "New session in this project" })).toBeInTheDocument()
+    expect(screen.getByRole("menuitem", { name: "Copy resume command" })).toBeInTheDocument()
+    expect(screen.getByRole("menuitem", { name: "New session in this project" })).toBeInTheDocument()
     expect(screen.getByRole("menuitem", { name: "Duplicate this session" })).toBeInTheDocument()
+    expect(screen.getByRole("menuitem", { name: "Share session…" })).toBeInTheDocument()
     expect(screen.getByRole("menuitem", { name: "Open project in editor" })).toBeInTheDocument()
     expect(screen.getByRole("menuitem", { name: "Reveal in file manager" })).toBeInTheDocument()
     expect(screen.getByRole("menuitem", { name: "Open terminal in project" })).toBeInTheDocument()
     expect(screen.getByRole("menuitem", { name: "View all sessions in this project" })).toBeInTheDocument()
+
+    await user.click(screen.getByRole("menuitem", { name: "Duplicate this session" }))
+    expect(PROPS.onDuplicateSession).toHaveBeenCalledOnce()
   })
 
   it("offers a member without host access none of the host's project actions", async () => {
@@ -288,12 +310,12 @@ describe("FloatingChrome", () => {
       user: { id: "u_1", username: "alice", displayName: "Alice" },
       capabilities: NO_CAPABILITIES,
     })
-    mocks.authFetch.mockResolvedValue({ ok: true, status: 200, json: async () => [] })
+    const user = userEvent.setup()
     renderChrome()
 
-    fireEvent.contextMenu(screen.getByRole("button", { name: /my-session/ }))
+    await openSessionMenu(user)
 
-    expect(await screen.findByRole("menuitem", { name: "New session in this project" })).toBeInTheDocument()
+    expect(screen.getByRole("menuitem", { name: "New session in this project" })).toBeInTheDocument()
     expect(screen.getByRole("menuitem", { name: "View all sessions in this project" })).toBeInTheDocument()
     expect(screen.queryByRole("menuitem", { name: "Open project in editor" })).not.toBeInTheDocument()
     expect(screen.queryByRole("menuitem", { name: "Reveal in file manager" })).not.toBeInTheDocument()
@@ -301,19 +323,19 @@ describe("FloatingChrome", () => {
   })
 
   it("preserves project action request and project-session navigation semantics", async () => {
+    const user = userEvent.setup()
     renderChrome()
-    const breadcrumb = screen.getByRole("button", { name: /my-session/ })
 
-    fireEvent.contextMenu(breadcrumb)
-    fireEvent.click(await screen.findByRole("menuitem", { name: "Open project in editor" }))
+    await openSessionMenu(user)
+    await user.click(screen.getByRole("menuitem", { name: "Open project in editor" }))
 
     expect(mocks.jsonFetch).toHaveBeenCalledWith("/api/open-in-editor", {
       path: "/tmp/project",
       dirName: "-tmp-project",
     })
 
-    fireEvent.contextMenu(breadcrumb)
-    fireEvent.click(await screen.findByRole("menuitem", { name: "View all sessions in this project" }))
+    await openSessionMenu(user)
+    await user.click(screen.getByRole("menuitem", { name: "View all sessions in this project" }))
 
     expect(mocks.dispatch).toHaveBeenNthCalledWith(1, { type: "GO_HOME", isMobile: false })
     expect(mocks.dispatch).toHaveBeenNthCalledWith(2, {
@@ -322,7 +344,7 @@ describe("FloatingChrome", () => {
     })
   })
 
-  it("shows the session state that used to occupy the two lower bars", async () => {
+  it("keeps the session's state to the top of its menu", async () => {
     const user = userEvent.setup()
     const thinkingTurn = prTurn("thinking", "echo ok", "ok")
     thinkingTurn.thinking = [{ type: "thinking", thinking: "Working", signature: "sig" }]
@@ -331,28 +353,17 @@ describe("FloatingChrome", () => {
       gitBranch: "feat/clean-header",
       turns: [thinkingTurn],
       branchedFrom: { sessionId: "parent-session", turnIndex: 2 },
-      digest: computeSessionDigest([{
-        type: "assistant",
-        message: {
-          model: "claude-opus-4-5",
-          usage: {
-            input_tokens: 50_000,
-            output_tokens: 1_000,
-            cache_creation_input_tokens: 10_000,
-            cache_read_input_tokens: 5_000,
-          },
-        },
-      }]),
+      digest: computeSessionDigest([usage("claude-opus-4-5", 50_000)]),
     }))
     mocks.isLive = true
 
     renderChrome({ workflowCount: 2 })
 
-    // The composer's model picker shows the model; the pill keeps it to its details.
+    // The composer's model picker shows the model; the title keeps it to its menu.
     expect(screen.queryByText("Opus 4.5")).not.toBeInTheDocument()
     expect(screen.getByLabelText("Session is live")).toBeInTheDocument()
-    // opus-4-5 is a 200k model: 65k used of the 167k usable before auto-compact.
-    expect(screen.getByText(/61%/)).toBeInTheDocument()
+    // opus-4-5 is a 200k model: 65k used of the 167k usable leaves 61%, which only the menu reports.
+    expect(screen.queryByText(/61%/)).not.toBeInTheDocument()
     expect(screen.getByRole("button", { name: /Workflows/ })).toHaveTextContent("2")
     expect(screen.queryByText("feat/clean-header")).not.toBeInTheDocument()
 
@@ -365,22 +376,24 @@ describe("FloatingChrome", () => {
     expect(details).toHaveTextContent(/left before compact/)
   })
 
+  it("leaves the context reading to the composer, even once context runs low", () => {
+    showSession(makeSession({
+      model: "claude-opus-4-5",
+      digest: computeSessionDigest([usage("claude-opus-4-5", 140_000)]),
+    }))
+
+    renderChrome()
+
+    // 155k used of the 167k usable before auto-compact.
+    expect(screen.queryByText(/^\d+%$/)).not.toBeInTheDocument()
+  })
+
   it("does not interpret Copilot provider records as Claude context usage", async () => {
     const user = userEvent.setup()
     showSession(makeSession({
       agentKind: "copilot",
-      digest: computeSessionDigest([{
-        type: "assistant",
-        message: {
-          model: "claude-sonnet-4.6",
-          usage: {
-            input_tokens: 50_000,
-            output_tokens: 1_000,
-            cache_creation_input_tokens: 10_000,
-            cache_read_input_tokens: 5_000,
-          },
-        },
-      }]),
+      model: "claude-sonnet-4.6",
+      digest: computeSessionDigest([usage("claude-sonnet-4.6", 140_000)]),
     }))
     mocks.sessionSource = {
       dirName: "copilot__L3RtcC9wcm9qZWN0",
@@ -391,7 +404,7 @@ describe("FloatingChrome", () => {
 
     renderChrome()
 
-    expect(screen.queryByText(/61%/)).not.toBeInTheDocument()
+    expect(screen.queryByText(/^\d+%$/)).not.toBeInTheDocument()
     const details = await openSessionDetails(user)
     expect(details).not.toHaveTextContent(/left before compact/)
   })
@@ -407,7 +420,7 @@ describe("FloatingChrome", () => {
 
     renderChrome()
 
-    fireEvent.click(screen.getByRole("button", { name: "Main" }))
+    await user.click(screen.getByRole("button", { name: "Main" }))
     expect(PROPS.onBackToMain).toHaveBeenCalledOnce()
 
     const details = await openSessionDetails(user)
@@ -415,86 +428,57 @@ describe("FloatingChrome", () => {
     expect(details).toHaveTextContent("a1b2c3d4")
   })
 
-  it("offers the sidebar toggle only while the sidebar is hidden", () => {
+  it("offers the sidebar toggle only while the sidebar is hidden", async () => {
     const { unmount } = renderChrome()
-    expect(screen.queryByRole("button", { name: "Show sidebar (\u2318B)" })).not.toBeInTheDocument()
+    expect(screen.queryByRole("button", { name: "Show sidebar (⌘B)" })).not.toBeInTheDocument()
     unmount()
 
     renderChrome({ showSidebar: false })
-    fireEvent.click(screen.getByRole("button", { name: "Show sidebar (\u2318B)" }))
+    await userEvent.click(screen.getByRole("button", { name: "Show sidebar (⌘B)" }))
     expect(PROPS.onToggleSidebar).toHaveBeenCalledOnce()
   })
 
-  it("renders no network readout while network access is off", async () => {
+  it("stops a live session from its menu", async () => {
     const user = userEvent.setup()
+    mocks.isLive = true
     renderChrome()
 
-    await user.click(screen.getByRole("button", { name: "More actions" }))
-    await screen.findByRole("menuitem", { name: "Settings" })
+    await openSessionMenu(user)
+    await user.click(screen.getByRole("menuitem", { name: "Stop session" }))
 
-    expect(screen.queryByRole("menuitem", { name: /Copy network URL/ })).not.toBeInTheDocument()
+    expect(mocks.stopSession).toHaveBeenCalledOnce()
   })
 
-  it("copies the connection URL from the overflow menu while reachable on the network", async () => {
+  it("offers Stop session only for a live process the user may drive and the agent can stop", async () => {
     const user = userEvent.setup()
-    mocks.config = {
-      networkUrl: "http://10.0.0.4:19384",
-      defaultAgentKind: "claude",
-      networkAccessDisabled: false,
-    }
-    mocks.copyToClipboard.mockResolvedValue(true)
-    renderChrome()
-
-    await user.click(screen.getByRole("button", { name: "More actions" }))
-    await user.click(await screen.findByRole("menuitem", { name: /10\.0\.0\.4/ }))
-
-    expect(mocks.copyToClipboard).toHaveBeenCalledWith("http://10.0.0.4:19384")
-    await vi.waitFor(() => expect(mocks.toastSuccess).toHaveBeenCalledWith("Copied network URL"))
-  })
-
-  it("keeps secondary workspace actions in the overflow menu", async () => {
-    const user = userEvent.setup()
-    renderChrome()
-
-    expect(screen.queryByRole("menuitem", { name: "Settings" })).not.toBeInTheDocument()
-
-    await user.click(screen.getByRole("button", { name: "More actions" }))
-    await user.click(await screen.findByRole("menuitem", { name: "Settings" }))
-
-    expect(PROPS.onOpenSettings).toHaveBeenCalledOnce()
-  })
-
-  it("offers help and docs from the overflow menu", async () => {
-    const user = userEvent.setup()
-    const open = vi.spyOn(window, "open").mockReturnValue(null)
-    try {
+    const cases: Array<() => void> = [
+      () => { mocks.isLive = false },
+      () => { mocks.isLive = true; mocks.level = "view" },
+      () => {
+        mocks.isLive = true
+        mocks.sessionSource = { dirName: "codex__L3RtcC9wcm9qZWN0", fileName: "s.jsonl", watchOffset: 0, loadId: 1 }
+      },
+    ]
+    for (const arrange of cases) {
+      resetSession()
+      arrange()
       renderChrome()
-
-      await user.click(screen.getByRole("button", { name: "More actions" }))
-      expect(await screen.findByText("Help & docs")).toBeInTheDocument()
-      await user.click(screen.getByRole("menuitem", { name: "Documentation" }))
-      expect(open).toHaveBeenCalledWith(DOCUMENTATION_URL, "_blank", "noopener,noreferrer")
-
-      await user.click(screen.getByRole("button", { name: "More actions" }))
-      await user.click(await screen.findByRole("menuitem", { name: "Report an issue" }))
-      expect(open).toHaveBeenCalledWith(REPORT_ISSUE_URL, "_blank", "noopener,noreferrer")
-
-      await user.click(screen.getByRole("button", { name: "More actions" }))
-      await user.click(await screen.findByRole("menuitem", { name: "Keyboard shortcuts" }))
-      expect(PROPS.onOpenKeyboardShortcuts).toHaveBeenCalledOnce()
-    } finally {
-      open.mockRestore()
+      await openSessionMenu(user)
+      expect(screen.queryByRole("menuitem", { name: "Stop session" })).not.toBeInTheDocument()
+      cleanup()
     }
   })
 
-  it("offers the share control only while a session is open", () => {
-    const { unmount } = renderChrome()
-    expect(screen.getByRole("button", { name: "Share session" })).toBeInTheDocument()
-    unmount()
-
-    showSession(null)
+  it("shows no share button for an unshared session until the menu opens it", async () => {
+    const user = userEvent.setup()
     renderChrome()
     expect(screen.queryByRole("button", { name: "Share session" })).not.toBeInTheDocument()
+
+    await openSessionMenu(user)
+    await user.click(screen.getByRole("menuitem", { name: "Share session…" }))
+
+    expect(await screen.findByRole("button", { name: "Enable sharing" })).toBeInTheDocument()
+    expect(screen.getByRole("button", { name: "Share session" })).toBeInTheDocument()
   })
 
   // The share route only accepts agents whose transcripts it can publish, so
@@ -503,27 +487,87 @@ describe("FloatingChrome", () => {
     ["-Users-me-proj", true],
     ["codex__L3RtcC9wcm9qZWN0", true],
     ["copilot__L3RtcC9wcm9qZWN0", false],
-  ])("offers the share control in %s only when the agent can be shared", (dirName, shareable) => {
+  ])("offers sharing in %s only when the agent can be shared", async (dirName, shareable) => {
+    const user = userEvent.setup()
     mocks.sessionSource = { dirName, fileName: "s.jsonl", watchOffset: 0, loadId: 1 }
 
     renderChrome()
+    await openSessionMenu(user)
 
-    const control = screen.queryByRole("button", { name: "Share session" })
-    if (shareable) expect(control).toBeInTheDocument()
-    else expect(control).not.toBeInTheDocument()
+    const item = screen.queryByRole("menuitem", { name: "Share session…" })
+    if (shareable) expect(item).toBeInTheDocument()
+    else expect(item).not.toBeInTheDocument()
   })
 
-  it("withholds the share control from a member who may not share", () => {
+  it("withholds sharing from a member who may not share", async () => {
     setMe({
       authenticated: true,
       edition: "team",
       user: null,
       capabilities: NO_CAPABILITIES,
     })
+    const user = userEvent.setup()
+
+    renderChrome()
+    await openSessionMenu(user)
+
+    expect(screen.queryByRole("menuitem", { name: "Share session…" })).not.toBeInTheDocument()
+  })
+
+  it("makes an already-shared session visible without opening anything", async () => {
+    mocks.authFetch.mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: async () => [{
+        sessionId: "test-session-id",
+        dirName: "-tmp-project",
+        fileName: "test-session-id.jsonl",
+        title: "my-session",
+        createdAt: Date.now(),
+        lastAccessAt: 0,
+        guests: 1,
+      }],
+    })
 
     renderChrome()
 
-    expect(screen.queryByRole("button", { name: "Share session" })).not.toBeInTheDocument()
+    expect(await screen.findByRole("button", { name: "Session is shared" })).toBeInTheDocument()
+  })
+
+  it("keeps only the drag strip and sidebar toggle off the conversation view", () => {
+    withScannedSession("test-session-id", [])
+    mocks.authFetch.mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: async () => [{
+        sessionId: "test-session-id",
+        dirName: "-tmp-project",
+        fileName: "test-session-id.jsonl",
+        title: "my-session",
+        createdAt: Date.now(),
+        lastAccessAt: 0,
+        guests: 1,
+      }],
+    })
+    __installEditionUiForTest({
+      SessionHeaderActions: ({ sessionId }: { sessionId: string }) => <button>Act on {sessionId}</button>,
+    })
+    const { container } = renderChrome({ showSession: false, showSidebar: false, workflowCount: 2 })
+
+    expect(container.querySelector(".drag-strip")).toBeInTheDocument()
+    expect(screen.getByRole("button", { name: "Show sidebar (\u2318B)" })).toBeInTheDocument()
+    expect(screen.queryByRole("button", { name: /Session menu$/ })).not.toBeInTheDocument()
+    expect(screen.queryByRole("button", { name: /Workflows/ })).not.toBeInTheDocument()
+    expect(screen.queryByRole("button", { name: /Act on/ })).not.toBeInTheDocument()
+    expect(screen.queryByRole("button", { name: /Share session|Session is shared/ })).not.toBeInTheDocument()
+    expect(screen.getAllByRole("button")).toHaveLength(1)
+  })
+
+  it("renders nothing about a session while none is open", () => {
+    showSession(null)
+    renderChrome()
+    expect(screen.queryByRole("button", { name: /Session menu$/ })).not.toBeInTheDocument()
+    expect(screen.queryByRole("button", { name: /Share session|Session is shared/ })).not.toBeInTheDocument()
   })
 
   it("carries the edition's actions for the open session, never for a sub-agent view", () => {
@@ -547,89 +591,32 @@ describe("FloatingChrome", () => {
     renderChrome()
     expect(screen.queryByRole("button", { name: /Act on/ })).not.toBeInTheDocument()
   })
-
-  it("carries the edition's account control, wired to sign-out and the edition's main views", async () => {
-    renderChrome()
-    expect(screen.queryByRole("button", { name: "Account" })).not.toBeInTheDocument()
-    cleanup()
-
-    __installEditionUiForTest({
-      AccountControl: ({ onLogout, onOpenMainView }: AccountControlProps) => (
-        <>
-          <button onClick={onLogout}>Account</button>
-          <button onClick={() => onOpenMainView("reports")}>Reports</button>
-        </>
-      ),
-    })
-    renderChrome()
-
-    await userEvent.click(screen.getByRole("button", { name: "Account" }))
-    await userEvent.click(screen.getByRole("button", { name: "Reports" }))
-    expect(PROPS.onLogout).toHaveBeenCalledOnce()
-    expect(PROPS.onOpenMainView).toHaveBeenCalledWith("reports")
-  })
-
-  it("makes an already-shared session visible without opening anything", async () => {
-    mocks.authFetch.mockResolvedValue({
-      ok: true,
-      status: 200,
-      json: async () => [{
-        sessionId: "test-session-id",
-        dirName: "-tmp-project",
-        fileName: "test-session-id.jsonl",
-        title: "my-session",
-        createdAt: Date.now(),
-        lastAccessAt: 0,
-        guests: 1,
-      }],
-    })
-
-    renderChrome()
-
-    expect(await screen.findByRole("button", { name: "Session is shared" })).toBeInTheDocument()
-  })
-
-  it("opens usage and the server monitor from the overflow menu", async () => {
-    const user = userEvent.setup()
-    renderChrome()
-
-    await user.click(screen.getByRole("button", { name: "More actions" }))
-    await user.click(await screen.findByRole("menuitem", { name: "Usage & cost\u2026" }))
-    expect(screen.getByTestId("usage-dialog")).toBeInTheDocument()
-
-    await user.click(screen.getByRole("button", { name: "More actions" }))
-    await user.click(await screen.findByRole("menuitem", { name: "Server monitor\u2026" }))
-    expect(screen.getByTestId("power-monitor")).toBeInTheDocument()
-  })
 })
 
 describe("FloatingChrome archive", () => {
-  beforeEach(() => {
-    showSession(makeSession())
-    mocks.sessionSource = { dirName: "-tmp-project", fileName: "test-session-id.jsonl", watchOffset: 0, loadId: 1, agentKind: "claude" }
-    mocks.isLive = false
-    mocks.level = "own"
-    mocks.inventorySessions = []
-    mocks.jsonFetch.mockResolvedValue({ ok: true, status: 200, json: async () => ({}) })
-  })
+  beforeEach(resetSession)
 
   afterEach(() => {
     cleanup()
     vi.clearAllMocks()
-    mocks.level = "own"
   })
 
-  it.each(["view", "interact", "unknown"] as const)("withholds archiving while access is %s", (level) => {
+  it.each(["view", "interact", "unknown"] as const)("withholds archiving while access is %s", async (level) => {
     mocks.level = level
+    const user = userEvent.setup()
     renderChrome()
 
-    expect(screen.queryByRole("button", { name: /rchive/ })).not.toBeInTheDocument()
+    await openSessionMenu(user)
+
+    expect(screen.queryByRole("menuitem", { name: /rchive/ })).not.toBeInTheDocument()
   })
 
   it("archives the open session, refreshes the inventory and offers an undo", async () => {
+    const user = userEvent.setup()
     renderChrome()
 
-    fireEvent.click(screen.getByRole("button", { name: "Archive session" }))
+    await openSessionMenu(user)
+    await user.click(screen.getByRole("menuitem", { name: "Archive session" }))
 
     expect(mocks.setArchived).toHaveBeenCalledWith(["test-session-id"], true)
     await vi.waitFor(() => expect(mocks.jsonFetch).toHaveBeenCalledWith(
@@ -644,9 +631,11 @@ describe("FloatingChrome archive", () => {
 
   it("rolls back when the server refuses", async () => {
     mocks.jsonFetch.mockResolvedValue({ ok: false, status: 500, json: async () => ({}) })
+    const user = userEvent.setup()
     renderChrome()
 
-    fireEvent.click(screen.getByRole("button", { name: "Archive session" }))
+    await openSessionMenu(user)
+    await user.click(screen.getByRole("menuitem", { name: "Archive session" }))
 
     await vi.waitFor(() => expect(mocks.setArchived).toHaveBeenCalledWith(["test-session-id"], false))
     expect(mocks.toastError).toHaveBeenCalledWith("Could not archive session")
@@ -655,10 +644,12 @@ describe("FloatingChrome archive", () => {
 
   it("restores an archived session instead", async () => {
     withScannedSession("test-session-id", undefined, { archived: true, archivedReason: "manual" })
+    const user = userEvent.setup()
     renderChrome()
 
-    expect(screen.queryByRole("button", { name: "Archive session" })).not.toBeInTheDocument()
-    fireEvent.click(screen.getByRole("button", { name: "Restore from archive" }))
+    await openSessionMenu(user)
+    expect(screen.queryByRole("menuitem", { name: "Archive session" })).not.toBeInTheDocument()
+    await user.click(screen.getByRole("menuitem", { name: "Restore from archive" }))
 
     await vi.waitFor(() => expect(mocks.jsonFetch).toHaveBeenCalledWith(
       "/api/archive-sessions",
@@ -666,20 +657,25 @@ describe("FloatingChrome archive", () => {
     ))
   })
 
-  it("explains that a live session has to stop first", () => {
+  it("explains that a live session has to stop first", async () => {
     mocks.isLive = true
+    const user = userEvent.setup()
     renderChrome()
 
-    const button = screen.getByRole("button", { name: "Archive session" })
-    expect(button).toBeDisabled()
-    expect(screen.getByLabelText("Stop the session before archiving it")).toBeInTheDocument()
+    const menu = await openSessionMenu(user)
+    const item = within(menu).getByRole("menuitem", { name: "Archive session" })
+    expect(item).toHaveAttribute("aria-disabled", "true")
+    expect(item).toHaveAttribute("title", "Stop the session before archiving it")
   })
 
-  it("withholds archiving from a sub-agent view", () => {
+  it("withholds archiving from a sub-agent view", async () => {
     mocks.sessionSource = { dirName: "-tmp-project", fileName: "parent-id/subagents/agent-abc.jsonl", watchOffset: 0, loadId: 1, agentKind: "claude" }
+    const user = userEvent.setup()
     renderChrome()
 
-    expect(screen.queryByRole("button", { name: /rchive/ })).not.toBeInTheDocument()
+    await openSessionMenu(user)
+
+    expect(screen.queryByRole("menuitem", { name: /rchive/ })).not.toBeInTheDocument()
   })
 })
 
@@ -694,19 +690,7 @@ describe("FloatingChrome pull requests", () => {
     timestamp: "2026-08-14T09:00:00.000Z",
   }
 
-  beforeEach(() => {
-    mocks.config = { networkUrl: null, defaultAgentKind: "claude", networkAccessDisabled: false }
-    showSession(makeSession())
-    mocks.sessionSource = {
-      dirName: "-tmp-project",
-      fileName: "test-session-id.jsonl",
-      watchOffset: 0, loadId: 1,
-      agentKind: "claude",
-    }
-    mocks.isLive = false
-    mocks.level = "own"
-    mocks.inventorySessions = []
-  })
+  beforeEach(resetSession)
 
   afterEach(() => {
     cleanup()
@@ -757,6 +741,7 @@ describe("FloatingChrome pull requests", () => {
   it("ignores scan results belonging to a different session", async () => {
     const user = userEvent.setup()
     withScannedSession("some-other-session", [scanned])
+    showSession(makeSession({ model: "claude-opus-4-5" }))
 
     renderChrome()
     await openSessionDetails(user)

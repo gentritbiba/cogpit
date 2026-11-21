@@ -1,5 +1,7 @@
-import { useState, useEffect, useCallback, useMemo, useRef, memo } from "react"
+import { useState, useEffect, useCallback, useMemo, useRef, memo, type ReactNode } from "react"
+import { Search } from "lucide-react"
 import { toast } from "sonner"
+import { Button } from "@/components/ui/button"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { authFetch } from "@/lib/auth"
 import { deviceScopedKey } from "@/lib/device"
@@ -14,7 +16,9 @@ import { useSessionNames } from "@/hooks/useSessionNames"
 import { useProjectNames } from "@/hooks/useProjectNames"
 import { useIsMobile } from "@/hooks/useIsMobile"
 import { useLocalStorage } from "@/hooks/useLocalStorage"
+import { openFolderBrowser } from "@/lib/folders"
 import { hapticMedium } from "@/lib/haptics"
+import { cn } from "@/lib/utils"
 import { useCapability } from "@/hooks/useCapability"
 import { useListedPermissions } from "@/hooks/useListedPermissions"
 import { useSessionContentSearch } from "@/hooks/useSessionContentSearch"
@@ -31,7 +35,7 @@ import { isSessionLive, listedSessions, projectGroupKey, sessionTitle } from "./
 import { classifyAttention, rollUpCrews } from "./attentionGroups"
 import { foldCrewRows, memberStatus, type CrewPendingInput } from "./crew"
 import { AttentionStrip } from "./AttentionStrip"
-import { LiveSessionsFeedback, LiveSessionsToolbar } from "./LiveSessionsChrome"
+import { LiveSessionsFeedback, SessionListOptions, SessionSearchField } from "./LiveSessionsChrome"
 import { SessionCardList, type SessionListSharedProps } from "./SessionCardList"
 import { ProjectScopePicker } from "./ProjectScopePicker"
 import { NewSessionButton } from "./NewSessionButton"
@@ -60,11 +64,13 @@ interface LiveSessionsProps {
   refreshRef?: React.MutableRefObject<(() => void) | null>
   /** Warm the session cache for a row on hover-intent so a subsequent click is instant. */
   onPrefetchSession?: (dirName: string, fileName: string) => void
+  /** Closes the header row, after the list's own actions. */
+  headerActions?: ReactNode
 }
 
 const ALL_PROJECTS: OlderSessionsTarget = { key: "all" }
 
-export const LiveSessions = memo(function LiveSessions({ activeSessionKey, onSelectSession, onOpenQuoteSource, onDuplicateSession, onDeleteSession, onNewSession, onNewFolder, defaultAgentKind, creatingSession, pendingSession, refreshRef, onPrefetchSession }: LiveSessionsProps) {
+export const LiveSessions = memo(function LiveSessions({ activeSessionKey, onSelectSession, onOpenQuoteSource, onDuplicateSession, onDeleteSession, onNewSession, onNewFolder, defaultAgentKind, creatingSession, pendingSession, refreshRef, onPrefetchSession, headerActions }: LiveSessionsProps) {
   const { names: sessionNames, rename: renameSession } = useSessionNames()
   const { names: projectNames, rename: renameProject } = useProjectNames()
   const pty = usePty()
@@ -100,6 +106,8 @@ export const LiveSessions = memo(function LiveSessions({ activeSessionKey, onSel
   )
   const [killingPids, setKillingPids] = useState<Set<number>>(new Set())
   const [searchQuery, setSearchQuery] = useState("")
+  const [searchOpen, setSearchOpen] = useState(false)
+  const searchToggleRef = useRef<HTMLButtonElement>(null)
   const [newSessionPickerOpen, setNewSessionPickerOpen] = useState(false)
   // Which project the sidebar is focused on; null lists every project. Kept
   // per device, since projects differ between devices and DeviceRoot remounts
@@ -115,6 +123,12 @@ export const LiveSessions = memo(function LiveSessions({ activeSessionKey, onSel
   )
   const groupCrewsPreferred = groupCrewsSetting !== false
   const searching = Boolean(searchQuery.trim())
+  const searchShown = searchOpen || searching
+  function closeSearch(): void {
+    setSearchQuery("")
+    setSearchOpen(false)
+    searchToggleRef.current?.focus()
+  }
   const groupCrews = groupCrewsPreferred && !searching
   // A search looks through everything, so archived sessions join the list
   // while one is active even when the toggle is off.
@@ -378,23 +392,8 @@ export const LiveSessions = memo(function LiveSessions({ activeSessionKey, onSel
 
   return (
     <div className="flex h-full min-h-0 flex-col" onKeyDown={searching ? handleSearchKeyDown : undefined}>
-      <LiveSessionsToolbar
-        loading={loading}
-        isMobile={isMobile}
-        searchQuery={searchQuery}
-        searchLoading={pullRequestResults.loading}
-        showArchived={showArchived}
-        archivedCount={archivedCount}
-        groupCrews={groupCrewsPreferred}
-        onToggleGroupCrews={() => setGroupCrews(!groupCrewsPreferred)}
-        onSearchQueryChange={setSearchQuery}
-        onToggleShowArchived={() => setShowArchived(!showArchived)}
-        onRefresh={() => { hapticMedium(); fetchData() }}
-      />
-
-      {FilterControl && <FilterControl />}
-
       <ProjectScopePicker
+        className={cn(!isMobile && "electron-drag window-inset-start")}
         options={scopeOptions}
         value={projectScope}
         focused={focusedProject}
@@ -405,6 +404,31 @@ export const LiveSessions = memo(function LiveSessions({ activeSessionKey, onSel
         archivableCount={focusedArchivable.length}
         onArchiveIdle={() => handleArchiveSessions(focusedArchivable)}
       >
+        <Button
+          type="button"
+          variant="ghost"
+          size="icon-sm"
+          aria-label="Search sessions"
+          title="Search sessions"
+          ref={searchToggleRef}
+          aria-pressed={searchShown}
+          // Keeps focus in the field, so its blur cannot put it away before this click does.
+          onPointerDown={(event) => { if (searchShown) event.preventDefault() }}
+          onClick={() => (searchShown ? closeSearch() : setSearchOpen(true))}
+          className={cn("shrink-0 text-muted-foreground hover:text-foreground", searchShown && "bg-accent text-foreground")}
+        >
+          <Search data-icon="inline-start" />
+        </Button>
+        <SessionListOptions
+          loading={loading}
+          showArchived={showArchived}
+          archivedCount={archivedCount}
+          groupCrews={groupCrewsPreferred}
+          onToggleGroupCrews={() => setGroupCrews(!groupCrewsPreferred)}
+          onToggleShowArchived={() => setShowArchived(!showArchived)}
+          onRefresh={() => { hapticMedium(); fetchData() }}
+          onNewInFolder={sessionStarts ? () => openFolderBrowser() : undefined}
+        />
         {sessionStarts && (
           <NewSessionButton
             {...sessionStarts}
@@ -418,7 +442,20 @@ export const LiveSessions = memo(function LiveSessions({ activeSessionKey, onSel
             onPickerOpenChange={setNewSessionPickerOpen}
           />
         )}
+        {headerActions}
       </ProjectScopePicker>
+
+      {searchShown && (
+        <SessionSearchField
+          searchQuery={searchQuery}
+          searchLoading={pullRequestResults.loading}
+          onSearchQueryChange={setSearchQuery}
+          onClose={closeSearch}
+          onDismiss={() => setSearchOpen(false)}
+        />
+      )}
+
+      {FilterControl && <FilterControl />}
 
       <ScrollArea className="flex-1">
         <div className="flex flex-col gap-4 p-2">

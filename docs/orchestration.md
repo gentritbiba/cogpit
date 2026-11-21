@@ -37,7 +37,7 @@ answer keeps the corresponding question and command linked.
 
 ## Continuing a conversation
 
-Open the session’s overflow menu and choose **Continue with another provider…**.
+Click the session’s title above the conversation and choose **Continue with another provider…**.
 The option is available only for existing conversations you can drive.
 
 Native resume requires a compatible provider and account instance. Cross-provider

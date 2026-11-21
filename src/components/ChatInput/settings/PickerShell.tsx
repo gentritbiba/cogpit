@@ -16,6 +16,14 @@ export function pickerSideFor(isNewSession: boolean): PickerSide {
   return isNewSession ? "bottom" : "top"
 }
 
+/**
+ * Marks a row of chips as quiet: once a session is running its settings
+ * recede to their icons, and each chip names itself on hover instead.
+ */
+export const QUIET_CHIPS = "group/chips"
+/** For a chip's label inside a row that may be quiet. */
+export const CHIP_LABEL = "truncate group-data-quiet/chips:sr-only"
+
 /** The chip every composer picker hangs off: ghost, compact, chevron at the end. */
 export function PickerChip({ className, children, ...props }: ComponentProps<typeof Button>) {
   return (
@@ -27,7 +35,7 @@ export function PickerChip({ className, children, ...props }: ComponentProps<typ
       {...props}
     >
       {children}
-      <ChevronDown data-icon="inline-end" className="opacity-60" />
+      <ChevronDown data-icon="inline-end" className="opacity-60 group-data-quiet/chips:hidden" />
     </Button>
   )
 }

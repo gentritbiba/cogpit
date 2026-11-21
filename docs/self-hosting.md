@@ -147,7 +147,8 @@ treat the network password — narrower in scope, not smaller in consequence. Gi
 you would let type into that session over your shoulder, and send it through a different
 channel than the link.
 
-Turn sharing on from the share button above the session. Cogpit generates a four-word
+Turn sharing on from the session's menu (click its title above the conversation), under
+**Share session…**. Cogpit generates a four-word
 passphrase and shows it once; after that the popover masks it, because only a scrypt hash is
 kept, in `shares.local.json` beside your config at mode 0600. Lose it and you regenerate rather
 than look it up. Every shared session has its own passphrase, and it is unrelated to the
@@ -161,7 +162,8 @@ reverse proxy or tunnel, not the LAN address Cogpit prints. Login attempts are r
 and a wrong passphrase and a session that was never shared return the same 401, so the endpoint
 cannot be used to discover which sessions are shared.
 
-To revoke, reopen the share button on that session and press **Stop sharing**, or open
+A shared session shows a share button beside its title for as long as the share exists. To
+revoke, open that button and press **Stop sharing**, or open
 **Configuration → Network**, where every shared session is listed with when it was shared, when
 it was last opened, and how many guests are connected — revoke one row, or revoke all. Either
 way the guest's live stream closes immediately rather than at their next click.

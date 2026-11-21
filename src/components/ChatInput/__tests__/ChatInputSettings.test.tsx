@@ -226,6 +226,43 @@ describe("ChatInputSettings", () => {
     expect(within(panel).queryByRole("radio", { name: /Opus \(default\)/ })).not.toBeInTheDocument()
   })
 
+  describe("chips row", () => {
+    function renderChips(isNewSession: boolean) {
+      render(
+        <ChatInputSettings
+          agentKind="codex"
+          selectedModel="gpt-6-astra"
+          onModelChange={vi.fn()}
+          selectedEffort="high"
+          onEffortChange={vi.fn()}
+          permissionMode="default"
+          onPermissionModeChange={vi.fn()}
+          worktreeEnabled={false}
+          onWorktreeEnabledChange={vi.fn()}
+          isNewSession={isNewSession}
+        />,
+      )
+      return screen.getByRole("group", { name: "Session settings" }).firstElementChild
+    }
+
+    it("is quiet for a running session, with the same accessible names", () => {
+      const row = renderChips(false)
+
+      expect(row).toHaveAttribute("data-quiet")
+      const permissions = screen.getByRole("button", { name: "Permissions: Workspace" })
+      expect(row).toContainElement(permissions)
+      expect(permissions).toHaveAttribute("title", "Permissions: Workspace")
+    })
+
+    it("is not quiet for a new session, with the same accessible names", () => {
+      const row = renderChips(true)
+
+      expect(row).not.toHaveAttribute("data-quiet")
+      expect(screen.getByRole("button", { name: "Permissions: Workspace" })).toBeInTheDocument()
+      expect(screen.getByRole("button", { name: "Worktree" })).toBeInTheDocument()
+    })
+  })
+
   it("locks the provider column for active sessions", () => {
     render(
       <ChatInputSettings

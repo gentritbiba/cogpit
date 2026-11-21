@@ -5,7 +5,7 @@ import { FULL_ACCESS_MODE, type PermissionMode } from "@/lib/permissions"
 import { cn } from "@/lib/utils"
 import type { AgentKind } from "@/lib/agents"
 import { getPermissionModeOptions } from "./permissionOptions"
-import { PickerChip, PickerList, PickerOption, PickerPanel, PickerSectionLabel, pickerSideFor } from "./PickerShell"
+import { CHIP_LABEL, PickerChip, PickerList, PickerOption, PickerPanel, PickerSectionLabel, pickerSideFor } from "./PickerShell"
 
 interface PermissionPickerProps {
   agentKind: AgentKind
@@ -30,9 +30,9 @@ export function PermissionPicker({
 
   return (
     <Popover modal={false} open={open} onOpenChange={setOpen}>
-      <PopoverTrigger render={<PickerChip aria-label={`Permissions: ${current.label}`} className={cn(fullAccess && "text-warning hover:text-warning")} />}>
+      <PopoverTrigger render={<PickerChip aria-label={`Permissions: ${current.label}`} title={`Permissions: ${current.label}`} className={cn(fullAccess && "text-warning hover:text-warning")} />}>
         {fullAccess ? <ShieldAlert data-icon="inline-start" /> : <Shield data-icon="inline-start" />}
-        <span className="truncate">{current.label}</span>
+        <span className={CHIP_LABEL}>{current.label}</span>
       </PopoverTrigger>
       <PickerPanel side={pickerSideFor(isNewSession)} aria-label="Permissions" className="w-80">
         <div className="p-1.5">

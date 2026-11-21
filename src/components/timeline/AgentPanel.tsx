@@ -1,5 +1,5 @@
 import { useState, memo, useMemo } from "react"
-import { Users, ChevronRight, ChevronDown, Clock, Wrench, CheckCircle2, XCircle, Loader2, ExternalLink } from "lucide-react"
+import { Users, ChevronRight, Loader2, ExternalLink } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { formatDuration, parseSubAgentPath, shortenModel } from "@/lib/format"
 import type { SubAgentMessage } from "../../../shared/session/types"
@@ -9,15 +9,14 @@ import { useSubagentContent } from "@/hooks/useSubagentContent"
 import { useSessionContext } from "@/contexts/SessionContext"
 import ReactMarkdown from "react-markdown"
 import { markdownComponents, markdownPlugins, preprocessMediaPaths } from "./markdown-components"
-import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { capabilitiesForDirName } from "@/lib/agents"
 
 interface AgentPanelProps {
   messages: SubAgentMessage[]
   expandAll: boolean
-  label: string
-  countLabel: string
+  /** What one of these agents is called at the start of a line: "Sub-agent", "Background agent". */
+  noun: string
   /** Calls whose own row streams their agent's live output, so the panel leaves it out. */
   liveOnCallRow?: ReadonlySet<string>
 }
@@ -32,9 +31,13 @@ const UNFINISHED_ENDINGS: ReadonlyMap<string, "Failed" | "Interrupted" | "Cancel
   ["canceled", "Cancelled"],
 ])
 
+function toolCallCount(count: number): string {
+  return `${count} tool ${count === 1 ? "call" : "calls"}`
+}
+
 /**
- * Shared collapsible panel for sub-agent and background-agent activity.
- * The two use cases differ only in color palette and labeling.
+ * One line for the sub-agents or background agents a turn ran: who they were
+ * and what they cost, in the grammar of a tool call's line.
  *
  * When expanded, shows only the FINAL text message returned from each agent to
  * the main agent (what the parent actually received back), plus a low-key
@@ -44,8 +47,7 @@ const UNFINISHED_ENDINGS: ReadonlyMap<string, "Failed" | "Interrupted" | "Cancel
 export const AgentPanel = memo(function AgentPanel({
   messages,
   expandAll,
-  label,
-  countLabel,
+  noun,
   liveOnCallRow,
 }: AgentPanelProps): React.ReactElement | null {
   const [open, setOpen] = useState(false)
@@ -127,65 +129,51 @@ export const AgentPanel = memo(function AgentPanel({
     let totalDuration = 0
     let totalToolUses = 0
     let hasSummary = false
-    let allCompleted = true
+    let unfinished = false
     for (const m of messages) {
       if (m.durationMs != null) { totalDuration += m.durationMs; hasSummary = true }
       if (m.toolUseCount != null) totalToolUses += m.toolUseCount
-      if (m.status && m.status !== "completed") allCompleted = false
+      if (m.status && UNFINISHED_ENDINGS.has(m.status)) unfinished = true
     }
     if (!hasSummary) return null
-    return { totalDuration, totalToolUses, allCompleted }
+    return { totalDuration, totalToolUses, unfinished }
   }, [messages])
+  const agentNames = agentIds.map((id) => agentLabelMap.get(id)).filter(Boolean).join(", ")
 
   if (messages.length === 0) return null
 
   return (
-    <div>
-      <Button
+    <div className="min-w-0">
+      <button
         type="button"
-        variant="ghost"
+        aria-expanded={isOpen}
         onClick={() => setOpen(!open)}
-        className="h-auto w-full min-w-0 flex-wrap justify-start gap-2 px-0 py-1 text-left whitespace-normal"
+        className="group/tool flex min-h-8 pointer-fine:min-h-7 w-full min-w-0 items-center gap-2 rounded-md px-2 py-0.5 text-left text-[13px] leading-5 transition-colors hover:bg-muted/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
       >
-        {isOpen
-          ? <ChevronDown className="size-3.5 shrink-0 text-muted-foreground" data-icon="inline-start" />
-          : <ChevronRight className="size-3.5 shrink-0 text-muted-foreground" data-icon="inline-start" />}
-        <Users className="size-3.5 shrink-0 text-muted-foreground" data-icon="inline-start" />
-        <span className="text-xs font-medium text-foreground">{label}</span>
-        {agentIds.length > 1 && (
-          <Badge variant="secondary">
-            {agentIds.length} {countLabel}
-          </Badge>
-        )}
-        {agentIds.map((id) => {
-          return (
-            <Badge key={id} variant="outline">
-              {agentLabelMap.get(id)}
-            </Badge>
-          )
-        })}
-        {summaryStats ? (
-          <span className="inline-flex items-center gap-2 text-xs text-muted-foreground">
-            {summaryStats.allCompleted
-              ? <CheckCircle2 className="size-3 text-success" data-icon="inline-start" />
-              : <XCircle className="size-3 text-destructive" data-icon="inline-start" />}
-            <span className="inline-flex items-center gap-0.5">
-              <Clock className="size-3" data-icon="inline-start" />
-              {formatDuration(summaryStats.totalDuration)}
-            </span>
-            {summaryStats.totalToolUses > 0 && (
-              <span className="inline-flex items-center gap-0.5">
-                <Wrench className="size-3" data-icon="inline-start" />
-                {summaryStats.totalToolUses}
-              </span>
-            )}
+        <span className={cn("flex size-4 shrink-0 items-center justify-center text-muted-foreground", summaryStats?.unfinished && "text-destructive")}>
+          <Users className="size-3.5" aria-hidden="true" />
+        </span>
+        <span className="flex min-w-0 flex-1 items-baseline gap-1.5">
+          <span className="shrink-0 font-medium text-foreground/90">
+            {agentIds.length === 1 ? noun : `${agentIds.length} ${noun.toLowerCase()}s`}
           </span>
-        ) : (
-          <span className="text-xs text-muted-foreground">
-            ({agentIds.length} agent{agentIds.length !== 1 ? "s" : ""})
+          <span className="min-w-0 truncate text-muted-foreground" title={agentNames}>{agentNames}</span>
+        </span>
+        {summaryStats && (
+          <span className="shrink-0 text-xs tabular-nums text-muted-foreground">
+            {summaryStats.unfinished && <span className="text-destructive">Did not finish · </span>}
+            {formatDuration(summaryStats.totalDuration)}
+            {summaryStats.totalToolUses > 0 && ` · ${toolCallCount(summaryStats.totalToolUses)}`}
           </span>
         )}
-      </Button>
+        <ChevronRight
+          className={cn(
+            "size-3.5 shrink-0 text-muted-foreground transition-[transform,opacity] pointer-fine:opacity-0 pointer-fine:group-hover/tool:opacity-100 pointer-fine:group-focus-visible/tool:opacity-100",
+            isOpen && "rotate-90 pointer-fine:opacity-100",
+          )}
+          aria-hidden="true"
+        />
+      </button>
 
       {/* Live transcript is visible even while the panel is collapsed —
           running agents stream here before any return text exists. */}
@@ -195,7 +183,7 @@ export const AgentPanel = memo(function AgentPanel({
       })}
 
       {isOpen && (
-        <div className="motion-enter mt-2 flex flex-col gap-2">
+        <div className="motion-enter mb-1 ml-[15px] mt-1 flex flex-col gap-3">
           {unavailable ? (
             <div className="py-1 text-xs italic text-muted-foreground">
               Sub-agent transcripts aren't available in a shared session.
@@ -278,33 +266,13 @@ function AgentReturnItem({
     <div className={cn("border-l pl-3", depth === 1 && "ml-4", depth >= 2 && "ml-8")}>
       <div className="flex min-w-0 flex-1 flex-col gap-1.5">
         {/* Header: agent label + stats + open button */}
-        <div className="flex items-center gap-2 flex-wrap">
-          <Badge variant="outline">
-            {agentLabel}
-          </Badge>
-          {runLabel && <span className="text-xs text-muted-foreground">{runLabel}</span>}
-          {stats && (
-            <span className="inline-flex items-center gap-2 text-xs text-muted-foreground">
-              {isCompleted && <CheckCircle2 className="size-3 text-success" />}
-              {ending && (
-                <span className={cn("inline-flex items-center gap-0.5", ending === "Failed" ? "text-destructive" : "text-warning")}>
-                  <XCircle className="size-3" />
-                  {ending}
-                </span>
-              )}
-              {stats.durationMs != null && (
-                <span className="inline-flex items-center gap-0.5">
-                  <Clock className="size-3" />
-                  {formatDuration(stats.durationMs)}
-                </span>
-              )}
-              {stats.toolUseCount != null && stats.toolUseCount > 0 && (
-                <span className="inline-flex items-center gap-0.5">
-                  <Wrench className="size-3" />
-                  {stats.toolUseCount}
-                </span>
-              )}
-            </span>
+        <div className="group/agent flex min-h-6 flex-wrap items-center gap-x-2 text-xs text-muted-foreground">
+          <span className="text-[13px] font-medium text-foreground/90">{agentLabel}</span>
+          {ending && <span className={ending === "Failed" ? "text-destructive" : "text-warning"}>{ending}</span>}
+          {runLabel && <span>{runLabel}</span>}
+          {stats?.durationMs != null && <span className="tabular-nums">{formatDuration(stats.durationMs)}</span>}
+          {stats?.toolUseCount != null && stats.toolUseCount > 0 && (
+            <span className="tabular-nums">{toolCallCount(stats.toolUseCount)}</span>
           )}
           {canNavigate && (
             <Button
@@ -312,7 +280,7 @@ function AgentReturnItem({
               variant="ghost"
               size="xs"
               onClick={onOpen}
-              className="ml-auto"
+              className="ml-auto transition-opacity pointer-fine:opacity-0 pointer-fine:group-hover/agent:opacity-100 pointer-fine:focus-visible:opacity-100"
               title="Open this sub-agent's full chat session"
             >
               <ExternalLink data-icon="inline-start" />

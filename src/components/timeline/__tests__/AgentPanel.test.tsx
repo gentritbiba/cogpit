@@ -36,7 +36,7 @@ function summaryOnlyAgent(): SubAgentMessage {
 
 const SESSION = { sessionId: "sess-1", turns: [] } as unknown as SessionView
 
-function renderPanel(messages: SubAgentMessage[] = [summaryOnlyAgent()]) {
+function renderPanel(messages: SubAgentMessage[] = [summaryOnlyAgent()], expandAll = true) {
   const controls = {
     sessionSource: { dirName: "-Users-me-proj", fileName: "sess-1.jsonl" },
     isLive: false,
@@ -47,9 +47,8 @@ function renderPanel(messages: SubAgentMessage[] = [summaryOnlyAgent()]) {
     <InSession session={SESSION} controls={controls}>
       <AgentPanel
         messages={messages}
-        expandAll
-        label="Sub-agents"
-        countLabel="agents"
+        expandAll={expandAll}
+        noun="Sub-agent"
       />
     </InSession>,
   )
@@ -119,6 +118,38 @@ describe("AgentPanel nesting and run settings", () => {
     expect(screen.getByText("high effort")).toBeInTheDocument()
     expect(screen.getByText("inner9012 said").closest(".border-l")).toHaveClass("ml-4")
     expect(screen.getByText("outer1234 said").closest(".border-l")).not.toHaveClass("ml-4")
+  })
+})
+
+describe("AgentPanel line", () => {
+  function done(agentId: string, extra: Partial<SubAgentMessage> = {}): SubAgentMessage {
+    return { ...summaryOnlyAgent(), agentId, status: "completed", durationMs: 61_000, toolUseCount: 4, ...extra }
+  }
+
+  it("names a lone agent and what it cost on one line, closed until asked", () => {
+    renderPanel([done("solo1234")], false)
+
+    const line = screen.getByRole("button", { name: /^Sub-agent/ })
+    expect(line).toHaveAttribute("aria-expanded", "false")
+    expect(line).toHaveTextContent("Sub-agentExplore - solo12341m 1s · 4 tool calls")
+    expect(screen.queryByRole("button", { name: /open chat/i })).toBeNull()
+  })
+
+  it("counts several agents, lists them and adds up their work", () => {
+    renderPanel([done("first123"), done("second12", { subagentType: "Plan", toolUseCount: 1 })], false)
+
+    expect(screen.getByRole("button", { name: /^2 sub-agents/ })).toHaveTextContent(
+      "2 sub-agentsExplore - first123, Plan - second122m 2s · 5 tool calls",
+    )
+  })
+
+  it("flags the line only when an agent ended without finishing, not while one still runs", () => {
+    const { unmount } = renderPanel([done("busy1234", { status: "running" })], false)
+    expect(screen.queryByText(/Did not finish/)).toBeNull()
+    unmount()
+
+    renderPanel([done("dead1234", { status: "failed" })], false)
+    expect(screen.getByText(/Did not finish/)).toHaveClass("text-destructive")
   })
 })
 

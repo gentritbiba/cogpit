@@ -1,9 +1,9 @@
-import { Send, Square, Power } from "lucide-react"
+import { Send, Square } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Tooltip, TooltipTrigger, TooltipContent } from "@/components/ui/tooltip"
 import { cn } from "@/lib/utils"
 import { useSessionChatContext, useSessionControls } from "@/contexts/SessionContext"
-import { agentKindForDirName, capabilitiesFor } from "@/lib/agents"
+import { agentKindForDirName } from "@/lib/agents"
 import { agentInterruptLabel } from "@/lib/agents/presentation"
 
 interface ActionButtonsProps {
@@ -17,7 +17,7 @@ export function ActionButtons({
   onSubmit,
   submitLabel = "Send message",
 }: ActionButtonsProps) {
-  const { isLive, sessionSource, actions: { handleStopSession: onStopSession } } = useSessionControls()
+  const { isLive, sessionSource } = useSessionControls()
   const { chat: { isConnected, interrupt: onInterrupt } } = useSessionChatContext()
   const showAgentControls = isConnected || isLive
   const agentKind = sessionSource?.agentKind ?? agentKindForDirName(sessionSource?.dirName ?? null)
@@ -39,23 +39,6 @@ export function ActionButtons({
               <Square data-icon="inline-start" className="fill-current" />
           </TooltipTrigger>
           <TooltipContent>{interruptLabel} (Esc)</TooltipContent>
-        </Tooltip>
-      )}
-
-      {/* Stop session -- kills the server process */}
-      {showAgentControls && capabilitiesFor(agentKind).stopSession && (
-        <Tooltip>
-          <TooltipTrigger render={<Button
-              variant="ghost"
-              size="icon-sm"
-              className="motion-enter shrink-0 rounded-full text-destructive hover:bg-destructive/10 hover:text-destructive"
-              onClick={onStopSession}
-              aria-label="Stop session"
-              title="Stop session"
-            />}>
-              <Power data-icon="inline-start" />
-          </TooltipTrigger>
-          <TooltipContent>Stop session</TooltipContent>
         </Tooltip>
       )}
 

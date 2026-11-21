@@ -168,7 +168,7 @@ export const AgentMessageCard = memo(function AgentMessageCard({
     <div
       data-agent-rail
       style={{ "--agent-hue": String(agentAccentHue(sender)) } as CSSProperties}
-      className="my-2 rounded-lg border border-l-[3px] border-border bg-card px-3 py-2 [border-left-color:oklch(0.52_0.16_var(--agent-hue))] dark:[border-left-color:oklch(0.74_0.14_var(--agent-hue))]"
+      className="my-2 border-l-2 py-0.5 pl-3 [border-left-color:oklch(0.52_0.16_var(--agent-hue))] dark:[border-left-color:oklch(0.74_0.14_var(--agent-hue))]"
     >
       <div className="flex items-center gap-2">
         <div className="flex min-w-0 items-center gap-1.5">
@@ -251,6 +251,7 @@ export const AgentMessageCard = memo(function AgentMessageCard({
           variant="ghost"
           size="xs"
           onClick={() => setExpanded((open) => !open)}
+          title={`${body.length.toLocaleString("en-US")} ${body.length === 1 ? "character" : "characters"}`}
           className="-mr-2 text-muted-foreground"
         >
           {expanded ? (
@@ -259,8 +260,7 @@ export const AgentMessageCard = memo(function AgentMessageCard({
             </>
           ) : (
             <>
-              <ChevronRight data-icon="inline-start" /> Expand ·{" "}
-              {body.length.toLocaleString("en-US")} {body.length === 1 ? "char" : "chars"}
+              <ChevronRight data-icon="inline-start" /> Expand
             </>
           )}
         </Button>

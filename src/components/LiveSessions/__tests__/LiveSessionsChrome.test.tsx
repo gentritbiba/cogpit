@@ -1,9 +1,10 @@
-import { fireEvent, render, screen } from "@testing-library/react"
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react"
+import userEvent from "@testing-library/user-event"
 import { describe, expect, it, vi } from "vitest"
 import type { ReactElement, ReactNode } from "react"
 import { cloneElement, isValidElement } from "react"
 
-import { LiveSessionsFeedback, LiveSessionsToolbar } from "../LiveSessionsChrome"
+import { LiveSessionsFeedback, SessionListOptions, SessionSearchField } from "../LiveSessionsChrome"
 
 vi.mock("@/components/ui/tooltip", () => ({
   Tooltip: ({ children }: { children: ReactNode }) => <>{children}</>,
@@ -15,62 +16,186 @@ vi.mock("@/components/ui/tooltip", () => ({
   TooltipContent: () => null,
 }))
 
-function renderToolbar(overrides: Partial<Parameters<typeof LiveSessionsToolbar>[0]> = {}) {
+function renderSearch(overrides: Partial<Parameters<typeof SessionSearchField>[0]> = {}) {
   const props = {
-    loading: false,
-    isMobile: false,
     searchQuery: "",
     searchLoading: false,
-    showArchived: false,
-    archivedCount: 0,
     onSearchQueryChange: vi.fn(),
-    onToggleShowArchived: vi.fn(),
-    onRefresh: vi.fn(),
+    onClose: vi.fn(),
+    onDismiss: vi.fn(),
     ...overrides,
   }
-  return { ...render(<LiveSessionsToolbar {...props} />), props }
+  return { ...render(<SessionSearchField {...props} />), props }
 }
 
-describe("LiveSessionsToolbar", () => {
-  it("toggles whether spawned sessions are grouped under the session that started them", () => {
-    const onToggleGroupCrews = vi.fn()
-    const { rerender, props } = renderToolbar({ groupCrews: true, onToggleGroupCrews })
+describe("SessionSearchField", () => {
+  it("is a focused search box for sessions and PRs", () => {
+    renderSearch()
 
-    const toggle = screen.getByRole("button", { name: "List spawned sessions on their own" })
-    expect(toggle).toHaveAttribute("aria-pressed", "true")
-    fireEvent.click(toggle)
-    expect(onToggleGroupCrews).toHaveBeenCalledOnce()
-
-    rerender(<LiveSessionsToolbar {...props} groupCrews={false} />)
-    expect(screen.getByRole("button", { name: "Group spawned sessions" })).toHaveAttribute("aria-pressed", "false")
-  })
-
-  it("places the archive toggle and refresh after the search box without a sessions heading", () => {
-    const { container, props } = renderToolbar()
-
-    const toolbar = container.firstElementChild
     const search = screen.getByRole("searchbox")
-    const searchBox = search.closest('[data-slot="input-group"]')
-    const archive = screen.getByRole("button", { name: "Show archived sessions" })
-    const refresh = screen.getByRole("button", { name: "Refresh sessions" })
-
-    expect(screen.queryByRole("heading", { name: "Sessions" })).not.toBeInTheDocument()
-    expect(toolbar).not.toBeNull()
-    expect(Array.from(toolbar?.children ?? [])).toEqual([searchBox, archive, refresh])
-
-    fireEvent.click(refresh)
-    expect(props.onRefresh).toHaveBeenCalledOnce()
+    expect(search).toHaveFocus()
     expect(search).toHaveAttribute("placeholder", "Search sessions or PRs")
+    expect(search).toHaveAttribute("aria-busy", "false")
+    expect(screen.queryByRole("heading", { name: "Sessions" })).not.toBeInTheDocument()
   })
 
-  it("toggles archived sessions and reflects the pressed state", () => {
-    const { props } = renderToolbar({ showArchived: true, archivedCount: 3 })
+  it("reports what is typed and whether a search is loading", () => {
+    const { props, rerender } = renderSearch()
 
-    const toggle = screen.getByRole("button", { name: "Hide archived sessions" })
-    expect(toggle).toHaveAttribute("aria-pressed", "true")
+    fireEvent.change(screen.getByRole("searchbox"), { target: { value: "sidebar" } })
+    expect(props.onSearchQueryChange).toHaveBeenCalledWith("sidebar")
 
-    fireEvent.click(toggle)
+    rerender(<SessionSearchField {...props} searchQuery="sidebar" searchLoading />)
+    expect(screen.getByRole("searchbox")).toHaveAttribute("aria-busy", "true")
+  })
+
+  it("closes on Escape, which clears the query", () => {
+    const { props } = renderSearch({ searchQuery: "sidebar" })
+
+    fireEvent.keyDown(screen.getByRole("searchbox"), { key: "Escape" })
+
+    expect(props.onClose).toHaveBeenCalledOnce()
+    expect(props.onDismiss).not.toHaveBeenCalled()
+  })
+
+  it("ignores other keys", () => {
+    const { props } = renderSearch({ searchQuery: "sidebar" })
+
+    fireEvent.keyDown(screen.getByRole("searchbox"), { key: "a" })
+
+    expect(props.onClose).not.toHaveBeenCalled()
+    expect(props.onSearchQueryChange).not.toHaveBeenCalled()
+  })
+
+  it("closes from its close button, which clears the query", () => {
+    const { props } = renderSearch({ searchQuery: "sidebar" })
+
+    fireEvent.click(screen.getByRole("button", { name: "Close session search" }))
+
+    expect(props.onClose).toHaveBeenCalledOnce()
+  })
+
+  it("stays while focus moves to its own close button, which a keyboard can then press", async () => {
+    const user = userEvent.setup()
+    const { props } = renderSearch()
+
+    await user.tab()
+    expect(screen.getByRole("button", { name: "Close session search" })).toHaveFocus()
+    expect(props.onDismiss).not.toHaveBeenCalled()
+
+    await user.keyboard("{Enter}")
+    expect(props.onClose).toHaveBeenCalledOnce()
+  })
+
+  it("goes away quietly when it loses focus empty, and stays open while it holds a query", () => {
+    const empty = renderSearch()
+    fireEvent.blur(screen.getByRole("searchbox"))
+    expect(empty.props.onDismiss).toHaveBeenCalledOnce()
+    expect(empty.props.onClose).not.toHaveBeenCalled()
+    cleanup()
+
+    const filled = renderSearch({ searchQuery: "  sidebar " })
+    fireEvent.blur(screen.getByRole("searchbox"))
+    expect(filled.props.onDismiss).not.toHaveBeenCalled()
+  })
+})
+
+function renderOptions(overrides: Partial<Parameters<typeof SessionListOptions>[0]> = {}) {
+  const props = {
+    loading: false,
+    showArchived: false,
+    archivedCount: 0,
+    groupCrews: true,
+    onToggleGroupCrews: vi.fn(),
+    onToggleShowArchived: vi.fn(),
+    onRefresh: vi.fn(),
+    onNewInFolder: vi.fn(),
+    ...overrides,
+  }
+  return { ...render(<SessionListOptions {...props} />), props }
+}
+
+function openOptions() {
+  fireEvent.click(screen.getByRole("button", { name: "Session list options" }))
+}
+
+describe("SessionListOptions", () => {
+  it("keeps every option behind one button until it is opened", () => {
+    renderOptions()
+
+    expect(screen.queryByRole("menuitem")).not.toBeInTheDocument()
+    expect(screen.queryByRole("menuitemcheckbox")).not.toBeInTheDocument()
+
+    openOptions()
+
+    expect(screen.getByRole("menuitemcheckbox", { name: /Group spawned sessions/ })).toBeInTheDocument()
+    expect(screen.getByRole("menuitemcheckbox", { name: /Show archived/ })).toBeInTheDocument()
+    expect(screen.getByRole("menuitem", { name: "New session in another folder…" })).toBeInTheDocument()
+    expect(screen.getByRole("menuitem", { name: "Refresh sessions" })).toBeInTheDocument()
+  })
+
+  it("toggles whether spawned sessions are grouped under the session that started them", () => {
+    const { props, rerender } = renderOptions({ groupCrews: true })
+    openOptions()
+
+    const grouped = screen.getByRole("menuitemcheckbox", { name: /Group spawned sessions/ })
+    expect(grouped).toHaveAttribute("aria-checked", "true")
+    fireEvent.click(grouped)
+    expect(props.onToggleGroupCrews).toHaveBeenCalledOnce()
+    expect(screen.getByRole("menuitemcheckbox", { name: /Group spawned sessions/ })).toBeInTheDocument()
+
+    rerender(<SessionListOptions {...props} groupCrews={false} />)
+    expect(screen.getByRole("menuitemcheckbox", { name: /Group spawned sessions/ })).toHaveAttribute("aria-checked", "false")
+  })
+
+  it("toggles archived sessions, reflects the state and shows how many there are", () => {
+    const { props, rerender } = renderOptions({ showArchived: true, archivedCount: 3 })
+    openOptions()
+
+    const archived = screen.getByRole("menuitemcheckbox", { name: /Show archived/ })
+    expect(archived).toHaveAttribute("aria-checked", "true")
+    expect(archived).toHaveTextContent("3")
+    fireEvent.click(archived)
     expect(props.onToggleShowArchived).toHaveBeenCalledOnce()
+
+    rerender(<SessionListOptions {...props} showArchived={false} archivedCount={0} />)
+    const hidden = screen.getByRole("menuitemcheckbox", { name: /Show archived/ })
+    expect(hidden).toHaveAttribute("aria-checked", "false")
+    expect(hidden).not.toHaveTextContent("3")
+  })
+
+  it("starts a session in another folder and closes the menu", async () => {
+    const { props } = renderOptions()
+    openOptions()
+
+    fireEvent.click(screen.getByRole("menuitem", { name: "New session in another folder…" }))
+
+    expect(props.onNewInFolder).toHaveBeenCalledOnce()
+    await waitFor(() => expect(screen.queryByRole("menuitem")).not.toBeInTheDocument())
+  })
+
+  it("refreshes the list and closes the menu", async () => {
+    const { props } = renderOptions()
+    openOptions()
+
+    fireEvent.click(screen.getByRole("menuitem", { name: "Refresh sessions" }))
+
+    expect(props.onRefresh).toHaveBeenCalledOnce()
+    await waitFor(() => expect(screen.queryByRole("menuitem")).not.toBeInTheDocument())
+  })
+
+  it("leaves out the folder item where sessions cannot be started", () => {
+    renderOptions({ onNewInFolder: undefined })
+    openOptions()
+
+    expect(screen.queryByRole("menuitem", { name: /another folder/ })).not.toBeInTheDocument()
+    expect(screen.getByRole("menuitem", { name: "Refresh sessions" })).toBeInTheDocument()
+  })
+
+  it("spins its button while the list loads", () => {
+    const { container } = renderOptions({ loading: true })
+
+    expect(container.querySelector("button .animate-spin")).not.toBeNull()
   })
 })
 

@@ -1,6 +1,6 @@
 import type { ReactNode } from "react"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
-import { render, screen } from "@testing-library/react"
+import { fireEvent, render, screen, within } from "@testing-library/react"
 import { Users } from "lucide-react"
 import { DesktopWorkspace } from "../DesktopWorkspace"
 import type { DesktopAppShellProps } from "../desktopTypes"
@@ -26,9 +26,9 @@ vi.mock("@/contexts/SessionContext", async () => (await import("@/__tests__/sess
 }))
 
 vi.mock("@/components/session-browser", () => ({
-  SessionBrowser: ({ activeSessionKey, header }: { activeSessionKey: string | null; header?: ReactNode }) => (
+  SessionBrowser: ({ activeSessionKey, headerActions }: { activeSessionKey: string | null; headerActions?: ReactNode }) => (
     <div data-testid="session-browser">
-      {header}
+      {headerActions}
       {activeSessionKey ?? "no-session"}
     </div>
   ),
@@ -37,6 +37,15 @@ vi.mock("@/components/session-browser", () => ({
 vi.mock("@/components/FloatingChrome", () => ({
   FloatingChrome: ({ showSidebar }: { showSidebar: boolean }) => (
     <div data-testid="floating-chrome">{showSidebar ? "sidebar-on" : "sidebar-off"}</div>
+  ),
+}))
+
+vi.mock("@/components/AppDock", () => ({
+  AppDock: ({ onOpenAgentFiles, onToggleTerminal }: { onOpenAgentFiles: () => void; onToggleTerminal?: () => void }) => (
+    <div data-testid="app-dock">
+      <button onClick={onOpenAgentFiles}>Dock agent files</button>
+      {onToggleTerminal && <button onClick={onToggleTerminal}>Dock terminal</button>}
+    </div>
   ),
 }))
 
@@ -243,6 +252,7 @@ function makeProps(
       launchTerminalRequest: 0,
       pendingProject: { path: null, dirName: null },
       onOpenTerminal: vi.fn(),
+      onToggleIntegratedTerminal: vi.fn(),
       onTogglePreview: vi.fn(),
       onToggleProjectFiles: vi.fn(),
       onCloseRightWorkspace: vi.fn(),
@@ -292,8 +302,17 @@ describe("DesktopWorkspace", () => {
 
     expect(await screen.findByTestId("config-browser")).toHaveTextContent("/fresh/session")
     expect(screen.queryByTestId("chat-area")).not.toBeInTheDocument()
-    expect(screen.getByRole("button", { name: "Agent files" })).toHaveAttribute("aria-pressed", "true")
     expect(screen.getByRole("button", { name: "Mission Control" })).toHaveAttribute("aria-pressed", "false")
+  })
+
+  it("opens agent files from the dock", () => {
+    setContexts({ session: makeSession() })
+    const props = makeProps()
+
+    render(<DesktopWorkspace {...props} />)
+    fireEvent.click(screen.getByRole("button", { name: "Dock agent files" }))
+
+    expect(props.navigation.panels.handleToggleConfig).toHaveBeenCalledOnce()
   })
 
   describe("an edition main view", () => {
@@ -362,14 +381,16 @@ describe("DesktopWorkspace", () => {
     expect(screen.queryByTestId("session-browser")).not.toBeInTheDocument()
   })
 
-  it("floats the chrome over the main pane and puts the header row in the sidebar", () => {
+  it("floats the chrome over the main pane and ends the sidebar's header row with a hide button", () => {
     setContexts({ session: makeSession() })
+    const props = makeProps()
 
-    render(<DesktopWorkspace {...makeProps()} />)
+    render(<DesktopWorkspace {...props} />)
 
     expect(screen.getByTestId("floating-chrome")).toHaveTextContent("sidebar-on")
-    expect(screen.getByRole("button", { name: "Home" })).toBeInTheDocument()
-    expect(screen.getByRole("button", { name: /Hide sidebar/ })).toBeInTheDocument()
+    const hide = within(screen.getByTestId("session-browser")).getByRole("button", { name: /Hide sidebar/ })
+    fireEvent.click(hide)
+    expect(props.navigation.panels.handleToggleSidebar).toHaveBeenCalledOnce()
   })
 
   it("tells the chrome when the sidebar is hidden", () => {
@@ -380,7 +401,7 @@ describe("DesktopWorkspace", () => {
     render(<DesktopWorkspace {...props} />)
 
     expect(screen.getByTestId("floating-chrome")).toHaveTextContent("sidebar-off")
-    expect(screen.queryByRole("button", { name: "Home" })).not.toBeInTheDocument()
+    expect(screen.queryByRole("button", { name: /Hide sidebar/ })).not.toBeInTheDocument()
   })
 
   it("removes the permanent session rail when the sidebar is disabled", () => {
@@ -416,7 +437,7 @@ describe("DesktopWorkspace", () => {
     expect(screen.getByTestId("stats-panel")).toBeInTheDocument()
   })
 
-  it("moves Mission Control and Config into the activity rail", async () => {
+  it("keeps only Mission Control as a top action in the activity rail", async () => {
     setContexts({ mainView: "mission" })
     const props = makeProps()
 
@@ -425,7 +446,20 @@ describe("DesktopWorkspace", () => {
     expect(await screen.findByTestId("mission-control")).toBeInTheDocument()
     expect(screen.getByRole("button", { name: "Mission Control" })).toHaveAttribute("aria-pressed", "true")
     expect(screen.getByRole("button", { name: "Mission Control" })).toHaveClass("bg-sidebar-primary")
-    expect(screen.getByRole("button", { name: "Agent files" })).toHaveAttribute("aria-pressed", "false")
+    expect(screen.queryByRole("button", { name: "Agent files" })).not.toBeInTheDocument()
+    expect(screen.queryByRole("button", { name: "Plugins" })).not.toBeInTheDocument()
+  })
+
+  it("mounts the app dock in the rail's footer and wires the terminal toggle", () => {
+    setContexts({ session: makeSession() })
+    const props = makeProps()
+
+    render(<DesktopWorkspace {...props} />)
+
+    const rail = screen.getByRole("complementary", { name: "Workspace panels" })
+    expect(within(rail).getByTestId("app-dock")).toBeInTheDocument()
+    fireEvent.click(screen.getByRole("button", { name: "Dock terminal" }))
+    expect(props.project.onToggleIntegratedTerminal).toHaveBeenCalledOnce()
   })
 
   it("opens worktrees inside the resizable workspace panel", async () => {

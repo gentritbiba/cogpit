@@ -32,6 +32,14 @@ describe("UserMessage — teammate-message rendering", () => {
     expect(screen.queryByText("From team-lead")).toBeNull()
   })
 
+  it("draws the raw toggle over the gap above the message instead of on a line of its own", () => {
+    render(<UserMessage content={TEAMMATE_MSG} timestamp="" />)
+    expect(screen.getByText("Show raw").closest("div")).toHaveClass(
+      "pointer-fine:absolute", "pointer-fine:bottom-full", "pointer-fine:opacity-0", "pointer-fine:group-hover:opacity-100",
+      "pointer-fine:pointer-events-none", "pointer-fine:group-hover:pointer-events-auto", "pointer-fine:focus-within:pointer-events-auto",
+    )
+  })
+
   it("does not show a teammate badge for a plain user message", () => {
     render(<UserMessage content="just a normal message" timestamp="" />)
     expect(screen.getByText(/just a normal message/)).toBeInTheDocument()
@@ -126,6 +134,19 @@ describe("UserMessage — task notification status", () => {
 })
 
 describe("UserMessage — animated disclosures", () => {
+  it("spells out how a background task ended only when it did not end well", () => {
+    const report = (status: string) => `<task-notification>
+<task-id>task-${status}</task-id>
+<status>${status}</status>
+<summary>Audit ${status}</summary>
+</task-notification>`
+
+    render(<UserMessage content={report("completed") + report("failed")} timestamp="" />)
+
+    expect(screen.getByText("Completed")).toHaveClass("sr-only")
+    expect(screen.getByText("Failed")).not.toHaveClass("sr-only")
+  })
+
   it("uses the measured collapsible panel for task details", () => {
     const notification = `<task-notification>
 <task-id>task-1</task-id>

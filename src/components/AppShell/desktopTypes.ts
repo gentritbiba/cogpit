@@ -116,6 +116,7 @@ export interface DesktopProject {
   /** Project a pending (not yet started) session would run in. */
   pendingProject: ProjectRef
   onOpenTerminal: () => void
+  onToggleIntegratedTerminal: () => void
   onTogglePreview: () => void
   onToggleProjectFiles: () => void
   onCloseRightWorkspace: () => void

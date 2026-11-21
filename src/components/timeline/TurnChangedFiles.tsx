@@ -8,7 +8,7 @@ import { OpIndicator, SubAgentIndicator } from "@/components/FileChangesPanel/fi
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible"
 import { cn } from "@/lib/utils"
 import { changeBreakdownWithin } from "@/lib/changeBreakdown"
-import { ChangeBar, LineCounts } from "@/components/shared/ChangeCounts"
+import { LineCounts } from "@/components/shared/ChangeCounts"
 import type { Turn, ToolCall } from "../../../shared/session/types"
 import { useCapability } from "@/hooks/useCapability"
 import { fileTypeIcon } from "@/lib/fileTypeColors"
@@ -239,7 +239,7 @@ export const TurnChangedFiles = memo(function TurnChangedFiles({ turn, turnIndex
 
   return (
     <Collapsible open={expanded} onOpenChange={setExpanded}>
-      <div className="group/files relative flex min-h-7 w-full items-center gap-1.5 px-1 text-xs text-muted-foreground transition-colors hover:text-foreground">
+      <div className="relative flex min-h-7 w-fit items-center gap-1.5 px-1 text-xs text-muted-foreground transition-colors hover:text-foreground">
         <CollapsibleTrigger
           className="flex cursor-pointer items-center gap-1.5 text-left outline-none after:absolute after:inset-0 after:rounded-md focus-visible:after:ring-[3px] focus-visible:after:ring-ring/50"
         >
@@ -256,11 +256,6 @@ export const TurnChangedFiles = memo(function TurnChangedFiles({ turn, turnIndex
           </span>
         </CollapsibleTrigger>
         <LineCounts add={totals.add} del={totals.del} breakdown={totals.breakdown} className="relative opacity-80" />
-        <ChangeBar add={totals.add} del={totals.del} />
-        <span
-          aria-hidden
-          className="pointer-events-none ml-1 h-px flex-1 bg-border/40 transition-colors group-hover/files:bg-border/70"
-        />
       </div>
 
       <CollapsibleContent className="ml-1 border-l border-border/40 pl-3">
@@ -306,7 +301,7 @@ const TreeRow = memo(function TreeRow({
     }
 
     return (
-      <div className="flex h-7 w-full items-center gap-1.5 font-mono text-xs" style={{ paddingLeft }}>
+      <div className="flex h-7 w-full items-center gap-1.5 font-mono text-xs pointer-fine:h-6" style={{ paddingLeft }}>
         <Button
           type="button"
           variant="ghost"
@@ -325,7 +320,6 @@ const TreeRow = memo(function TreeRow({
         </Button>
         {node.subAgentId && <SubAgentIndicator agentId={node.subAgentId} />}
         <LineCounts add={node.additions} del={node.deletions} />
-        <ChangeBar add={node.additions} del={node.deletions} />
       </div>
     )
   }
@@ -336,7 +330,7 @@ const TreeRow = memo(function TreeRow({
         type="button"
         variant="ghost"
         size="xs"
-        className="h-7 w-full justify-start gap-1 rounded-sm font-mono text-xs font-normal"
+        className="h-7 w-full justify-start gap-1 rounded-sm font-mono text-xs font-normal pointer-fine:h-6"
         style={{ paddingLeft }}
         onClick={() => setExpanded(!expanded)}
         aria-expanded={expanded}

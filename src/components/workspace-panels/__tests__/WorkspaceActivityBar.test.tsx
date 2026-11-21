@@ -104,6 +104,47 @@ describe("WorkspaceActivityBar", () => {
     expect(openConfig).toHaveBeenCalledOnce()
   })
 
+  it("renders the footer slot at the end of the rail, after the panel buttons", () => {
+    render(
+      <WorkspaceActivityBar
+        panels={panels}
+        context={context}
+        activePanelId={null}
+        onTogglePanel={vi.fn()}
+        footer={<button>Dock control</button>}
+      />,
+    )
+
+    const rail = screen.getByRole("complementary", { name: "Workspace panels" })
+    const footer = screen.getByRole("button", { name: "Dock control" })
+    const lastPanel = screen.getByRole("button", { name: "Second panel" })
+    expect(rail.lastElementChild).toContainElement(footer)
+    expect(lastPanel.compareDocumentPosition(footer) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+  })
+
+  it("renders the rail with only a footer", () => {
+    render(
+      <WorkspaceActivityBar
+        panels={[]}
+        context={context}
+        activePanelId={null}
+        onTogglePanel={vi.fn()}
+        footer={<button>Dock control</button>}
+      />,
+    )
+
+    expect(screen.getByRole("complementary", { name: "Workspace panels" })).toBeInTheDocument()
+    expect(screen.getByRole("button", { name: "Dock control" })).toBeInTheDocument()
+  })
+
+  it("renders nothing with no panels, actions or footer", () => {
+    const { container } = render(
+      <WorkspaceActivityBar panels={[]} context={context} activePanelId={null} onTogglePanel={vi.fn()} />,
+    )
+
+    expect(container).toBeEmptyDOMElement()
+  })
+
   it("keeps opted-in panels mounted while another panel is active", () => {
     const props = {
       panels,

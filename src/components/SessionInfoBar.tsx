@@ -3,11 +3,13 @@ import { MobileSessionInfoBar, type SessionInfoBarProps } from "@/components/Ses
 import { useAppContext } from "@/contexts/AppContext"
 import { useSessionContext } from "@/contexts/SessionContext"
 import { parseSubAgentPath } from "@/lib/format"
+import { useStopSession } from "@/hooks/useStopSession"
 import { capabilitiesForDirName } from "@/lib/agents"
 
 export const SessionInfoBar = memo(function SessionInfoBar(props: SessionInfoBarProps) {
   const { isMobile } = useAppContext()
   const { session, sessionSource, isLive, permissions, actions } = useSessionContext()
+  const onStopSession = useStopSession()
   if (!isMobile || !session) return null
 
   const subAgentInfo = sessionSource ? parseSubAgentPath(sessionSource.fileName) : null
@@ -22,6 +24,7 @@ export const SessionInfoBar = memo(function SessionInfoBar(props: SessionInfoBar
       isLive={isLive}
       canArchive={permissions.archive}
       onProviderHandoff={permissions.send && subAgentInfo === null ? actions.handleProviderHandoff : undefined}
+      onStopSession={onStopSession}
       contextUsage={contextUsage}
     />
   )

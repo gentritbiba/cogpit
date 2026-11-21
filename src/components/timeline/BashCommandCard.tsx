@@ -100,9 +100,7 @@ function formatValue(value: unknown): string {
 function bashOptions(input: Record<string, unknown>): string[] {
   const options: string[] = []
   if (input.timeout !== undefined) options.push(formatTimeout(input.timeout))
-  if (typeof input.run_in_background === "boolean") {
-    options.push(input.run_in_background ? "Background" : "Foreground")
-  }
+  if (input.run_in_background === true) options.push("Background")
   for (const [key, value] of Object.entries(input)) {
     if (STANDARD_BASH_KEYS.has(key) || value === undefined) continue
     options.push(`${formatKey(key)} ${formatValue(value)}`)
@@ -343,8 +341,9 @@ export function BashCommandCard({
   return (
     <section className="min-w-0" aria-label={commandCount === 1 ? "Bash command" : "Bash commands"}>
       <div className="mb-1 flex items-center justify-between gap-2">
-        <span className="text-xs font-medium text-muted-foreground">
-          {commandCount === 1 ? "Command" : `${commandCount} commands`}
+        <span className="flex min-w-0 flex-wrap items-baseline gap-x-2 text-xs text-muted-foreground [overflow-wrap:anywhere]">
+          <span className="font-medium">{commandCount === 1 ? "Command" : `${commandCount} commands`}</span>
+          {call.options.map((option) => <span key={option}>{option}</span>)}
         </span>
         <Button
           type="button"
@@ -358,14 +357,9 @@ export function BashCommandCard({
         </Button>
       </div>
       <div className="flex min-w-0 flex-col gap-2" aria-label="Command sections">
-        {call.options.length > 0 && (
-          <div className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1 py-1 text-xs text-muted-foreground [overflow-wrap:anywhere]">
-            {call.options.map((option) => <span key={option}>{option}</span>)}
-          </div>
-        )}
         {commandCount === 1 ? (
           <>
-            <pre className="min-w-0 whitespace-pre-wrap break-words rounded-md bg-muted p-3 font-mono text-xs leading-relaxed text-foreground [overflow-wrap:anywhere]">
+            <pre tabIndex={0} className="max-h-64 min-w-0 overflow-y-auto whitespace-pre-wrap break-words rounded-md bg-muted p-3 font-mono text-xs leading-relaxed text-foreground [overflow-wrap:anywhere]">
               <CommandText command={call.command} paths={call.rows[0].analysis.paths} cwd={cwd} />
             </pre>
             <CommandOutput row={call.rows[0]} cwd={cwd} />

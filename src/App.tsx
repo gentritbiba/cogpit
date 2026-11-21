@@ -1387,6 +1387,7 @@ export default function App() {
             launchTerminalRequest,
             pendingProject,
             onOpenTerminal: handleOpenTerminal,
+            onToggleIntegratedTerminal: handleToggleIntegratedTerminal,
             onTogglePreview: handleTogglePreview,
             onToggleProjectFiles: handleToggleProjectFiles,
             onCloseRightWorkspace: closeRightWorkspace,

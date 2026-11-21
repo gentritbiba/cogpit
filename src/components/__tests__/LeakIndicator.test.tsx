@@ -57,7 +57,7 @@ describe("LeakIndicator", () => {
     expect(review).toHaveBeenCalledOnce()
   })
 
-  it("stays pinned at zero for a cool-down after the last leak clears", () => {
+  it("stays as a quiet icon without a count for a cool-down after the last leak clears", () => {
     vi.useFakeTimers()
     mocks.useLeakMonitor.mockReturnValue(hookValue({ leaks: [LEAK] }))
     const { container, rerender } = render(<LeakIndicator onReview={vi.fn()} />)
@@ -65,7 +65,7 @@ describe("LeakIndicator", () => {
     mocks.useLeakMonitor.mockReturnValue(hookValue())
     rerender(<LeakIndicator onReview={vi.fn()} />)
 
-    expect(screen.getByRole("button", { name: /Leak monitor/ })).toHaveTextContent("0")
+    expect(screen.getByRole("button", { name: /Leak monitor/ })).toHaveTextContent("")
 
     act(() => void vi.advanceTimersByTime(60_000))
 

@@ -1,9 +1,8 @@
 import { memo } from "react"
 import { useDisclosure, useDisclosureKey } from "./disclosure"
-import { ChevronRight, ChevronDown, Webhook, AlertCircle } from "lucide-react"
+import { ChevronRight, Webhook, AlertCircle } from "lucide-react"
 import type { ParsedHookEvent } from "../../../shared/session/types"
 import { cn } from "@/lib/utils"
-import { Button } from "@/components/ui/button"
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible"
 
 interface Props {
@@ -18,32 +17,33 @@ export const HookEventChip = memo(function HookEventChip({ events }: Props) {
   const hasError = events.some(
     (e) => TERMINAL_EVENTS.has(e.eventName) || (e.exitCode !== undefined && e.exitCode !== 0)
   )
-  const Chev = open ? ChevronDown : ChevronRight
   return (
-    <Collapsible
-      open={open}
-      onOpenChange={setOpen}
-      className={cn(
-        "my-1 rounded-md border px-2 py-1 text-xs",
-        hasError ? "border-destructive/20 bg-destructive/5" : "bg-muted/30"
-      )}
-    >
-      <CollapsibleTrigger render={<Button type="button" variant="ghost" size="sm" className="h-auto w-full justify-start px-0 py-0 text-left font-normal text-muted-foreground" />}>
-        <Chev className="size-3 shrink-0" data-icon="inline-start" />
-        {hasError ? (
-          <AlertCircle className="size-3 text-destructive" data-icon="inline-start" />
-        ) : (
-          <Webhook className="size-3" data-icon="inline-start" />
+    <Collapsible open={open} onOpenChange={setOpen} className="min-w-0 text-xs">
+      <CollapsibleTrigger
+        className={cn(
+          "group/tool flex min-h-8 pointer-fine:min-h-7 w-full min-w-0 items-center gap-2 rounded-md px-2 py-0.5 text-left text-muted-foreground transition-colors hover:bg-muted/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+          hasError && "bg-destructive/5",
         )}
-        <span className="font-mono">
+      >
+        {hasError
+          ? <AlertCircle className="size-3.5 shrink-0 text-destructive" aria-hidden="true" />
+          : <Webhook className="size-3.5 shrink-0" aria-hidden="true" />}
+        <span className="shrink-0">
           {events.length} hook event{events.length === 1 ? "" : "s"}
         </span>
-        <span className="truncate text-muted-foreground/60">
+        <span className="min-w-0 flex-1 truncate text-muted-foreground/70">
           {events.map((e) => e.eventName).join(", ")}
         </span>
+        <ChevronRight
+          className={cn(
+            "size-3.5 shrink-0 transition-[transform,opacity] pointer-fine:opacity-0 pointer-fine:group-hover/tool:opacity-100 pointer-fine:group-focus-visible/tool:opacity-100",
+            open && "rotate-90 pointer-fine:opacity-100",
+          )}
+          aria-hidden="true"
+        />
       </CollapsibleTrigger>
       <CollapsibleContent>
-        <ul className="ml-5 mt-1 flex flex-col gap-0.5 font-mono">
+        <ul className="mb-1 ml-[15px] flex flex-col gap-0.5 border-l border-border/60 py-1 pl-4 font-mono">
           {events.map((e, i) => (
             <li key={i} className="text-muted-foreground/80">
               <span className="text-foreground">{e.eventName}</span>

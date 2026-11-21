@@ -21,7 +21,7 @@ export function TurnWorkFold({
       onClick={onToggle}
       aria-expanded={expanded}
       className={cn(
-        "group/fold h-auto min-h-8 w-full cursor-pointer justify-start gap-1.5 px-1 text-left text-xs font-normal text-muted-foreground",
+        "h-auto min-h-8 pointer-fine:min-h-7 w-fit cursor-pointer justify-start gap-1.5 px-1 text-left text-xs font-normal text-muted-foreground",
         compact && "min-h-9",
       )}
     >
@@ -33,10 +33,6 @@ export function TurnWorkFold({
         )}
       />
       <span className="tabular-nums">{label}</span>
-      <span
-        aria-hidden
-        className="pointer-events-none ml-1 h-px flex-1 bg-border/40 transition-colors group-hover/fold:bg-border/70"
-      />
     </Button>
   )
 }

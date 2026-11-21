@@ -89,7 +89,7 @@ describe("a sub-agent's live output", () => {
     expect(panes[0]).toHaveTextContent("Reading the router")
     expect(panes[0].closest("[data-tool-call-id]")).toHaveAttribute("data-tool-call-id", "task-1")
 
-    fireEvent.click(screen.getByRole("button", { name: /Sub-agent activity/ }))
+    fireEvent.click(screen.getByRole("button", { name: /^Sub-agent/ }))
     expect(screen.getByText("Working — no return yet")).toBeInTheDocument()
     expect(screen.getAllByTestId("live-subagent-transcript")).toHaveLength(1)
   })

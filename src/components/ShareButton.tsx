@@ -21,6 +21,8 @@ const MASKED = "••••"
 
 interface ShareButtonProps {
   sessionId: string
+  open: boolean
+  onOpenChange: (open: boolean) => void
 }
 
 function guestLabel(guests: number): string {
@@ -31,16 +33,16 @@ function guestLabel(guests: number): string {
 /**
  * Enable, inspect and revoke the share on the open session.
  *
- * The trigger is deliberately loud once a share exists: a forgotten share is an
- * open door onto the host machine, so it has to be visible without opening
+ * An unshared session shows no button; the session menu opens this. Once a
+ * share exists the button stays and is deliberately loud: a forgotten share is
+ * an open door onto the host machine, so it has to be visible without opening
  * anything. The plaintext passphrase lives in this component's state and
  * nowhere else — the server hands it over exactly once, at mint or rotate.
  */
-export function ShareButton({ sessionId }: ShareButtonProps) {
+export function ShareButton({ sessionId, open, onOpenChange }: ShareButtonProps) {
   const { config: { networkAccessDisabled } } = useAppContext()
   const { shares, error, refresh, create, regenerate, revoke } = useShares()
   const { activeDeviceId, activeDevice } = useDevices()
-  const [open, setOpen] = useState(false)
   const [passphrase, setPassphrase] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
   const [linkCopied, copyLink] = useCopyWithFeedback()
@@ -85,11 +87,13 @@ export function ShareButton({ sessionId }: ShareButtonProps) {
       </p>
     )
 
+  if (!share && !open) return null
+
   return (
     <DropdownMenu
       open={open}
       onOpenChange={(next) => {
-        setOpen(next)
+        onOpenChange(next)
         // Closing spends the one showing the server ever gives us. Reopening
         // has to fall back to Regenerate rather than re-reveal it.
         if (!next) setPassphrase(null)
@@ -102,7 +106,7 @@ export function ShareButton({ sessionId }: ShareButtonProps) {
             variant="ghost"
             size="icon-sm"
             aria-label={share ? "Session is shared" : "Share session"}
-            className={cn(share && "bg-primary/15 text-primary hover:bg-primary/25")}
+            className={cn("rounded-lg", share && "bg-primary/15 text-primary hover:bg-primary/25")}
           />
         }
       >

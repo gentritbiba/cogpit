@@ -26,7 +26,7 @@ import {
 import { AskUserQuestionCard } from "./AskUserQuestionCard"
 import { JsonResultHighlighted, ToolResultPanel } from "./ToolCallResult"
 import { isCodexExecCall } from "../../../shared/session/codex-exec"
-import { getCommandText, getToolPresentation } from "../../../shared/session/toolSummary"
+import { getCommandText, getToolPresentation, getToolSummary } from "../../../shared/session/toolSummary"
 import { Button } from "@/components/ui/button"
 import { Collapsible, CollapsibleContent } from "@/components/ui/collapsible"
 import { ToolCallStatus, ToolOperationIcon } from "./ToolCallStatus"
@@ -61,6 +61,19 @@ function ToolTarget({ summary, filePath, monospace }: { summary: string; filePat
     )
   }
   return <span className={cn("min-w-0 truncate text-muted-foreground", monospace && "font-mono text-xs")} title={summary}>{summary}</span>
+}
+
+// One whole literal shell word on the cd's own line (double-quoted without expansions, single-quoted, or bare
+// path characters with no globs), then `&&` or a lone `;`.
+const LEADING_CD = /^cd[ \t]+(?:"([^"\\$`]*)"|'([^']*)'|([\w./@%+=:,-]+))[ \t]*(?:&&|;(?![;&]))\s*/
+
+/** A command without the `cd` into the session's own folder that agents put in front of it. */
+function withoutOwnCd(command: string, cwd: string | undefined): string {
+  const match = cwd ? LEADING_CD.exec(command) : null
+  if (!match) return command
+  const folder = (match[1] ?? match[2] ?? match[3]).replace(/\/$/, "")
+  const rest = command.slice(match[0].length)
+  return folder === cwd!.replace(/\/$/, "") && rest ? rest : command
 }
 
 /** Lines an edit added and removed, when that is cheap to know. */
@@ -191,11 +204,13 @@ function ToolCallCardBody({
 
   const showPanel = expandToolPayloads || panelOpen
 
+  const described = hasCommand && typeof toolCall.input.description === "string" && Boolean(toolCall.input.description.trim())
+  const multiSection = sections !== null && sections.length > 1
   const summary = crewCall
     ? crewCallSentence(crewCall, () => undefined)
-    : hasCommand && typeof toolCall.input.description === "string" && toolCall.input.description.trim()
-    ? toolCall.input.description
-    : sections && sections.length > 1
+    : described
+    ? toolCall.input.description as string
+    : multiSection
       ? `${sections.length} commands · ${sections.map((section) => section.label || section.command.split(/\s+/)[0]).join(", ")}`
       : presentation.summary
   const skillMeta = toolCall.name === "Skill" && skillMetadata
@@ -236,14 +251,22 @@ function ToolCallCardBody({
   const running = toolCall.result === null && Boolean(isAgentActive) && !toolCall.awaitingReview
   const verb = toolVerb(presentation.label, running)
   const isPathTarget = [toolCall.input.file_path, toolCall.input.path, toolCall.input.notebook_path].includes(summary)
-  const target = summary && summary !== verb ? summary : ""
+  // The cd is read off the command as written; the summary has already folded its whitespace.
+  const commandIsSummary = hasCommand && !crewCall && !described && !multiSection
+  const commandText = commandIsSummary ? getCommandText(toolCall.input) : ""
+  const withoutCd = commandIsSummary ? withoutOwnCd(commandText, facts?.cwd) : commandText
+  const target = !summary || summary === verb
+    ? ""
+    : withoutCd === commandText
+      ? summary
+      : getToolSummary({ name: toolCall.name, input: { ...toolCall.input, command: withoutCd } })
 
   return (
     <div className="min-w-0" data-tool-call-id={toolCall.id} data-scroll-anchor="">
       <button
         type="button"
         className={cn(
-          "group/tool flex min-h-8 w-full min-w-0 items-center gap-2 rounded-md px-2 py-1 text-left text-[13px] leading-5 transition-colors hover:bg-muted/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+          "group/tool flex min-h-8 pointer-fine:min-h-7 w-full min-w-0 items-center gap-2 rounded-md px-2 py-0.5 text-left text-[13px] leading-5 transition-colors hover:bg-muted/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
           showPanel && "bg-muted/40",
         )}
         title={timeLabel ? `${nameTitle} · ${timeLabel}` : nameTitle}
@@ -371,7 +394,7 @@ function ToolCallCardBody({
                 type="button"
                 variant="ghost"
                 size="xs"
-                className="mt-1"
+                className="mt-1 text-muted-foreground"
                 aria-expanded={inputOpen}
                 aria-controls={inputId}
                 onClick={() => setInputOpen((open) => !open)}

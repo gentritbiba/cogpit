@@ -7,7 +7,7 @@ import { MobileSessionInfoBar } from "../SessionInfoBar.mobile"
 import { type SessionView } from "../../../shared/session/sessionDigest"
 
 vi.mock("../DeviceSwitcher", () => ({ DeviceSwitcher: () => null }))
-vi.mock("../header-shared", () => ({ ContextBadge: () => null }))
+vi.mock("../header-shared", () => ({ ContextMeter: () => null }))
 vi.mock("@/hooks/useSessionArchive", () => ({ useSessionArchiveToggle: () => null }))
 vi.mock("@/lib/auth", () => ({ authFetch: async () => ({ ok: true, json: async () => ({ instances: [], tasks: [] }) }) }))
 vi.mock("@/lib/conversationState", () => {

@@ -1,4 +1,5 @@
-import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react"
+import { createContext, memo, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react"
+import { createPortal } from "react-dom"
 import { ChevronUp, MessageSquareText } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import type { TimelineHandle } from "@/lib/timelineScroll/types"
@@ -18,6 +19,12 @@ import {
   promptSource,
   stripSystemTags,
 } from "@/lib/userMessageContent"
+
+/**
+ * Where the banner goes when the layout has a line above the conversation: on
+ * desktop it joins the session title there instead of floating over the text.
+ */
+export const StickyPromptSlot = createContext<HTMLElement | null>(null)
 
 interface StickyPromptBannerProps {
   session: SessionView
@@ -148,6 +155,7 @@ export const StickyPromptBanner = memo(function StickyPromptBanner({
   timelineRef,
 }: StickyPromptBannerProps) {
   const store = useTimelineStore()
+  const slot = useContext(StickyPromptSlot)
   const [sticky, setSticky] = useState<MessageAddress & { sessionId: string } | null>(null)
   const turns = session.turns
   const keys = useMemo(() => turnKeysOf(turns), [turns])
@@ -203,20 +211,46 @@ export const StickyPromptBanner = memo(function StickyPromptBanner({
     })
   }
 
+  const label = `Scroll to your message in turn ${message.turnIndex + 1}`
+  const turnLabel = (
+    <span className="shrink-0 font-mono text-xs text-muted-foreground">
+      Turn {message.turnIndex + 1}
+    </span>
+  )
+
+  if (slot) {
+    return createPortal(
+      <Button
+        type="button"
+        variant="ghost"
+        size="sm"
+        aria-label={label}
+        title={message.text}
+        className="motion-enter h-8 min-w-0 max-w-md shrink justify-start gap-2 rounded-lg px-2 text-left"
+        onClick={scrollToMessage}
+      >
+        {turnLabel}
+        <span className="min-w-0 flex-1 truncate text-sm font-normal text-muted-foreground">
+          {message.text}
+        </span>
+        <ChevronUp data-icon="inline-end" className="text-muted-foreground" />
+      </Button>,
+      slot,
+    )
+  }
+
   return (
     <Button
       type="button"
       variant="outline"
       size="sm"
-      aria-label={`Scroll to your message in turn ${message.turnIndex + 1}`}
+      aria-label={label}
       title={message.text}
       className="motion-slide-down-in absolute left-1/2 top-12 z-20 h-9 max-w-[calc(100%-5rem)] -translate-x-1/2 justify-start gap-2 rounded-full bg-popover px-3 text-left shadow-sm"
       onClick={scrollToMessage}
     >
       <MessageSquareText data-icon="inline-start" />
-      <span className="shrink-0 font-mono text-xs text-muted-foreground">
-        Turn {message.turnIndex + 1}
-      </span>
+      {turnLabel}
       <span className="min-w-0 flex-1 truncate text-sm font-normal text-foreground/80">
         {message.text}
       </span>

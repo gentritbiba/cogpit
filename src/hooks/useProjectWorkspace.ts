@@ -90,9 +90,9 @@ export function useProjectWorkspace({
     const terminals = [...processPanel.processes.values()].filter((entry) => entry.type === "terminal")
     const terminal = terminals.at(-1)
     if (!terminal) {
-      if (sessionCwd ?? pendingPath) {
-        setLaunchTerminalRequest((request) => request + 1)
-      }
+      // Without a project there is nowhere to start one; the open panel says so.
+      if (sessionCwd ?? pendingPath) setLaunchTerminalRequest((request) => request + 1)
+      else processPanel.toggleCollapse()
       return
     }
     if (processPanel.activeProcessId === terminal.id && !processPanel.collapsed) {

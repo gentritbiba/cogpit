@@ -3,12 +3,14 @@ import { resolvePluginPanelPreference } from "@/plugins/panelAliases"
 import { useOpenSessionCrew } from "@/hooks/useOpenSessionCrew"
 import { lazy, Suspense, useCallback, useEffect, useRef, useState } from "react"
 import type { ReactNode } from "react"
-import { Code2, FolderSearch, LayoutGrid, Puzzle, SlidersHorizontal, TerminalSquare } from "lucide-react"
+import { Code2, FolderSearch, LayoutGrid, PanelLeftClose, TerminalSquare } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { DisabledHint } from "@/components/ui/disabled-hint"
+import { AppDock } from "@/components/AppDock"
 import { ChatArea } from "@/components/ChatArea"
+import { StickyPromptSlot } from "@/components/StickyPromptBanner"
 import { FloatingChrome } from "@/components/FloatingChrome"
-import { SidebarHeader } from "@/components/SidebarHeader"
+import { HeaderIconButton } from "@/components/header-shared"
 import { TodoProgressPanel } from "@/components/TodoProgressPanel"
 import { DesktopWorkspacePanels } from "@/components/workspace-panels/DesktopWorkspacePanels"
 import { StatusPanelProvider } from "@/components/board/StatusPanelContext"
@@ -248,6 +250,7 @@ export function DesktopWorkspace({
   const openCrew = useOpenSessionCrew(sessionId)
   const [pluginsOpen, setPluginsOpen] = useState(() => new URLSearchParams(window.location.search).get("pluginSafeMode") === "1")
   const [pluginSettingsId, setPluginSettingsId] = useState<string>()
+  const [promptSlot, setPromptSlot] = useState<HTMLElement | null>(null)
   const openPluginSettings = useCallback((pluginId: string) => { setPluginSettingsId(pluginId); setPluginsOpen(true) }, [])
   const runtimePlugins = useRuntimePlugins(can("configWrite"))
   const workspacePanels = useRuntimeWorkspacePanels({ ...runtimePlugins, projectPath: project.currentCwd ?? null, openSettings: openPluginSettings })
@@ -284,13 +287,13 @@ export function DesktopWorkspace({
     extensionViewAvailable: extensionView !== null,
   })
 
-  const sidebarHeader = (
-    <SidebarHeader
-      onToggleSidebar={navigation.panels.handleToggleSidebar}
-      onGoHome={navigation.actions.handleGoHome}
-      onOpenCommandPalette={chrome.onOpenCommandPalette}
-      sidebarShortcut={shortcutLabel("toggleSidebar")}
-      commandPaletteShortcut={shortcutLabel("commandPalette")}
+  const hideSidebar = (
+    <HeaderIconButton
+      icon={PanelLeftClose}
+      label={`Hide sidebar (${shortcutLabel("toggleSidebar")})`}
+      onClick={navigation.panels.handleToggleSidebar}
+      size="default"
+      className="shrink-0 text-muted-foreground hover:text-foreground"
     />
   )
 
@@ -355,7 +358,6 @@ export function DesktopWorkspace({
       showSidebar={navigation.panels.showSidebar}
       sidebarRendered={sidebarRendered}
       sidebarShortcut={shortcutLabel("toggleSidebar")}
-      killing={chrome.killing}
       creatingSession={navigation.creatingSession}
       onNewSession={navigation.onStartNewSession}
       onDuplicateSession={navigation.handlers.handleDuplicateSession}
@@ -364,11 +366,8 @@ export function DesktopWorkspace({
       onShowWorkflows={sessionView.onShowWorkflows}
       workflowCount={sessionView.workflowCount}
       onToggleSidebar={navigation.panels.handleToggleSidebar}
-      onKillAll={chrome.onKillAll}
-      onOpenSettings={config.openConfigDialog}
-      onOpenKeyboardShortcuts={() => chrome.onKeyboardShortcutsOpenChange(true)}
-      onLogout={chrome.onLogout}
-      onOpenMainView={navigation.panels.openMainView}
+      promptSlotRef={setPromptSlot}
+      showSession={view === "session"}
     />
   )
 
@@ -379,7 +378,7 @@ export function DesktopWorkspace({
     <div className="relative flex min-h-0 flex-1 overflow-hidden">
       {sidebarRendered && (
         <div className="view-transition-sidebar panel-enter w-80 shrink-0 border-r bg-sidebar text-sidebar-foreground">
-          <PrimarySessionBrowser navigation={navigation} header={sidebarHeader} />
+          <PrimarySessionBrowser navigation={navigation} headerActions={hideSidebar} />
         </div>
       )}
 
@@ -412,31 +411,35 @@ export function DesktopWorkspace({
             active: isHome,
             onSelect: navigation.panels.handleToggleMission,
           },
-          ...(can("configWrite") ? [{
-            id: "plugins",
-            title: "Plugins",
-            icon: Puzzle,
-            active: pluginsOpen,
-            onSelect: () => setPluginsOpen(true),
-          }, {
-            id: "config",
-            title: "Agent files",
-            icon: SlidersHorizontal,
-            active: state.mainView === "config",
-            onSelect: navigation.panels.handleToggleConfig,
-          }] : []),
         ]}
+        railFooter={(
+          <AppDock
+            killing={chrome.killing}
+            onKillAll={chrome.onKillAll}
+            onOpenSettings={config.openConfigDialog}
+            onOpenCommandPalette={chrome.onOpenCommandPalette}
+            onOpenKeyboardShortcuts={() => chrome.onKeyboardShortcutsOpenChange(true)}
+            onOpenPlugins={() => setPluginsOpen(true)}
+            onOpenAgentFiles={navigation.panels.handleToggleConfig}
+            onToggleTerminal={can("terminal") ? project.onToggleIntegratedTerminal : undefined}
+            terminalShortcut={shortcutLabel("integratedTerminal")}
+            onLogout={chrome.onLogout}
+            onOpenMainView={navigation.panels.openMainView}
+          />
+        )}
       >
         <main className="app-view-transition relative flex size-full min-w-0 flex-col overflow-hidden">
           {view !== "session" && floatingChrome}
-          <DesktopMainView
-            navigation={navigation}
-            sessionView={sessionView}
-            project={project}
-            view={view}
-            extensionView={extensionView}
-            floatingChrome={floatingChrome}
-          />
+          <StickyPromptSlot.Provider value={promptSlot}>
+            <DesktopMainView
+              navigation={navigation}
+              sessionView={sessionView}
+              project={project}
+              view={view}
+              extensionView={extensionView}
+              floatingChrome={floatingChrome}
+            />
+          </StickyPromptSlot.Provider>
         </main>
       </DesktopWorkspacePanels>
 

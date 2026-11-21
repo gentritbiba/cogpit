@@ -1,7 +1,7 @@
 import { useLayoutEffect, useRef, useState } from "react"
 import { act, fireEvent, render, screen } from "@testing-library/react"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
-import { StickyPromptBanner } from "@/components/StickyPromptBanner"
+import { StickyPromptBanner, StickyPromptSlot } from "@/components/StickyPromptBanner"
 import type { TimelineHandle } from "@/lib/timelineScroll/types"
 import { makeTurn } from "@/__tests__/fixtures"
 import { DisclosureProvider, revealKey, useTimelineStore, type TimelineStateStore } from "@/components/timeline/disclosure"
@@ -171,6 +171,67 @@ describe("StickyPromptBanner", () => {
     scrollAndSettle()
 
     expect(banner(2)).toHaveTextContent("Fix the preview")
+  })
+
+  describe("placement", () => {
+    function scrollPastFirstPrompt(): void {
+      setRect(screen.getByTestId("scroll-container"), 100, 700)
+      setRect(screen.getByTestId("turn-0"), -500, -200)
+      setRect(screen.getByTestId("turn-1"), -100, 600)
+      setRect(screen.getByTestId("bubble-1-prompt"), -60, 90)
+      scrollAndSettle()
+    }
+
+    const session = () => makeSession("session-a", ["First prompt", "Second prompt"])
+
+    function withSlot(run: (slot: HTMLElement) => void): void {
+      const slot = document.createElement("div")
+      document.body.appendChild(slot)
+      try {
+        run(slot)
+      } finally {
+        slot.remove()
+      }
+    }
+
+    it("portals into the layout's slot when one is provided", () => {
+      withSlot((slot) => {
+        render(
+          <StickyPromptSlot.Provider value={slot}>
+            <Harness session={session()} bubbles={[["prompt"], ["prompt"]]} />
+          </StickyPromptSlot.Provider>,
+        )
+        scrollPastFirstPrompt()
+
+        expect(slot).toContainElement(banner(2))
+        expect(screen.getByTestId("scroll-container").parentElement).not.toContainElement(banner(2))
+        expect(banner(2)).toHaveTextContent("Second prompt")
+      })
+    })
+
+    it("renders in place, as the floating pill, without a slot", () => {
+      render(<Harness session={session()} bubbles={[["prompt"], ["prompt"]]} />)
+      scrollPastFirstPrompt()
+
+      expect(banner(2)).toHaveClass("absolute")
+      expect(banner(2)).toHaveTextContent("Second prompt")
+    })
+
+    it("lands on the prompt when clicked in the slot", () => {
+      withSlot((slot) => {
+        const scrollToTurn = vi.fn<TimelineHandle["scrollToTurn"]>(() => Promise.resolve(true))
+        render(
+          <StickyPromptSlot.Provider value={slot}>
+            <Harness session={session()} bubbles={[["prompt"], ["prompt"]]} onScrollToTurn={scrollToTurn} />
+          </StickyPromptSlot.Provider>,
+        )
+        scrollPastFirstPrompt()
+
+        fireEvent.click(banner(2))
+
+        expect(scrollToTurn).toHaveBeenCalledWith("session-a-turn-1", expect.objectContaining({ target: expect.any(Function) }))
+      })
+    })
   })
 
   it("asks the timeline to land on the exact prompt instead of the start of a long turn", () => {

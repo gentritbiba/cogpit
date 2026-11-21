@@ -5,7 +5,6 @@ import type { AgentKind } from "@/lib/agents"
 const mocks = vi.hoisted(() => ({
   agentKind: "claude" as AgentKind,
   interrupt: vi.fn(),
-  stopSession: vi.fn(),
 }))
 
 vi.mock("@/contexts/SessionContext", async () => (await import("@/__tests__/sessionContextMock")).withSessionHooks({
@@ -17,7 +16,6 @@ vi.mock("@/contexts/SessionContext", async () => (await import("@/__tests__/sess
       watchOffset: 0, loadId: 1,
       agentKind: mocks.agentKind,
     },
-    actions: { handleStopSession: mocks.stopSession },
   }),
   useSessionChatContext: () => ({
     chat: { isConnected: true, interrupt: mocks.interrupt },
@@ -46,5 +44,6 @@ describe("ActionButtons", () => {
     render(<ActionButtons hasContent={false} onSubmit={vi.fn()} />)
 
     expect(screen.getByRole("button", { name: label })).toBeInTheDocument()
+    expect(screen.queryByRole("button", { name: "Stop session" })).not.toBeInTheDocument()
   })
 })

@@ -52,9 +52,18 @@ describe("DeviceSwitcher", () => {
 
   afterEach(() => __resetCapabilitiesForTest())
 
-  it("shows the local device name on the trigger", () => {
+  it("shows an icon-only trigger that names the local device in its title", () => {
     render(<DeviceSwitcher />)
-    expect(screen.getByRole("button", { name: "Switch device" })).toHaveTextContent("This machine")
+    const trigger = screen.getByRole("button", { name: "Switch device" })
+    expect(trigger).toHaveAttribute("title", "This machine")
+    expect(trigger).toHaveTextContent("")
+  })
+
+  it("keeps the device name as text on the compact trigger", () => {
+    render(<DeviceSwitcher compact />)
+    const trigger = screen.getByRole("button", { name: "Switch device" })
+    expect(trigger).toHaveTextContent("This machine")
+    expect(trigger).not.toHaveAttribute("title")
   })
 
   it("switches to a device chosen from the dropdown", async () => {
@@ -79,12 +88,12 @@ describe("DeviceSwitcher", () => {
     await waitFor(() => expect(value.refresh).toHaveBeenCalled())
   })
 
-  it("marks the active remote device with a check and reflects its name", () => {
+  it("reflects the active remote device's name in the trigger's title", () => {
     mocks.useDevices.mockReturnValue(
       hookValue({ activeDeviceId: "dev_1", activeDevice: DEVICE }),
     )
     render(<DeviceSwitcher />)
-    expect(screen.getByRole("button", { name: "Switch device" })).toHaveTextContent("Studio")
+    expect(screen.getByRole("button", { name: "Switch device" })).toHaveAttribute("title", "Studio")
   })
 
   it("shows the add/manage entries with default (personal) capabilities", async () => {
@@ -114,7 +123,7 @@ describe("DeviceSwitcher", () => {
       hookValue({ devices: [], activeDeviceId: "dev_1", activeDevice: DEVICE }),
     )
     render(<DeviceSwitcher />)
-    expect(screen.getByRole("button", { name: "Switch device" })).toHaveTextContent("Studio")
+    expect(screen.getByRole("button", { name: "Switch device" })).toHaveAttribute("title", "Studio")
   })
 
   it("hides the add/manage entries for a member without manageDevices", async () => {
