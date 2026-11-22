@@ -229,9 +229,12 @@ export async function readUsageCostSummary(input: {
   sinceDay: string
   untilDay: string
   timeZone: string
+  /** Count only these sessions' usage. */
+  sessionIds?: ReadonlySet<string>
 }): Promise<UsageCostSummary> {
   const startedAtMs = Date.now()
   await ensureRates()
+  const counts = (record: UsageCostRecord) => !input.sessionIds || input.sessionIds.has(record.sessionId)
 
   const windowStartMs = Date.parse(`${input.sinceDay}T00:00:00Z`) - TRANSCRIPT_MTIME_SLACK_MS
 
@@ -259,6 +262,7 @@ export async function readUsageCostSummary(input: {
       const records = scopeUsageRecords(await readFileRecords(file, provider), instanceId)
       scannedFiles += 1
       for (const record of records) {
+        if (!counts(record)) continue
         aggregator.add(record)
         if (liveSessionIds.has(record.sessionId)) addCountedUsage(durableTotals, record)
       }
@@ -268,7 +272,9 @@ export async function readUsageCostSummary(input: {
   // Usage that only reaches a transcript when its session closes is folded in
   // from the runtimes that still hold those sessions open.
   for (const runtime of runtimes) {
-    for (const record of await runtime.liveUsageRecords(durableTotals)) aggregator.add(record)
+    for (const record of await runtime.liveUsageRecords(durableTotals)) {
+      if (counts(record)) aggregator.add(record)
+    }
   }
 
   const { buckets, distinctSessions } = aggregator.finish()

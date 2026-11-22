@@ -23,7 +23,7 @@ is in the audit reports listed at the end.
 
 ## Decisions
 
-- **No telemetry.** Cogpit promises not to upload usage; the walkthrough above is the tracking method.
+- **Usage data, with consent.** Originally "no telemetry", with this walkthrough as the only tracking method. Superseded by [anonymous usage data](../telemetry.md): on by default, off with `COGPIT_TELEMETRY=0` or `DO_NOT_TRACK=1`, and nothing personal is sent. The walkthrough stays the method for finding friction.
 - **Safe permissions for new installs only.** Brand-new installs start in each agent's ask-first mode and the home composer shows the permission control. Existing installs keep Full access, which current users rely on.
 - **Keep product names.** Mission Control and Crew stay; plain-language subtitles and tooltips explain them.
 - **macOS notarization** needs an Apple Developer ID (paid account): owner decision. Until then the README documents "Open Anyway".

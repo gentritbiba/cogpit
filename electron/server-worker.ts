@@ -14,6 +14,7 @@ import { startSessionActivityMonitor } from "../server/lib/sessionActivityMonito
 import { startDelegatedRequestWatcher } from "../server/sessionHosts/delegatedRequests"
 import { startSlack } from "../server/slack"
 import { flushSessionCatalog, startSessionCatalogAfterFirstResponse } from "../server/sessionCatalog"
+import { stopTelemetry } from "../server/telemetry"
 import { LOCAL_READER, markNotificationsRead } from "../server/lib/notificationHistory"
 import { isDesktopAttentionMessage, isNotificationClickedMessage } from "../shared/notifications"
 
@@ -59,8 +60,8 @@ async function start({ staticDir, userDataDir, isDev, coreBin }: WorkerConfig): 
     setServerPort(port)
     writePortFile(port)
     process.on("exit", removePortFile)
-    // The app ends the worker with SIGTERM on quit; keep what the session catalog learned.
-    process.once("SIGTERM", () => { void flushSessionCatalog().finally(() => process.exit(0)) })
+    // The app ends the worker with SIGTERM on quit; keep what the session catalog learned and send queued usage data.
+    process.once("SIGTERM", () => { void Promise.allSettled([flushSessionCatalog(), stopTelemetry()]).finally(() => process.exit(0)) })
 
     console.log(`[server-worker] Cogpit server listening on http://${listenHost}:${port}`)
     startSessionActivityMonitor()

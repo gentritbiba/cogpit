@@ -35,6 +35,7 @@ qa-notes.md
 
 /plugin-host-classification/
 /install-state.json
+/telemetry.json
 
 # Rust core build output, and the release builds staged for packaging
 /target

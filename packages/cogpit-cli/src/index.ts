@@ -211,6 +211,7 @@ async function startPackagedServer(
     port: options.port,
     publishPort: false,
     coreBin: process.env.COGPIT_CORE_BIN ? undefined : packagedCoreBinary(import.meta.dirname),
+    distribution: "npm",
   })
 }
 

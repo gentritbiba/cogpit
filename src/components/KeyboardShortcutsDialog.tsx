@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react"
+import { useReportFeature } from "@/hooks/useReportFeature"
 import { Keyboard, RotateCcw, Search } from "lucide-react"
 import { Alert, AlertDescription } from "@/components/ui/alert"
 import { Button } from "@/components/ui/button"
@@ -37,6 +38,7 @@ interface KeyboardShortcutsDialogProps {
 const modifierKeys = new Set(["Alt", "Control", "Meta", "Shift"])
 
 export function KeyboardShortcutsDialog({ open, onOpenChange }: KeyboardShortcutsDialogProps) {
+  useReportFeature("keyboard_shortcuts.open", open)
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <KeyboardShortcutsDialogContent key={open ? "open" : "closed"} />

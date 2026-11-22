@@ -4,7 +4,7 @@ import { mkdirSync } from "node:fs"
 import { join } from "node:path"
 import type { AddressInfo } from "node:net"
 
-import { createServerComposition } from "./app-server"
+import { createServerComposition, type AppServerEnvironment } from "./app-server"
 import {
   applyEnvNetworkOverrides,
   clearEnvNetworkOverrides,
@@ -38,6 +38,8 @@ export interface StartStandaloneServerOptions {
   legacyClickUpPath?: string
   /** The cogpit-core binary a package ships; a checkout finds its own build without it. */
   coreBin?: string
+  /** Where this copy came from, for usage data. */
+  distribution?: AppServerEnvironment["distribution"]
 }
 
 export interface RunningStandaloneServer {
@@ -85,6 +87,7 @@ export async function startStandaloneServer({
   publishPort = false,
   legacyClickUpPath,
   coreBin,
+  distribution,
 }: StartStandaloneServerOptions): Promise<RunningStandaloneServer> {
   detachFromParentCogpit()
   // First, before this start writes anything of its own.
@@ -136,6 +139,7 @@ export async function startStandaloneServer({
     legacyClickUpPath,
     viteDevUrl: process.env.ELECTRON_RENDERER_URL,
     coreBin,
+    distribution,
   })
   startSessionCatalogAfterFirstResponse(composition.httpServer)
   let boundPort: number

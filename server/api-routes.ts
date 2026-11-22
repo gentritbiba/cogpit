@@ -17,6 +17,8 @@ import { registerSessionCommandRoutes } from "./routes/session-commands"
 import { registerCodexThreadRoutes } from "./routes/codex-threads"
 import { registerConfigBrowserRoutes } from "./routes/config-browser"
 import { registerConfigRoutes } from "./routes/config"
+import { registerTelemetryRoutes } from "./routes/telemetry"
+import { telemetryFeatures } from "./telemetry/features"
 import { registerDeviceRoutes } from "./routes/devices"
 import { registerEditionRoutes } from "./routes/edition"
 import { registerEditorRoutes } from "./routes/editor"
@@ -117,6 +119,7 @@ export const API_ROUTE_REGISTRY = [
   apiRoute("hub", (use) => use("/hub", createHubProxyHandler())),
   apiRoute("performance", registerPerformanceRoutes),
   apiRoute("config", registerConfigRoutes),
+  apiRoute("telemetry", registerTelemetryRoutes),
   apiRoute("edition", registerEditionRoutes),
   apiRoute("projects", registerProjectRoutes),
   apiRoute("session-send", registerSessionSendRoutes),
@@ -192,6 +195,8 @@ export function registerApiRoutes(use: UseFn, context: ApiRouteContext): void {
   // Registered before every route so single-shot JSON/text responses gzip for
   // remote clients (tunnel/LAN); streaming responses pass through untouched.
   safeUse("/api", compressionMiddleware)
+  // Counts the features people use; it only watches, never answers.
+  safeUse("/api", telemetryFeatures)
   for (const route of API_ROUTE_REGISTRY) {
     route.register(safeUse, context)
   }

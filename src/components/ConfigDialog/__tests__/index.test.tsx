@@ -108,7 +108,7 @@ describe("ConfigDialog editor routing", () => {
     await user.click(screen.getByRole("button", { name: "Save" }))
 
     await waitFor(() => expect(onSaved).toHaveBeenCalledWith(SAVED_CONFIG.claudeDir))
-    const save = mocks.authFetch.mock.calls.find((call) => call[1]?.method === "POST")
+    const save = mocks.authFetch.mock.calls.find((call) => call[0] === "/api/config" && call[1]?.method === "POST")
     expect(JSON.parse(save?.[1]?.body as string)).toMatchObject({
       editorApp: "cursor",
       useBuiltInEditor: true,
@@ -190,7 +190,7 @@ describe("ConfigDialog executable picker", () => {
     await user.click(screen.getByRole("button", { name: "Save" }))
 
     await waitFor(() => expect(onSaved).toHaveBeenCalled())
-    const save = mocks.authFetch.mock.calls.find((call) => call[1]?.method === "POST")
+    const save = mocks.authFetch.mock.calls.find((call) => call[0] === "/api/config" && call[1]?.method === "POST")
     expect(JSON.parse(save?.[1]?.body as string)).toMatchObject({
       agentExecutable: { source: "bundled" },
     })
