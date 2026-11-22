@@ -47,6 +47,7 @@ import { answerHints, CLI_NAME } from "./hints"
 import { EXIT, json, parseArgs, UsageError, type CliInvocation, type CliOutput, type ParsedArgs } from "./args"
 import { SLACK_USAGE, slackCommand } from "./slack"
 import { VIEW_USAGE, viewCommand } from "./views"
+import { recordTelemetry } from "../telemetry"
 
 export { EXIT, type CliInvocation, type CliOutput } from "./args"
 
@@ -927,6 +928,9 @@ const COMMANDS: Record<string, (inv: CliInvocation, rest: string[]) => Promise<C
   projects: projectsCommand,
 }
 
+/** Commands agents poll; counting them would count waiting, not use. */
+const READ_ONLY_COMMANDS = new Set(["wait", "status", "result", "receipt", "queue", "tasks", "children", "devices", "projects"])
+
 export async function runSessionCli(inv: CliInvocation): Promise<CliOutput> {
   const [command, ...rest] = inv.argv
   if (!command || command === "help" || command === "--help" || command === "-h") {
@@ -934,6 +938,7 @@ export async function runSessionCli(inv: CliInvocation): Promise<CliOutput> {
   }
   const run = COMMANDS[command]
   if (!run) return { exitCode: EXIT.error, stdout: "", stderr: `Unknown command "${command}"\n\n${USAGE}\n` }
+  if (Object.hasOwn(COMMANDS, command) && !READ_ONLY_COMMANDS.has(command)) recordTelemetry("feature.used", { feature: `cogpit_session.${command}`, client: "agent" })
   try {
     if (command === "new" && inv.callerSessionId) await requireSessionAccess(inv, inv.callerSessionId, true)
     return await run(inv, rest)

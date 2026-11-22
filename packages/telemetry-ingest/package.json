@@ -1,0 +1,12 @@
+{
+  "name": "@cogpit/telemetry-ingest",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Cloudflare Worker that receives Cogpit's anonymous usage data and forwards it to PostHog.",
+  "scripts": {
+    "typecheck": "tsc --noEmit --pretty false -p tsconfig.json",
+    "dev": "bunx wrangler@4 dev",
+    "deploy": "bunx wrangler@4 deploy"
+  }
+}

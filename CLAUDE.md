@@ -87,6 +87,17 @@ and `shared/contracts/identity.ts`: no other file may compare an edition with
 `"team"` or name a `/api/team/` path. Core asks the `EditionModule` hooks or
 the renderer's UI slots instead.
 
+## Usage Data
+
+`server/telemetry/` records anonymous usage events on the server and sends them
+to `telemetry.cogpit.dev`, the Worker in `packages/telemetry-ingest/`, which
+adds a coarse location and forwards to PostHog. Every event and its properties
+are typed in `server/telemetry/events.ts`; values must stay short tokens,
+numbers or booleans, and model names go through `publicModelName`. Adding,
+changing or removing an event, a property or a counted feature means updating
+`docs/telemetry.md` in the same change: it is the public promise of what is
+sent.
+
 ## Adding New API Routes
 
 Define the route module under `server/routes/` and register it once in

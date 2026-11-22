@@ -1,4 +1,6 @@
 import type { ReactNode } from "react"
+import { useReportFeature } from "@/hooks/useReportFeature"
+import { panelFeature } from "@/lib/telemetry"
 import {
   ResizableHandle,
   ResizablePanel,
@@ -48,6 +50,7 @@ export function DesktopWorkspacePanels({
   actions,
   railFooter,
 }: DesktopWorkspacePanelsProps) {
+  useReportFeature(panelFeature(activePanel?.id), activePanel !== null)
   return (
     <>
       <ResizablePanelGroup orientation="horizontal" className="min-h-0 min-w-0 w-auto flex-1">

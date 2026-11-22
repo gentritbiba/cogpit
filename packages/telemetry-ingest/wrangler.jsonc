@@ -1,0 +1,14 @@
+{
+  "name": "cogpit-telemetry",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-11-01",
+  "workers_dev": false,
+  "routes": [{ "pattern": "telemetry.cogpit.dev", "custom_domain": true }],
+  "vars": {
+    "POSTHOG_HOST": "https://us.i.posthog.com"
+  },
+  // Optional raw copy of every accepted batch. Create the bucket first:
+  //   bunx wrangler@4 r2 bucket create cogpit-telemetry-archive
+  "r2_buckets": [{ "binding": "ARCHIVE", "bucket_name": "cogpit-telemetry-archive" }],
+  "observability": { "enabled": true }
+}

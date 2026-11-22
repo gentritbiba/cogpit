@@ -5,6 +5,7 @@ import type { NextFn } from "../http"
 import { getRequestPrincipal } from "../requestPrincipal"
 import type { AgentRuntime, SendOutcome, SendRequest, StartedSession, StartSessionRequest } from "../agents/runtimeTypes"
 import { editionModule } from "./registry"
+import { recordMessageSent, recordSessionStarted } from "../telemetry"
 import { sendSessionHidden } from "./refusals"
 import { allVisible, annotateAll } from "./visibleInOrder"
 import type {
@@ -265,24 +266,28 @@ export function reportShareLogin(req: IncomingMessage, login: ShareLogin): void 
 // ── Turns ────────────────────────────────────────────────────────────
 
 /** Start a session with its first prompt on the caller's behalf. */
-export function startTurn(
+export async function startTurn(
   req: IncomingMessage,
   receivedAt: number,
   runtime: AgentRuntime,
   request: StartSessionRequest,
 ): Promise<StartedSession> {
-  return editionModule().turns.start(req, receivedAt, runtime, request)
+  const started = await editionModule().turns.start(req, receivedAt, runtime, request)
+  recordSessionStarted(req, runtime, request, started)
+  return started
 }
 
 /** Send a message to a session on the caller's behalf. */
-export function sendTurn(
+export async function sendTurn(
   req: IncomingMessage,
   runtime: AgentRuntime,
   sessionId: string,
   request: SendRequest,
   context: SendContext,
 ): Promise<SendOutcome> {
-  return editionModule().turns.send(req, runtime, sessionId, request, context)
+  const outcome = await editionModule().turns.send(req, runtime, sessionId, request, context)
+  recordMessageSent(req, runtime, sessionId, request, outcome, context.route)
+  return outcome
 }
 
 /** Hand the agent a prompt through `deliver` on the caller's behalf; `delivered` is how the agent took it once `deliver` resolves. */

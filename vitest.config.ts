@@ -60,6 +60,7 @@ export default defineConfig({
             "packages/plugin-contracts/**/*.test.ts",
             "packages/plugin-sdk/**/*.test.ts",
             "packages/plugin-tools/**/*.test.ts",
+            "packages/telemetry-ingest/**/*.test.ts",
             ...(withTeam ? ["editions/team/tests/**/*.test.{ts,tsx}"] : []),
           ],
           exclude: ["**/node_modules/**", ...(withTeam ? ["editions/team/tests/ui/**"] : [])],

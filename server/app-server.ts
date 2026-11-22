@@ -5,7 +5,10 @@ import { join } from "node:path"
 
 import { registerApiRoutes } from "./api-routes"
 import { closeCommandDispatcher } from "./lib/durableSend"
-import { beginServerStart } from "./lib/installState"
+import { beginServerStart, installState } from "./lib/installState"
+import { readUsageCostSummary } from "./lib/usageCost/service"
+import { startTelemetry, stopTelemetry } from "./telemetry"
+import type { TelemetryDistribution } from "./telemetry/context"
 import { closeOrchestrationStore } from "./orchestration/storage"
 import {
   setConfigPath,
@@ -28,7 +31,7 @@ import { initializeAppPlugins } from "./plugins/startup"
 import { captureLegacyPluginHost, type LegacyHostClassification } from "./plugins/legacyHost"
 import { disposeHubPluginRelay } from "./hub/pluginRelay"
 import { refreshDirs } from "./sessionPaths"
-import { describeEditionSuppression, editionAuthz, editionModule, loadEdition } from "./edition"
+import { describeEditionSuppression, editionAuthz, editionModule, getEdition, loadEdition } from "./edition"
 import { initDeviceRegistry } from "./hub/registry"
 import { initShareRegistry } from "./share/registry"
 import { allRuntimes, isSessionActive } from "./agents/runtimes"
@@ -82,6 +85,8 @@ export interface AppServerEnvironment {
   legacyClickUpPath?: string
   /** The packaged cogpit-core binary; `COGPIT_CORE_BIN` overrides it. */
   coreBin?: string
+  /** Where this copy came from, for usage data; the desktop app's is implied. */
+  distribution?: Exclude<TelemetryDistribution, "desktop">
 }
 
 /**
@@ -187,6 +192,17 @@ export async function createServerComposition(
     })
   }
 
+  await startTelemetry({
+    dataDir: userDataDir,
+    shell: environment.mode === "electron" ? "desktop" : "standalone",
+    distribution: environment.mode === "electron" ? "desktop" : environment.distribution ?? "source",
+    edition: getEdition(),
+    freshInstall: installState().freshInstall,
+    development: Boolean(environment.viteDevUrl),
+    defaultAgent: getConfig()?.defaultAgent,
+    readDailyUsage: (day, sessionIds) => readUsageCostSummary({ sinceDay: day, untilDay: day, timeZone: "UTC", sessionIds }),
+  })
+
   const browserSupport = initBrowserSupport(isSessionActive)
   installSessionCli()
   resumeLocalDelegations()
@@ -243,6 +259,7 @@ export async function createServerComposition(
         browserSupport.shutdown(),
         ...allRuntimes().map((runtime) => runtime.shutdown()),
         core.release(),
+        stopTelemetry(),
       ])
     })()
     return cleanupPromise

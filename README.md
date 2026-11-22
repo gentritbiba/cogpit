@@ -136,6 +136,10 @@ Cogpit does not require a Cogpit account, API key, or paid subscription. It uses
 
 Cogpit reads session history from the CLI directories on your machine. It does not upload that history to a Cogpit cloud service. Your agent CLI still sends requests to its model provider. Optional remote access, session sharing, and integrations communicate with the services you configure.
 
+### Does Cogpit collect usage data?
+
+Yes, anonymously: which agents and models you use, token counts, the features you open, your app version and system, and your country and region. It never includes prompts, replies, code, file or project names, or your IP address. Set `COGPIT_TELEMETRY=0` or `DO_NOT_TRACK=1` to turn it off. See [usage data](docs/telemetry.md) for the full list.
+
 ### Can I use Cogpit from my phone or self-host it?
 
 Yes. Run the desktop app with Network Access enabled or run a headless Cogpit server, then connect through your phone's browser. Remote browser access requires HTTPS and authentication. The multi-device hub lets you switch between registered machines. See [self-hosting and remote access](docs/self-hosting.md).
@@ -162,6 +166,7 @@ React, TypeScript, Vite, Electron, Tailwind CSS, Express, and a Rust core (axum)
 - [Browser panel](docs/browser.md): shared browsing, persistent logins, and setup.
 - [Library](docs/library.md): the media, links, files and views agents share, and the copies Cogpit keeps.
 - [Self-hosting](docs/self-hosting.md): headless servers, HTTPS, and authentication.
+- [Usage data](docs/telemetry.md): what Cogpit sends, where it goes, and how to turn it off.
 - [Integrations and plugins](docs/plugins.md): GitHub, ClickUp, Vercel, Cloudflare, and custom panels.
 - [Remote workspaces](docs/remote-workspaces.md): isolated cross-device tasks with target or explicitly transferred env files.
 - [cogpit-memory](packages/cogpit-memory/README.md): search and inspect agent sessions from the command line.

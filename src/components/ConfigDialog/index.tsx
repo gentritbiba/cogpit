@@ -24,6 +24,7 @@ import {
   InputGroupInput,
 } from "@/components/ui/input-group"
 import { useConfigValidation } from "@/hooks/useConfigValidation"
+import { useReportFeature } from "@/hooks/useReportFeature"
 import { authFetch } from "@/lib/auth"
 import { can } from "@/lib/capabilities"
 import { isRemoteDeviceActive } from "@/lib/device"
@@ -93,6 +94,7 @@ interface ConfigDialogProps {
 }
 
 export function ConfigDialog({ open, currentPath, onClose, onSaved }: ConfigDialogProps) {
+  useReportFeature("settings.open", open)
   const [path, setPath] = useState(currentPath)
   const [saving, setSaving] = useState(false)
   const { status, error, debouncedValidate, reset, save } = useConfigValidation()

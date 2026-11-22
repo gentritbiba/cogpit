@@ -47,6 +47,7 @@ import {
 import { Spinner } from "@/components/ui/Spinner"
 import { DEVICE_SWITCH_COMMANDS, shortcutLabel } from "@/lib/keybindings"
 import { DOCUMENTATION_URL, REPORT_ISSUE_URL } from "../../shared/helpLinks"
+import { useReportFeature } from "@/hooks/useReportFeature"
 
 export interface CommandPaletteProject {
   dirName: string
@@ -193,6 +194,7 @@ function helpAction(id: string, label: string, keywords: string, icon: Component
 }
 
 export function CommandPalette(props: CommandPaletteProps) {
+  useReportFeature("command_palette.open", props.open)
   const navigation = availableActions(
     action("home", "Go to Mission Control", "home overview dashboard", Home, props.onGoHome),
     action(

@@ -202,6 +202,7 @@ Every one of these is read by the server. Edition packages document their own.
 | `COGPIT_NTFY_TOPIC` | none | ntfy topic for phone push. Push is off until set. |
 | `COGPIT_NTFY_URL` | `https://ntfy.sh` | ntfy base URL. Self-hosted works. |
 | `COGPIT_NTFY_TOKEN` | none | Sent as `Authorization: Bearer` for protected topics. |
+| `COGPIT_TELEMETRY` | on | `0`, `false`, `off` or `no` turns off anonymous [usage data](telemetry.md). `1` lets a development build send it. `DO_NOT_TRACK=1` also turns it off. |
 | `COGPIT_PUBLIC_URL` | none | Reachable Cogpit base URL. Without it, pushes carry no click target instead of a dead `127.0.0.1` link. |
 
 Env changes to the ntfy settings take effect without a restart.
@@ -306,8 +307,9 @@ What is actually there:
 - [Session shares](#session-sharing) are per-session credentials, hashed the same way, and a
   guest reaches one session and nothing else — but a guest can approve tool calls, so a share
   passphrase is host code execution.
-- No analytics, no account, no telemetry. It talks to localhost, to your CLIs, and to your
-  ntfy topic if you configured one.
+- No account. It talks to localhost, to your CLIs, to your ntfy topic if you configured one,
+  and to `telemetry.cogpit.dev` for anonymous [usage data](telemetry.md), which never includes
+  prompts, code, paths or your IP address. `COGPIT_TELEMETRY=0` turns it off.
 
 What is not there:
 

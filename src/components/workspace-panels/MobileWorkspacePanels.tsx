@@ -1,4 +1,6 @@
 import type { ReactNode } from "react"
+import { useReportFeature } from "@/hooks/useReportFeature"
+import { panelFeature } from "@/lib/telemetry"
 import { ArrowLeft, ChevronRight } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
@@ -23,6 +25,7 @@ export function MobileWorkspacePanels({
 }: MobileWorkspacePanelsProps) {
   const available = availableWorkspacePanels(panels, context)
   const selected = available.find((panel) => panel.id === activePanelId)
+  useReportFeature(panelFeature(selected?.id), active && selected !== undefined)
   const action = actions.find((item) => item.active)
   const title = action?.title ?? selected?.title
   const project = context.projectPath?.split(/[/\\]/).filter(Boolean).at(-1)
