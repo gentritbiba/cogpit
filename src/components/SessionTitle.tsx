@@ -29,8 +29,8 @@ import { formatAgentLabel } from "@/components/timeline/agent-utils"
 import { useAppContext } from "@/contexts/AppContext"
 import type { SessionSource } from "@/lib/sessionSource"
 import type { SessionArchiveToggle } from "@/hooks/useSessionArchive"
-import { can } from "@/lib/capabilities"
-import { isRemoteDeviceActive } from "@/lib/device"
+import { useCan } from "@/hooks/useCapability"
+import { useIsRemoteDevice } from "@/contexts/DevicePaneContext"
 import { isBuiltInEditorEnabled, openProject, revealInFolder } from "@/lib/fileOpener"
 import {
   formatTokenCount,
@@ -85,13 +85,14 @@ export const SessionTitle = memo(function SessionTitle({
   archive,
   onStopSession,
 }: SessionTitleProps) {
+  const can = useCan()
   const { dispatch } = useAppContext()
   const subAgentInfo = sessionSource ? parseSubAgentPath(sessionSource.fileName) : null
   const subAgentLabel = subAgentInfo ? formatAgentLabel(subAgentInfo.agentId) : null
   const thinkingEnabled = session.turns.some((turn) => turn.thinking.length > 0)
   const contextUsage = sessionContextUsage(session, sessionSource?.dirName)
 
-  const isRemote = isRemoteDeviceActive()
+  const isRemote = useIsRemoteDevice()
   const project = sessionSource ? { path: session.cwd, dirName: sessionSource.dirName } : null
   // Both reach the host's own files, which an edition may keep to some accounts.
   const hostFiles = can("hostFiles")

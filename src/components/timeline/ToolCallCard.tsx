@@ -8,7 +8,7 @@ import type { ToolCall } from "../../../shared/session/types"
 import { cn } from "@/lib/utils"
 import { LiveSubagentTranscript, streamsSubagentOnRow } from "@/components/timeline/LiveSubagentTranscript"
 import { EditDiffView } from "./EditDiffView"
-import { isRemoteDeviceActive } from "@/lib/device"
+import { useIsRemoteDevice } from "@/contexts/DevicePaneContext"
 import { isBuiltInEditorEnabled, openFile } from "@/lib/fileOpener"
 import { LocalImage } from "./LocalImage"
 import { ElidedResultImage } from "./ElidedResultImage"
@@ -173,6 +173,7 @@ function ToolCallCardBody({
   skillMetadata,
 }: ToolCallCardProps) {
   const facts = useTimelineRowFacts()
+  const remoteDevice = useIsRemoteDevice()
   const [panelOpen, setPanelOpen] = useDisclosure(useDisclosureKey("panel"), false)
   const [inputOpen, setInputOpen] = useDisclosure(useDisclosureKey("input"), false)
   const panelId = useId()
@@ -350,7 +351,7 @@ function ToolCallCardBody({
       {skillMeta && (
         <div className="mt-1 flex min-w-0 flex-wrap items-center gap-2 font-mono text-xs text-muted-foreground">
           <span>source: {skillMeta.source}</span>
-          {skillFilePath && (!isRemoteDeviceActive() || isBuiltInEditorEnabled()) && (
+          {skillFilePath && (!remoteDevice || isBuiltInEditorEnabled()) && (
             <Button
               type="button"
               variant="link"

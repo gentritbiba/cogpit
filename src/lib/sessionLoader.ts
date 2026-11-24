@@ -80,6 +80,15 @@ export interface SessionController {
   reloadCurrent(options?: { keepBackoff?: boolean }): Promise<void>
   /** The user left the session on screen; nothing pending may land after this. */
   leave(): void
+  /**
+   * The shell went off screen with its session still in it (DeviceRoot keeps
+   * a machine's UI in the background): like `leave`, nothing pending lands,
+   * but `resume` puts the same session back without reading it again.
+   */
+  suspend(): void
+  resume(): void
+  /** The session on screen, or null. */
+  showing(): SessionAddress | null
 }
 
 /** The waits before each retry of a failed reload; after the last one it gives up. */
@@ -222,6 +231,10 @@ export function createSessionController({
   let pending: PendingOpen | null = null
   /** The session the last committed open put on screen. */
   let shown: SessionAddress | null = null
+  /** What this shell's screen pins in the cache: the view the last open put on screen. */
+  let pinned: (SessionAddress & { view: SessionView }) | null = null
+  /** The session a suspended shell keeps on screen. */
+  let suspended: SessionAddress | null = null
   /** This shell's screen in the cache, which holds the view it shows. */
   const screen = {}
   let reloading: Promise<void> | null = null
@@ -229,6 +242,14 @@ export function createSessionController({
   let retryNow: (() => void) | null = null
   /** A direct reload came in while a read was in flight, which may have read the transcript before it changed. */
   let readAgain = false
+
+  const leave = () => {
+    dropPending()
+    token += 1
+    shown = null
+    suspended = null
+    sessionCache.show(screen, null)
+  }
 
   const dropPending = () => {
     if (!pending) return
@@ -244,6 +265,7 @@ export function createSessionController({
     recover?: OpenRequest["recover"],
   ): Promise<OpenOutcome> {
     dropPending()
+    suspended = null
     const mine = ++token
     const self: PendingOpen = { lookup: new AbortController(), flight: null }
     pending = self
@@ -252,7 +274,8 @@ export function createSessionController({
     const land = (address: SessionAddress, loaded: LoadedSession): OpenOutcome => {
       pending = null
       shown = address
-      sessionCache.show(screen, { ...address, view: loaded.parsed })
+      pinned = { ...address, view: loaded.parsed }
+      sessionCache.show(screen, pinned)
       commit(loaded)
       return "opened"
     }
@@ -348,11 +371,23 @@ export function createSessionController({
       return reloading
     },
 
-    leave() {
-      dropPending()
-      token += 1
-      shown = null
-      sessionCache.show(screen, null)
+    leave,
+
+    suspend() {
+      const kept = shown
+      leave()
+      suspended = kept
+    },
+
+    resume() {
+      if (!suspended || pending || shown) return
+      shown = suspended
+      suspended = null
+      if (pinned && pinned.dirName === shown.dirName && pinned.fileName === shown.fileName) sessionCache.show(screen, pinned)
+    },
+
+    showing() {
+      return shown
     },
   }
 }

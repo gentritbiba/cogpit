@@ -30,7 +30,7 @@ export function cacheTurnCount(sessionId: string, count: number): void {
  * Best available turn count: max of cached (accurate, from loading session)
  * and server-provided (cheap partial read). Turns only grow, so max is safest.
  */
-export function resolveTurnCount(sessionId: string, serverCount?: number): number {
-  const cached = cache.get(deviceScopedKey(sessionId))
+export function resolveTurnCount(sessionId: string, serverCount: number | undefined, deviceId: string): number {
+  const cached = cache.get(deviceScopedKey(sessionId, deviceId))
   return Math.max(cached ?? 0, serverCount ?? 0)
 }

@@ -2,6 +2,7 @@ import { useEffect, useRef, useCallback, useState, type Dispatch } from "react"
 import type { SessionShellState, SessionAction } from "./useSessionState"
 import type { LoadedSession, SessionController } from "@/lib/sessionLoader"
 import { devicePathPrefix, getActiveDeviceId, saveLastPath } from "@/lib/device"
+import { useDeviceId, useInDevicePane } from "@/contexts/DevicePaneContext"
 import { authFetch } from "@/lib/auth"
 import { previewSessionIdFromPath } from "@/lib/previewMode"
 import { fileNameFromUrlId } from "@/lib/agents"
@@ -186,7 +187,7 @@ export function useUrlSync({
   )
 
   // On mount: if URL has a path, load the corresponding session or project.
-  // Once per mount, not per hook instance: an unmount leaves the session, so a
+  // Once per mount, not per hook instance: an unmount suspends the session, so a
   // remount (StrictMode's in development) opens the link again.
   const loadFromUrlRef = useRef(loadFromUrl)
   loadFromUrlRef.current = loadFromUrl
@@ -195,11 +196,16 @@ export function useUrlSync({
     // deep links, whose URL never changes and so would otherwise never save).
     saveLastPath(getActiveDeviceId(), window.location.pathname)
 
+    // A machine's pane shown again at the address it left still has that
+    // session on screen (useSessionController resumed it): opening it again
+    // would only reset the scroll.
+    if (sessions.showing() && window.location.pathname === lastPushedRef.current) return
+
     const parsed = parsePath(window.location.pathname)
     if (parsed.type !== "home" || parsed.normalizeHome) {
       void loadFromUrlRef.current(parsed)
     }
-  }, [])
+  }, [sessions])
 
   // Sync state changes → URL (pushState)
   useEffect(() => {
@@ -217,9 +223,14 @@ export function useUrlSync({
   // eslint-disable-next-line react-hooks/exhaustive-deps -- only sync URL-relevant state fields
   }, [state.sessionSource, state.pendingDirName, state.mainView, state.dashboardProject])
 
-  // Handle browser back/forward
+  // Handle browser back/forward. Back onto another machine is DeviceRoot's to
+  // show; this pane only hears it before it goes to the background.
+  const inPane = useInDevicePane()
+  const deviceId = useDeviceId()
+  const paneDeviceId = inPane ? deviceId : null
   useEffect(() => {
     const handlePopstate = () => {
+      if (paneDeviceId !== null && getActiveDeviceId() !== paneDeviceId) return
       const parsed = parsePath(window.location.pathname)
       lastPushedRef.current = window.location.pathname
       saveLastPath(getActiveDeviceId(), window.location.pathname)
@@ -228,7 +239,7 @@ export function useUrlSync({
 
     window.addEventListener("popstate", handlePopstate)
     return () => window.removeEventListener("popstate", handlePopstate)
-  }, [loadFromUrl])
+  }, [loadFromUrl, paneDeviceId])
 
   return { previewLoadError }
 }

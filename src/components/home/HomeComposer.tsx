@@ -148,7 +148,7 @@ export function HomeComposer({
               className={cn(
                 "flex max-w-48 items-center gap-1.5 rounded-full border py-1 pl-1.5 pr-3 text-xs outline-none transition-colors focus-visible:ring-2 focus-visible:ring-ring",
                 selected
-                  ? "border-foreground/80 bg-foreground text-background"
+                  ? "border-foreground/80 bg-foreground text-canvas"
                   : "border-border/70 text-muted-foreground hover:border-foreground/40 hover:text-foreground",
               )}
             >

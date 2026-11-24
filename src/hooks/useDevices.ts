@@ -8,6 +8,7 @@ import {
 } from "@/lib/device"
 import { readJson } from "@/lib/httpJson"
 import type { SignInMode } from "../../shared/contracts/identity"
+import { parseThemeId, type ThemeId } from "../../shared/contracts/appearance"
 
 // ── Types (mirror server/hub/registry.ts + server/routes/devices.ts) ─────────
 
@@ -24,6 +25,8 @@ export interface DeviceHello {
   instanceId?: string
   networkAccess?: boolean
   configured?: boolean
+  /** The machine's own theme; absent before machines kept one. */
+  theme?: ThemeId | null
 }
 
 export interface DeviceRuntime {
@@ -171,6 +174,12 @@ export function deviceVersion(device: PublicDevice): string | undefined {
     if (typeof version === "string") return version
   }
   return undefined
+}
+
+/** The theme a device reported wearing in its last hello, if it has one. */
+export function deviceTheme(device: PublicDevice): ThemeId | null {
+  const hello = device.runtime.lastHello
+  return hello && typeof hello === "object" ? parseThemeId((hello as { theme?: unknown }).theme) : null
 }
 
 /** Read a device's sign-in only from a validated hello payload. */

@@ -1,6 +1,7 @@
 import { useEffect, useState, useSyncExternalStore, type ReactNode } from "react"
 import { authFetch } from "@/lib/auth"
-import { getActiveDeviceScope } from "@/lib/device"
+import { deviceScope, getActiveDeviceScope } from "@/lib/device"
+import { useDeviceId } from "@/contexts/DevicePaneContext"
 import { withViewTheme } from "../../../../../shared/views/frame"
 import { formatViewReference, viewVersionPath, VIEWS_PATH, type StoredViewVersion, type ViewReference, type ViewSummary } from "../../../../../shared/views/stored"
 import type { ViewPublication } from "../../../../../shared/views/publish"
@@ -91,12 +92,14 @@ function subscribe(notify: () => void): () => void {
 
 /** Where `id` on the active device is published, null when it is not, and undefined until this window knows. */
 export function usePublication(id: string): ViewPublication | null | undefined {
-  return useSyncExternalStore(subscribe, () => publications.get(`${viewsScope()} ${id}`))
+  const scope = deviceScope(useDeviceId())
+  return useSyncExternalStore(subscribe, () => publications.get(`${scope} ${id}`))
 }
 
 /** The newest version of `id` on the active device that this window has heard of, or null. */
 export function useNewestVersion(id: string): number | null {
-  return useSyncExternalStore(subscribe, () => newest.get(`${viewsScope()} ${id}`) ?? null)
+  const scope = deviceScope(useDeviceId())
+  return useSyncExternalStore(subscribe, () => newest.get(`${scope} ${id}`) ?? null)
 }
 
 /** One version of a stored view, fetched from the computer that built it. */

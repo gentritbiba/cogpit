@@ -3,7 +3,7 @@ import { afterEach, describe, expect, it, vi } from "vitest"
 
 const mocks = vi.hoisted(() => ({ device: "local", authFetch: vi.fn() }))
 vi.mock("@/lib/auth", () => ({ authFetch: mocks.authFetch }))
-vi.mock("@/lib/device", () => ({ getActiveDeviceScope: () => mocks.device }))
+vi.mock("@/lib/device", () => ({ getActiveDeviceScope: () => mocks.device, getActiveDeviceId: () => mocks.device, deviceScope: (id: string) => id }))
 
 import { rememberViews, useNewestVersion, viewsScope } from "../view/storedView"
 

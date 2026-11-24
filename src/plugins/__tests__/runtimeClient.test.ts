@@ -61,15 +61,17 @@ afterEach(() => {
 })
 
 describe("runtime plugin client host and session ownership", () => {
-  it("captures the target URL and revokes the old session on a host switch", async () => {
+  it("stays bound to the machine it was made for while another one is on screen", async () => {
     const client = createClient()
     await ready(client)
+    const shown = client.getSnapshot()
+    const before = calls.length
     switchDevice("host-b")
-    expect(client.getSnapshot()).toEqual(EMPTY_PLUGIN_STATE)
-    expect(calls.at(-1)).toMatchObject({ method: "DELETE" })
-    expect(calls.at(-1)!.url.pathname).toBe("/hub/host-a/api/plugins/session")
+    expect(client.getSnapshot()).toBe(shown)
+    expect(calls.slice(before).some((call) => call.method === "DELETE")).toBe(false)
+    // Its pane's frames still reach their own host, under the same session.
+    await client.changeInstalled("dev.fixture", "enabled", { enabled: false }, 1).catch(() => {})
     expect(calls.at(-1)!.headers.get("X-Cogpit-Plugin-Session")).toBe(sessionId(1))
-    await expect(client.changeInstalled("dev.fixture", "enabled", { enabled: false }, 1)).rejects.toThrow()
     expect(calls.every((call) => call.url.pathname.startsWith("/hub/host-a/api/plugins/"))).toBe(true)
   })
 
@@ -90,14 +92,39 @@ describe("runtime plugin client host and session ownership", () => {
     expect(client.getSnapshot()).toEqual(EMPTY_PLUGIN_STATE)
   })
 
-  it("does not publish a body that finishes after the host changes", async () => {
+  it("clears what it showed when its own machine's connection changes", async () => {
+    const client = createClient()
+    await ready(client)
+    recordDeviceConnectionRevision("host-a", 2)
+    expect(client.getSnapshot()).toEqual(EMPTY_PLUGIN_STATE)
+  })
+
+  it("keeps what it showed while its pane is in the background, then refreshes it in place", async () => {
+    const client = createClient()
+    await ready(client)
+    const shown = client.getSnapshot()
+    const minted = calls.filter((call) => call.url.pathname.endsWith("/session") && call.method === "POST").length
+    client.suspend()
+    expect(client.getSnapshot()).toBe(shown)
+    expect(calls.at(-1)?.method).not.toBe("DELETE")
+    client.start()
+    expect(client.getSnapshot()).toBe(shown)
+    await ready(client)
+    // The same host session carries on, so the activation, and every panel keyed on it, stays.
+    expect(calls.filter((call) => call.url.pathname.endsWith("/session") && call.method === "POST").length).toBe(minted)
+    expect(client.getSnapshot().activation).toBe(shown.activation)
+    client.stop()
+    expect(calls.at(-1)).toMatchObject({ method: "DELETE" })
+  })
+
+  it("does not publish a body that finishes after its host's connection changes", async () => {
     const client = createClient()
     await ready(client)
     let stream!: ReadableStreamDefaultController<Uint8Array>
     respond = (request) => request.url.pathname.endsWith("/status") ? new Response(new ReadableStream({ start(controller) { stream = controller } })) : fallback(request)
     const refresh = client.refresh()
     await waitFor(() => expect(stream).toBeDefined())
-    switchDevice("host-b")
+    recordDeviceConnectionRevision("host-a", 3)
     stream.enqueue(new TextEncoder().encode(JSON.stringify(status(99))))
     stream.close()
     await refresh

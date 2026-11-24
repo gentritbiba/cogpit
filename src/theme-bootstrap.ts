@@ -1,6 +1,8 @@
-import { applyTheme, readSavedTheme } from "./lib/themes"
+import { applyTheme } from "./lib/themes"
+import { shownDeviceTheme } from "./lib/deviceThemes"
+import { getActiveDeviceId } from "./lib/device"
 
-applyTheme(readSavedTheme())
+applyTheme(shownDeviceTheme(getActiveDeviceId()))
 
 if (navigator.userAgent.includes("Electron")) {
   document.documentElement.classList.add("electron")

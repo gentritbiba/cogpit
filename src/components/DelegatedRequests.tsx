@@ -9,16 +9,17 @@ import { Button } from "@/components/ui/button"
 import { PendingInputPrompt } from "@/components/PendingInputPrompt"
 import { useDelegatedRequests } from "@/hooks/useDelegatedRequests"
 import { sessionUrlIdFromFileName } from "@/lib/agents"
-import { getActiveDeviceId, LOCAL_DEVICE_ID } from "@/lib/device"
+import { LOCAL_DEVICE_ID } from "@/lib/device"
+import { useDeviceId } from "@/contexts/DevicePaneContext"
 import { revealSessionPath } from "@/lib/revealSession"
 import type { DelegatedRequest } from "../../shared/contracts/delegatedRequests"
 import type { PendingInputResponse } from "../../shared/contracts/pendingInput"
 
 /** The app path of a delegated session, on its own device. */
-function sessionPath(request: DelegatedRequest): string | null {
+function sessionPath(request: DelegatedRequest, paneDeviceId: string): string | null {
   if (!request.address) return null
   const { dirName, fileName } = request.address
-  const deviceId = request.device?.id ?? getActiveDeviceId()
+  const deviceId = request.device?.id ?? paneDeviceId
   const prefix = deviceId === LOCAL_DEVICE_ID ? "" : `/d/${encodeURIComponent(deviceId)}`
   return `${prefix}/${encodeURIComponent(dirName)}/${encodeURIComponent(sessionUrlIdFromFileName(dirName, fileName))}`
 }
@@ -50,7 +51,7 @@ function DelegatedRequestCard({
   responding: Set<string>
   onRespond: (requestId: string, response: PendingInputResponse) => void
 }) {
-  const path = sessionPath(request)
+  const path = sessionPath(request, useDeviceId())
   const open = () => {
     if (path) revealSessionPath(path)
   }

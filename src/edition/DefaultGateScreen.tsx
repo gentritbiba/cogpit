@@ -9,7 +9,8 @@ import {
   EmptyTitle,
 } from "@/components/ui/empty"
 import { useDevices } from "@/hooks/useDevices"
-import { isRemoteDeviceActive, LOCAL_DEVICE_ID, switchDevice } from "@/lib/device"
+import { LOCAL_DEVICE_ID, switchDevice } from "@/lib/device"
+import { useIsRemoteDevice } from "@/contexts/DevicePaneContext"
 import type { GateScreenProps } from "./contract"
 
 /**
@@ -20,7 +21,7 @@ import type { GateScreenProps } from "./contract"
  */
 export function DefaultGateScreen({ onRestored, onLogout }: GateScreenProps) {
   const { activeDevice, activeDeviceId } = useDevices()
-  const remote = isRemoteDeviceActive()
+  const remote = useIsRemoteDevice()
   const server = remote ? activeDevice?.name ?? activeDeviceId : "This server"
 
   return (

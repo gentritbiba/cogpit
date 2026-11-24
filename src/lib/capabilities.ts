@@ -49,17 +49,22 @@ const UNRESOLVED: Identity = {
   gate: null,
 }
 
-let identity: Identity = PERSONAL
-/** The device scope `identity` was read from; null until useMe first settles. */
-let identityScope: string | null = null
+/**
+ * Each device's identity, by the device scope it was read from. Empty until
+ * useMe first settles. Kept per device so a background pane, and the active
+ * one when it comes back, answer for their own machine.
+ */
+const identities = new Map<string, Identity>()
 const listeners = new Set<() => void>()
+/** Counts identity changes, so a hook can tell React that every check may answer differently. */
+let version = 0
 
 /**
  * Called by useMe with the active device's identity, or null while it is
  * unresolved. `hubUser` differs from `me.user` only on a remote device.
  */
 export function setMe(me: MeResponse | null, hubUser: AccountPublic | null = me?.user ?? null): void {
-  identity = me
+  const identity: Identity = me
     ? {
         capabilities: me.capabilities,
         user: {
@@ -71,28 +76,38 @@ export function setMe(me: MeResponse | null, hubUser: AccountPublic | null = me?
         gate: me.gate ?? null,
       }
     : UNRESOLVED
-  identityScope = getActiveDeviceScope()
+  identities.set(getActiveDeviceScope(), identity)
+  version += 1
   for (const listener of listeners) listener()
 }
 
-function activeIdentity(): Identity {
-  return identityScope === null || identityScope === getActiveDeviceScope() ? identity : UNRESOLVED
+/** Changes whenever an identity does. */
+export function capabilitiesVersion(): number {
+  return version
 }
 
-/** Render-time capability check for inline gating. A capability the server does not report is not held. */
-export function can(cap: keyof Capabilities | (string & {})): boolean {
-  const { capabilities } = activeIdentity()
+function identityFor(scope: string): Identity {
+  if (identities.size === 0) return PERSONAL
+  return identities.get(scope) ?? UNRESOLVED
+}
+
+/**
+ * Render-time capability check for inline gating, on the active device unless
+ * `scope` names another. A capability the server does not report is not held.
+ */
+export function can(cap: keyof Capabilities | (string & {}), scope = getActiveDeviceScope()): boolean {
+  const { capabilities } = identityFor(scope)
   return Object.hasOwn(capabilities, cap) && capabilities[cap] === true
 }
 
-/** The edition and user of the active device, as that device knows the caller. */
-export function getCurrentUser(): CurrentUser {
-  return activeIdentity().user
+/** The edition and user of the active device (or the one `scope` names), as that device knows the caller. */
+export function getCurrentUser(scope = getActiveDeviceScope()): CurrentUser {
+  return identityFor(scope).user
 }
 
-/** Why the active device keeps the caller out, or null. */
-export function getAppGate(): string | null {
-  return activeIdentity().gate
+/** Why the active device (or the one `scope` names) keeps the caller out, or null. */
+export function getAppGate(scope = getActiveDeviceScope()): string | null {
+  return identityFor(scope).gate
 }
 
 /** Subscribe React consumers that must update even through memo boundaries. */
@@ -102,7 +117,7 @@ export function subscribeCapabilities(listener: () => void): () => void {
 }
 
 export function __resetCapabilitiesForTest(): void {
-  identity = PERSONAL
-  identityScope = null
+  identities.clear()
+  version += 1
   for (const listener of listeners) listener()
 }

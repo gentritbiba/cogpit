@@ -104,11 +104,15 @@ export function recordDeviceConnectionRevision(deviceId: string, revision: numbe
   return true
 }
 
-/** Device id plus connection revision, used by async guards and module caches. */
+/** A device id plus its connection revision, used by async guards and module caches. */
+export function deviceScope(deviceId: string): string {
+  const revision = getDeviceConnectionRevision(deviceId)
+  return revision === 0 ? deviceId : `${deviceId}@${revision}`
+}
+
+/** The active device's {@link deviceScope}. */
 export function getActiveDeviceScope(): string {
-  const id = getActiveDeviceId()
-  const revision = getDeviceConnectionRevision(id)
-  return revision === 0 ? id : `${id}@${revision}`
+  return deviceScope(getActiveDeviceId())
 }
 
 export function __resetIdentityForTest(): void {
@@ -120,16 +124,16 @@ export function __resetDeviceRevisionsForTest(): void {
 }
 
 /**
- * Scope a cache/storage key to the active device so per-device state does not
- * collide. Local device keeps the bare key (warm switch-back for free). When a
+ * Scope a cache/storage key to a device (the active one unless named) so
+ * per-device state does not collide. Local device keeps the bare key. When a
  * signed-in account is active, keys are additionally scoped per account so two
- * people sharing a browser never read each other's state.
+ * people sharing a browser never read each other's state. While rendering, use
+ * useDeviceScopedKey: a background pane renders for its own device.
  */
-export function deviceScopedKey(base: string): string {
-  const id = getActiveDeviceId()
-  const scope = getActiveDeviceScope()
+export function deviceScopedKey(base: string, deviceId = getActiveDeviceId()): string {
+  const scope = deviceScope(deviceId)
   if (activeUserId !== null) return `${base}::${scope}::${activeUserId}`
-  return id === LOCAL_DEVICE_ID ? base : `${base}::${scope}`
+  return deviceId === LOCAL_DEVICE_ID ? base : `${base}::${scope}`
 }
 
 /**
@@ -140,11 +144,27 @@ export function saveLastPath(deviceId: string, path: string): void {
   sessionStorage.setItem(`${LAST_PATH_PREFIX}${deviceId}`, path)
 }
 
+let switchTransition: ((id: string) => void) | null = null
+
 /**
- * Switch the active device: navigate to the device's remembered last path (or a
- * fresh root for that device) and notify listeners so the app can remount.
+ * Let DeviceRoot carry explicit switches with a transition. The handler calls
+ * {@link commitDeviceSwitch} once the target is on screen.
  */
+export function setDeviceSwitchTransition(handler: ((id: string) => void) | null): void {
+  switchTransition = handler
+}
+
+/** Switch the active device, through DeviceRoot's transition when one is installed. */
 export function switchDevice(id: string): void {
+  if (switchTransition) switchTransition(id)
+  else commitDeviceSwitch(id)
+}
+
+/**
+ * Make `id` the active device now: navigate to its remembered last path (or a
+ * fresh root for it) and notify listeners.
+ */
+export function commitDeviceSwitch(id: string): void {
   const saved = sessionStorage.getItem(`${LAST_PATH_PREFIX}${id}`)
   const target = saved ?? (id === LOCAL_DEVICE_ID ? "/" : `/d/${id}/`)
   window.history.pushState(null, "", target)

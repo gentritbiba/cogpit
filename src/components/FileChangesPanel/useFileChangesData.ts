@@ -9,6 +9,7 @@ import { parseSubagentJsonl } from "@/hooks/useSubagentContent"
 import { agentKindForDirName } from "@/lib/agents"
 import { useCapability } from "@/hooks/useCapability"
 import { deviceScopedKey } from "@/lib/device"
+import { useDeviceId } from "@/contexts/DevicePaneContext"
 
 interface FileChange {
   turnIndex: number
@@ -46,6 +47,7 @@ function loadBgAgent(key: string, revision: string, read: () => Promise<ToolCall
 
 export function useFileChangesData(session: SessionView) {
   const canAccessHostFiles = useCapability("hostFiles")
+  const deviceId = useDeviceId()
   const { sessionSource } = useSessionControls()
   const dirName = sessionSource?.dirName
   const isCodexSession = agentKindForDirName(dirName) === "codex"
@@ -155,7 +157,7 @@ export function useFileChangesData(session: SessionView) {
     }
     return JSON.stringify([...revisions])
   }, [fileChanges])
-  const scope = deviceScopedKey(JSON.stringify([dirName, session.sessionId, session.cwd]))
+  const scope = deviceScopedKey(JSON.stringify([dirName, session.sessionId, session.cwd]), deviceId)
   const [fileContents, setFileContents] = useState<Map<string, string>>(new Map())
   const fetchedFiles = useRef(new Map<string, { revision: string; text: string }>())
   const [refreshVersion, setRefreshVersion] = useState(0)

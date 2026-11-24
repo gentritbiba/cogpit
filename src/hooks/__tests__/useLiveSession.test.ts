@@ -1,6 +1,7 @@
 import { __resetStreamsForTest } from "@/lib/sessionStream"
 import { describe, it, expect, vi, beforeEach, afterEach, type Mock } from "vitest"
-import { renderHook, act } from "@testing-library/react"
+import { render, renderHook, act } from "@testing-library/react"
+import { Activity, createElement } from "react"
 import { RESYNC_COOLDOWN_MS, useLiveSession } from "../useLiveSession"
 import type { SessionSource } from "@/lib/sessionSource"
 import { SESSION_ACCESS_LOST_EVENT } from "@/lib/sessionAccessEvents"
@@ -733,6 +734,155 @@ describe("useLiveSession", () => {
     const first = '{"type":"assistant","n":1}'
     const second = '{"type":"assistant","n":2}'
     const third = '{"type":"assistant","n":3}'
+
+    it("resumes a machine's pane shown again after the lines on screen, keeping what it showed", async () => {
+      vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "setInterval", "clearInterval", "Date"] })
+      const source: SessionSource = { dirName: "dir", fileName: "file.jsonl", loadId: 1, watchOffset: 100 }
+      let live!: ReturnType<typeof useLiveSession>
+      function Probe() {
+        live = useLiveSession(source, onUpdate, workerParse, workerAppend, undefined, () => mockParsedSession)
+        return null
+      }
+      const { rerender } = render(createElement(Activity, { mode: "visible", children: createElement(Probe) }))
+      const first = getLastEventSource()
+      act(() => {
+        first.simulateOpen()
+        first.simulateMessage({ type: "lines", lines: ['{"type":"assistant","n":1}'], start: 100, end: 130 })
+      })
+      await act(async () => { await vi.advanceTimersByTimeAsync(0) })
+      act(() => flushRAF())
+      expect(live.isLive).toBe(true)
+
+      rerender(createElement(Activity, { mode: "hidden", children: createElement(Probe) }))
+      expect(first.closed).toBe(true)
+      rerender(createElement(Activity, { mode: "visible", children: createElement(Probe) }))
+
+      expect(getLastEventSource().url).toBe("/api/watch/dir/file.jsonl?projection=results-v1&stream=2&offset=130")
+      expect(live.sseState).not.toBe("disconnected")
+      expect(live.isLive).toBe(true)
+    })
+
+    function mountInPane(source: SessionSource) {
+      function Probe() {
+        useLiveSession(source, onUpdate, workerParse, workerAppend, undefined, () => mockParsedSession)
+        return null
+      }
+      const view = render(createElement(Activity, { mode: "visible", children: createElement(Probe) }))
+      return {
+        hide: () => view.rerender(createElement(Activity, { mode: "hidden", children: createElement(Probe) })),
+        show: () => view.rerender(createElement(Activity, { mode: "visible", children: createElement(Probe) })),
+      }
+    }
+
+    it("puts a view that landed while its pane was hidden on screen, and appends to it", async () => {
+      vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "setInterval", "clearInterval", "Date"] })
+      const landed: SessionView = { ...mockParsedSession, sessionId: "landed" }
+      let finish!: (view: SessionView) => void
+      workerAppend.mockImplementationOnce(() => new Promise((resolve) => { finish = resolve }))
+      const pane = mountInPane({ dirName: "dir", fileName: "file.jsonl", loadId: 1, watchOffset: 100 })
+      const first = getLastEventSource()
+      act(() => {
+        first.simulateOpen()
+        first.simulateMessage({ type: "lines", lines: ['{"type":"assistant","n":1}'], start: 100, end: 130 })
+      })
+      await act(async () => { await vi.advanceTimersByTimeAsync(0) })
+      expect(workerAppend).toHaveBeenCalledOnce()
+
+      pane.hide()
+      await act(async () => { finish(landed); await vi.advanceTimersByTimeAsync(0) })
+      onUpdate.mockClear()
+      pane.show()
+      act(() => flushRAF())
+      expect(onUpdate).toHaveBeenCalledWith(landed, 1)
+
+      const resumed = getLastEventSource()
+      expect(resumed.url).toBe("/api/watch/dir/file.jsonl?projection=results-v1&stream=2&offset=130")
+      act(() => {
+        resumed.simulateOpen()
+        resumed.simulateMessage({ type: "lines", lines: ['{"type":"assistant","n":2}'], start: 130, end: 160 })
+      })
+      await act(async () => { await vi.advanceTimersByTimeAsync(0) })
+      expect(workerAppend).toHaveBeenLastCalledWith(landed, expect.any(String))
+    })
+
+    it("waits for a batch still with the worker when its pane comes back, then connects from its end", async () => {
+      vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "setInterval", "clearInterval", "Date"] })
+      const landed: SessionView = { ...mockParsedSession, sessionId: "landed" }
+      let finish!: (view: SessionView) => void
+      workerAppend.mockImplementationOnce(() => new Promise((resolve) => { finish = resolve }))
+      const pane = mountInPane({ dirName: "dir", fileName: "file.jsonl", loadId: 1, watchOffset: 100 })
+      const first = getLastEventSource()
+      const two = '{"type":"assistant","n":2}'
+      act(() => {
+        first.simulateOpen()
+        first.simulateMessage({ type: "lines", lines: ['{"type":"assistant","n":1}', '{"type":"assistant","n":1.5}'], start: 100, end: 200 })
+      })
+      await act(async () => { await vi.advanceTimersByTimeAsync(0) })
+
+      pane.hide()
+      pane.show()
+      // Nothing connects while the batch is with the worker: a frame overlapping it could not be split.
+      expect(MockEventSource.instances).toHaveLength(1)
+
+      await act(async () => { finish(landed); await vi.advanceTimersByTimeAsync(0) })
+      const resumed = getLastEventSource()
+      expect(resumed).not.toBe(first)
+      expect(resumed.url).toBe("/api/watch/dir/file.jsonl?projection=results-v1&stream=2&offset=200")
+      act(() => {
+        resumed.simulateOpen()
+        resumed.simulateMessage({ type: "lines", lines: [two], start: 200, end: 230 })
+      })
+      await act(async () => { await vi.advanceTimersByTimeAsync(0) })
+      act(() => flushRAF())
+      expect(workerAppend).toHaveBeenCalledTimes(2)
+      expect(workerAppend).toHaveBeenLastCalledWith(landed, `${two}\n`)
+      expect(onUpdate).toHaveBeenCalled()
+    })
+
+    it("keeps a batch that landed after a second hide for the run that comes back", async () => {
+      vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "setInterval", "clearInterval", "Date"] })
+      const landed: SessionView = { ...mockParsedSession, sessionId: "landed" }
+      let finish!: (view: SessionView) => void
+      workerAppend.mockImplementationOnce(() => new Promise((resolve) => { finish = resolve }))
+      const pane = mountInPane({ dirName: "dir", fileName: "file.jsonl", loadId: 1, watchOffset: 100 })
+      const first = getLastEventSource()
+      act(() => {
+        first.simulateOpen()
+        first.simulateMessage({ type: "lines", lines: ['{"type":"assistant","n":1}'], start: 100, end: 200 })
+      })
+      await act(async () => { await vi.advanceTimersByTimeAsync(0) })
+
+      pane.hide()
+      pane.show()
+      pane.hide()
+      await act(async () => { finish(landed); await vi.advanceTimersByTimeAsync(0) })
+      onUpdate.mockClear()
+      pane.show()
+      act(() => flushRAF())
+
+      expect(onUpdate).toHaveBeenCalledWith(landed, 1)
+      expect(getLastEventSource().url).toBe("/api/watch/dir/file.jsonl?projection=results-v1&stream=2&offset=200")
+    })
+
+    it("puts a view still waiting for its frame when the pane was hidden on screen", async () => {
+      vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "setInterval", "clearInterval", "Date"] })
+      const appended: SessionView = { ...mockParsedSession, sessionId: "appended" }
+      workerAppend.mockResolvedValueOnce(appended)
+      const pane = mountInPane({ dirName: "dir", fileName: "file.jsonl", loadId: 1, watchOffset: 100 })
+      const first = getLastEventSource()
+      act(() => {
+        first.simulateOpen()
+        first.simulateMessage({ type: "lines", lines: ['{"type":"assistant","n":1}'], start: 100, end: 130 })
+      })
+      await act(async () => { await vi.advanceTimersByTimeAsync(0) })
+      // The frame that would show it has not come yet.
+      onUpdate.mockClear()
+      pane.hide()
+      pane.show()
+      act(() => flushRAF())
+      expect(onUpdate).toHaveBeenCalledWith(appended, 1)
+      expect(getLastEventSource().url).toBe("/api/watch/dir/file.jsonl?projection=results-v1&stream=2&offset=130")
+    })
 
     it("reconnects after the last line received and ignores a replay of it, without reloading", async () => {
       vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "setInterval", "clearInterval", "Date"] })

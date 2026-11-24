@@ -8,7 +8,7 @@ const { openFile, writeText } = vi.hoisted(() => ({
   writeText: vi.fn().mockResolvedValue(undefined),
 }))
 
-vi.mock("@/lib/capabilities", () => ({ can: () => true }))
+vi.mock("@/lib/capabilities", async (importOriginal) => ({ ...await importOriginal<typeof import("@/lib/capabilities")>(), can: () => true }))
 vi.mock("@/lib/fileOpener", () => ({ openFile }))
 vi.mock("@/hooks/useIsDarkMode", () => ({ useIsDarkMode: () => true }))
 vi.mock("@/lib/shiki", () => ({

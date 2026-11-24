@@ -9,7 +9,7 @@ import { PlanApprovalBar } from "./PlanApprovalBar"
 import { PermissionRequestBar } from "./PermissionRequestBar"
 import { useImageUpload } from "./useImageUpload"
 import { ImageDropOverlay, ImageNotice, ImageThumbnails } from "./ImageAttachments"
-import { deviceScopedKey } from "@/lib/device"
+import { useDeviceScopedKey } from "@/contexts/DevicePaneContext"
 import { combineContext } from "./composerEditing"
 import { unsentRecovery, downloadUnsentBackup } from "./unsentRecovery"
 import { ContextChips } from "./ContextChips"
@@ -141,7 +141,8 @@ export const ChatInput = memo(forwardRef<ChatInputHandle, ChatInputProps>(functi
   const sessionId = useOpenSession((open) => open?.sessionId ?? null)
   const sessionCwd = useOpenSession((open) => open?.cwd)
   const identity = JSON.stringify([sessionSource?.dirName ?? props.composerIdentity ?? props.agentKind ?? "", sessionId ?? "pending"])
-  const scope = JSON.stringify([deviceScopedKey("composer-v1"), props.projectCwd ?? sessionCwd ?? "", identity])
+  const composerKey = useDeviceScopedKey("composer-v1")
+  const scope = JSON.stringify([composerKey, props.projectCwd ?? sessionCwd ?? "", identity])
   return <ScopedChatInput key={scope} {...props} scope={scope} ref={ref} />
 }))
 

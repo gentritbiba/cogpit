@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest"
-import { renderHook, act, waitFor } from "@testing-library/react"
+import { renderHook, render, act, waitFor } from "@testing-library/react"
+import { Activity, createElement } from "react"
 
 vi.mock("@/lib/auth", () => ({
   authFetch: vi.fn(),
@@ -9,7 +10,7 @@ vi.mock("@/lib/auth", () => ({
 import { authFetch, hubFetch } from "@/lib/auth"
 import { useMe } from "@/hooks/useMe"
 import { announceGate } from "@/lib/gateEvents"
-import { can, getCurrentUser, __resetCapabilitiesForTest } from "@/lib/capabilities"
+import { can, getCurrentUser, setMe, __resetCapabilitiesForTest } from "@/lib/capabilities"
 import { deviceScopedKey, getActiveIdentity, __resetIdentityForTest } from "@/lib/device"
 import { ALL_CAPABILITIES, GATE_HEADER, type MeResponse, NO_CAPABILITIES } from "../../../shared/contracts/identity"
 
@@ -53,6 +54,32 @@ describe("useMe", () => {
   afterEach(() => {
     __resetCapabilitiesForTest()
     __resetIdentityForTest()
+  })
+
+  it("keeps the identity of a machine's pane shown again while it asks again", async () => {
+    mockMeResponse({ ...MEMBER_ME, capabilities: { ...NO_CAPABILITIES, terminal: true } })
+    function Probe({ mode }: { mode: "visible" | "hidden" }) {
+      return createElement(Activity, { mode, children: createElement(MeProbe) })
+    }
+    let latest: ReturnType<typeof useMe> | null = null
+    function MeProbe() {
+      latest = useMe("team")
+      return null
+    }
+    const { rerender } = render(createElement(Probe, { mode: "visible" }))
+    await waitFor(() => expect(latest?.checked).toBe(true))
+    expect(can("terminal")).toBe(true)
+
+    // While it was off screen, its identity cell was overwritten.
+    rerender(createElement(Probe, { mode: "hidden" }))
+    act(() => setMe(null))
+    expect(can("terminal")).toBe(false)
+    mockedHubFetch.mockReturnValue(new Promise(() => {}))
+    rerender(createElement(Probe, { mode: "visible" }))
+
+    expect(latest!.checked).toBe(true)
+    expect(latest!.capabilities.terminal).toBe(true)
+    expect(can("terminal")).toBe(true)
   })
 
   it("stays fail-closed while a known team identity is in flight", async () => {

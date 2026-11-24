@@ -19,7 +19,7 @@ import { Button } from "@/components/ui/button"
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible"
 import { Separator } from "@/components/ui/separator"
 import { useCopyWithFeedback } from "@/hooks/useCopyWithFeedback"
-import { can } from "@/lib/capabilities"
+import { useCan } from "@/hooks/useCapability"
 import { openFile } from "@/lib/fileOpener"
 import {
   analyzeSection,
@@ -157,6 +157,7 @@ function PathLink({
   cwd: string | undefined
   children: React.ReactNode
 }): React.ReactElement {
+  const can = useCan()
   const resolved = resolvePath(path, cwd)
   if (!resolved || !can("hostFiles")) return <>{children}</>
   return (

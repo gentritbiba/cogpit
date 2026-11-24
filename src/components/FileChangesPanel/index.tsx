@@ -220,8 +220,13 @@ export const FileChangesPanel = memo(function FileChangesPanel({ session, sessio
     updateScrollIndicators()
   }, [fileChanges.length, activeGrouped.length, updateScrollIndicators])
 
-  // Reset scroll position on session switch
+  // Reset scroll position on session switch. Only a new session: the effect
+  // runs again when a machine's pane comes back from the background, and the
+  // reader's place in the list is still there.
+  const resetForRef = useRef<number | null>(null)
   useEffect(() => {
+    if (resetForRef.current === sessionChangeKey) return
+    resetForRef.current = sessionChangeKey
     const el = scrollRef.current
     if (el) el.scrollTop = el.scrollHeight
     isAtBottomRef.current = true

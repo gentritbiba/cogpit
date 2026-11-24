@@ -1,5 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest"
 import { renderHook } from "@testing-library/react"
+import { createElement, type ReactNode } from "react"
+import { DevicePaneProvider } from "@/contexts/DevicePaneContext"
 
 vi.mock("@/lib/auth", () => ({
   authFetch: vi.fn(),
@@ -18,6 +20,9 @@ const sessions: SessionController = {
   prefetchSession: vi.fn(),
   reloadCurrent: vi.fn(),
   leave: vi.fn(),
+  suspend: vi.fn(),
+  resume: vi.fn(),
+  showing: vi.fn(() => null),
 }
 const mockedAuthFetch = vi.mocked(authFetch)
 
@@ -288,6 +293,25 @@ describe("useUrlSync", () => {
 
     unmount()
     // Reset URL for next test
+    window.history.replaceState(null, "", "/")
+  })
+
+  it("leaves Back onto another machine to DeviceRoot when it runs in a machine's pane", async () => {
+    window.history.replaceState(null, "", "/-Users-foo/uuid")
+    mockedLoadTail.mockResolvedValueOnce(loadedSession("-Users-foo", "uuid.jsonl"))
+    const { unmount } = renderHook(
+      () => useUrlSync({ state: makeState(), dispatch, isMobile: false, resetTurnCount, scrollToBottomInstant, sessions }),
+      { wrapper: ({ children }: { children: ReactNode }) => createElement(DevicePaneProvider, { value: "local" }, children) },
+    )
+    await vi.waitFor(() => expect(dispatch).toHaveBeenCalledWith(expect.objectContaining({ type: "LOAD_SESSION" })))
+    dispatch.mockClear()
+
+    window.history.pushState(null, "", "/d/dev_b/")
+    window.dispatchEvent(new PopStateEvent("popstate"))
+    await new Promise((resolve) => setTimeout(resolve, 0))
+
+    expect(dispatch).not.toHaveBeenCalled()
+    unmount()
     window.history.replaceState(null, "", "/")
   })
 

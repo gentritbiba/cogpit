@@ -8,8 +8,8 @@ import {
 import { usePty } from "@/contexts/PtyContext"
 import { useProjectList } from "@/components/ProjectSwitcherList"
 import { authFetch } from "@/lib/auth"
-import { can } from "@/lib/capabilities"
-import { isRemoteDeviceActive } from "@/lib/device"
+import { useCan } from "@/hooks/useCapability"
+import { useIsRemoteDevice } from "@/contexts/DevicePaneContext"
 import { activeSessionsUrl, useSessionListFilter } from "@/lib/sessionListFilter"
 import { learnListedAccess, sessionAccessTicket } from "@/lib/sessionAccess"
 import { isBuiltInEditorEnabled, openProject, revealInFolder } from "@/lib/fileOpener"
@@ -48,7 +48,9 @@ export function CommandPaletteHost({
   launchTerminalRequest = 0,
   ...paletteProps
 }: CommandPaletteHostProps) {
+  const can = useCan()
   const pty = usePty()
+  const remoteDevice = useIsRemoteDevice()
   const projects: CommandPaletteProject[] = useProjectList(open)
   const [recentSessions, setRecentSessions] = useState<CommandPaletteSession[]>([])
   const [loadingNavigation, setLoadingNavigation] = useState(false)
@@ -114,10 +116,10 @@ export function CommandPaletteHost({
 
   const handleRevealProject = useCallback(() => revealInFolder(project), [project])
 
-  const canRevealProject = !isRemoteDeviceActive() && can("hostFiles")
+  const canRevealProject = !remoteDevice && can("hostFiles")
   // The built-in workspace reads files over the device proxy, so it stays
   // available even when the project lives on another machine.
-  const canOpenEditor = can("hostFiles") && (!isRemoteDeviceActive() || isBuiltInEditorEnabled())
+  const canOpenEditor = can("hostFiles") && (!remoteDevice || isBuiltInEditorEnabled())
 
   const handleCopyProjectPath = useCallback(() => {
     if (terminalCwd) void copyToClipboard(terminalCwd)

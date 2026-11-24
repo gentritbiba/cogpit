@@ -19,7 +19,7 @@ import { cn } from "@/lib/utils"
 import type { ProcessEntry } from "@/hooks/useProcessPanel"
 import { usePty } from "@/contexts/PtyContext"
 import { registerSignInRunner } from "@/lib/agents/signIn"
-import { isRemoteDeviceActive } from "@/lib/device"
+import { useIsRemoteDevice } from "@/contexts/DevicePaneContext"
 
 const TerminalOutput = lazy(() =>
   import("@/components/TerminalOutput").then((module) => ({ default: module.TerminalOutput })),
@@ -205,12 +205,13 @@ export const ProcessPanel = memo(function ProcessPanel({
   mobile = false,
 }: ProcessPanelProps) {
   const pty = usePty()
+  const remoteDevice = useIsRemoteDevice()
   const [height, setHeight] = useState(loadHeight)
 
   // Sign-ins run here, where the user can answer the CLI's prompts. A phone or
   // another device's session gets the command to copy instead.
   const { spawnTerminal } = pty
-  const canSignIn = !mobile && pty.status === "connected" && !isRemoteDeviceActive()
+  const canSignIn = !mobile && pty.status === "connected" && !remoteDevice
   useEffect(() => {
     if (!canSignIn || !onProcessStarted) return
     return registerSignInRunner(({ name, target }) => {

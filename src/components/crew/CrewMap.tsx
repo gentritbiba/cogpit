@@ -7,7 +7,7 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip
 import { useLocalStorage } from "@/hooks/useLocalStorage"
 import type { AgentKind } from "@/lib/agents"
 import { agentIcon } from "@/lib/agents/presentation"
-import { deviceScopedKey } from "@/lib/device"
+import { useDeviceScopedKey } from "@/contexts/DevicePaneContext"
 import { formatRelativeTime } from "@/lib/format"
 import { cn } from "@/lib/utils"
 import type { CrewMember, SessionCrew } from "../../../shared/contracts/crew"
@@ -70,7 +70,7 @@ const NO_FOLDS: Folds = { all: new Set(), active: new Set() }
  * crew starts fresh.
  */
 export function useCrewMapControls(rootId: string): CrewMapControls {
-  const [stored, setFilter] = useLocalStorage<CrewMapFilter>(deviceScopedKey("crew-map-filter"), "all")
+  const [stored, setFilter] = useLocalStorage<CrewMapFilter>(useDeviceScopedKey("crew-map-filter"), "all")
   const filter: CrewMapFilter = stored === "active" ? "active" : "all"
   const [folds, setFolds] = useState<{ rootId: string; folds: Folds }>({ rootId, folds: NO_FOLDS })
   const viewports = useRef(new Map<string, CrewMapViewport | null>())

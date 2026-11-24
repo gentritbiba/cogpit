@@ -14,7 +14,7 @@ import { useAppContext } from "@/contexts/AppContext"
 import { useOpenSession, useSessionControls } from "@/contexts/SessionContext"
 import { useEditionUi, useMainView } from "@/edition/hooks"
 import { useSwipeNavigation } from "@/hooks/useSwipeNavigation"
-import { can } from "@/lib/capabilities"
+import { useCan } from "@/hooks/useCapability"
 import { hapticLight } from "@/lib/haptics"
 import { cn } from "@/lib/utils"
 import type { MobileAppShellProps } from "./mobileTypes"
@@ -170,6 +170,7 @@ interface MobileChatProps extends MobileAppShellProps {
 function MobileChat({
   navigation, sessionView, project, chrome, headerAccessory, searchOpen, onSearchOpenChange,
 }: MobileChatProps) {
+  const can = useCan()
   const { state, config } = useAppContext()
   const { isSubAgentView } = useSessionControls()
   const hasSession = useOpenSession((open) => open !== null)

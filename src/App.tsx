@@ -73,7 +73,7 @@ import { useQuoteNavigation } from "@/hooks/useQuoteNavigation"
 import { turnsChangeFiles, workflowCallCount } from "@/lib/turnFacts"
 import { authFetch } from "@/lib/auth"
 import { getSessionConfigKey } from "@/lib/sessionConfig"
-import { can } from "@/lib/capabilities"
+import { useCan } from "@/hooks/useCapability"
 import {
   agentKindForDirName,
   capabilitiesFor,
@@ -116,6 +116,7 @@ function reloadApp(): void {
 }
 
 export default function App() {
+  const can = useCan()
   const previewSessionId = previewSessionIdFromPath(window.location.pathname)
   const config = useAppConfig()
   const networkAuth = useNetworkAuth()

@@ -13,8 +13,9 @@ const mocks = vi.hoisted(() => ({
 }))
 
 vi.mock("@/lib/auth", () => ({ authFetch: mocks.authFetch, hubFetch: mocks.hubFetch }))
-vi.mock("@/hooks/useDevices", () => ({
-  useDevices: () => ({ devices: [], testDevice: vi.fn() }),
+vi.mock("@/hooks/useDevices", async (importOriginal) => ({
+  ...await importOriginal<typeof import("@/hooks/useDevices")>(),
+  useDevices: () => ({ devices: [], loading: false, testDevice: vi.fn() }),
 }))
 vi.mock("@/contexts/SessionInventoryContext", () => ({
   SessionInventoryProvider: ({ children }: { children: React.ReactNode }) => <>{children}</>,

@@ -91,19 +91,29 @@ export function useAppConfig(): AppConfig {
     networkRequestRef.current?.abort()
   }, [])
 
+  // Only the first read gates the app. A later one (this machine's pane shown
+  // again, a saved setting, a sign-in) refreshes in place and keeps the last
+  // good config if it fails.
+  const loaded = useRef(false)
   useEffect(() => {
     const controller = new AbortController()
-    setConfigLoading(true)
-    setConfigError(null)
+    const firstRead = !loaded.current
+    if (firstRead) {
+      setConfigLoading(true)
+      setConfigError(null)
+    }
     fetchConfig(controller.signal)
-      .then(applySnapshot)
+      .then((snapshot) => {
+        loaded.current = true
+        applySnapshot(snapshot)
+      })
       .catch((err) => {
-        if (err instanceof Error && err.name === "AbortError") return
+        if ((err instanceof Error && err.name === "AbortError") || loaded.current) return
         setClaudeDir(null)
         setConfigError(err instanceof Error ? err.message : "Failed to load configuration")
       })
       .finally(() => {
-        if (!controller.signal.aborted) setConfigLoading(false)
+        if (!controller.signal.aborted && firstRead) setConfigLoading(false)
       })
     return () => controller.abort()
   }, [applySnapshot, fetchKey])

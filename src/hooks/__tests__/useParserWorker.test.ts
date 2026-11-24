@@ -1,5 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest"
-import { renderHook } from "@testing-library/react"
+import { render, renderHook } from "@testing-library/react"
+import { Activity, createElement } from "react"
+import { createPaneLifetime, PaneLifetimeProvider } from "@/contexts/DevicePaneContext"
 import { SessionHandleLostError, WORKER_REQUEST_TIMEOUT_MS, useParserWorker } from "../useParserWorker"
 import { EMPTY_SESSION_DIGEST, type SessionView } from "../../../shared/session/sessionDigest"
 import type { Turn } from "../../../shared/session/types"
@@ -165,6 +167,36 @@ describe("useParserWorker appends", () => {
     expect(last.assistantText).toEqual(["three", "four"])
     // The block that did not change inside the changed turn is the same object.
     expect(last.contentBlocks[0]).toBe(next.turns[2]!.contentBlocks[0])
+  })
+
+  it("keeps its worker, and the sessions it holds, while a machine's pane is hidden", async () => {
+    const lifetime = createPaneLifetime()
+    function Probe({ hidden }: { hidden: boolean }) {
+      return createElement(PaneLifetimeProvider, { value: lifetime }, createElement(Activity, { mode: hidden ? "hidden" : "visible", children: createElement(Worker_) }))
+    }
+    let worker!: ReturnType<typeof useParserWorker>
+    function Worker_() {
+      worker = useParserWorker()
+      return null
+    }
+    const { rerender, unmount } = render(createElement(Probe, { hidden: false }))
+    const parsed = worker.parse("lines")
+    latest().answer(view([turn("t1", "one")]), { handle: 4, version: 1 })
+    const session = await parsed
+
+    rerender(createElement(Probe, { hidden: true }))
+    rerender(createElement(Probe, { hidden: false }))
+    expect(FakeWorker.instances).toHaveLength(1)
+    expect(latest().terminated).toBe(false)
+
+    const appended = worker.append(session, "a\n")
+    expect(latest().posted.at(-1)).toMatchObject({ type: "append", base: { handle: 4, version: 1 } })
+
+    // The pane goes for good: the worker goes with it.
+    lifetime.end()
+    expect(latest().terminated).toBe(true)
+    await expect(appended).rejects.toThrow("Worker terminated")
+    unmount()
   })
 
   it("says the session is lost when the worker no longer holds it", async () => {

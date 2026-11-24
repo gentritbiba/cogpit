@@ -7,7 +7,11 @@ const { mockOpenProjectTerminal, mockIsRemoteDeviceActive } = vi.hoisted(() => (
   mockIsRemoteDeviceActive: vi.fn(),
 }))
 vi.mock("@/lib/openTerminal", () => ({ openProjectTerminal: mockOpenProjectTerminal }))
-vi.mock("@/lib/device", () => ({ isRemoteDeviceActive: mockIsRemoteDeviceActive }))
+vi.mock("@/lib/device", async (importOriginal) => ({
+  ...await importOriginal<typeof import("@/lib/device")>(),
+  isRemoteDeviceActive: mockIsRemoteDeviceActive,
+  getActiveDeviceId: () => mockIsRemoteDeviceActive() ? "dev_remote" : "local",
+}))
 
 const { RateLimitBanner } = await import("@/components/RateLimitBanner")
 

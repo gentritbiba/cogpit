@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useSyncExternalStore } from "react"
 import { authFetch } from "@/lib/auth"
-import { getActiveDeviceScope, getActiveIdentity } from "@/lib/device"
+import { deviceScope, getActiveDeviceScope, getActiveIdentity } from "@/lib/device"
+import { useDeviceId } from "@/contexts/DevicePaneContext"
 import {
   getModelOptions,
   setDynamicModelOptions,
@@ -19,6 +20,7 @@ let nextFetchAt = 0
 let inFlight: Promise<void> | null = null
 let catalogScope = ""
 let catalogGeneration = 0
+const rememberedCatalogs = new Map<string, Map<AgentKind, ModelOption[]>>()
 const scopeKey = () => JSON.stringify([getActiveDeviceScope(), getActiveIdentity()])
 
 function isModelOptionArray(value: unknown): value is ModelOption[] {
@@ -42,10 +44,13 @@ async function fetchModelCatalog(): Promise<void> {
     if (!res.ok) throw new Error(`GET /api/models → ${res.status}`)
     const data = await res.json() as Record<string, unknown> | null
     if (generation !== catalogGeneration || scope !== scopeKey()) return
+    const remembered = new Map<AgentKind, ModelOption[]>()
     for (const kind of AGENT_KINDS) {
       const options = data?.[kind]
-      if (isModelOptionArray(options)) setDynamicModelOptions(kind, options)
+      if (isModelOptionArray(options)) remembered.set(kind, options)
     }
+    rememberedCatalogs.set(scope, remembered)
+    for (const [kind, options] of remembered) setDynamicModelOptions(kind, options)
     nextFetchAt = Date.now() + CATALOG_TTL_MS
   } catch {
     // Offline / server error — static fallback lists stay in effect
@@ -61,7 +66,13 @@ async function fetchModelCatalog(): Promise<void> {
  * `CATALOG_TTL_MS`. Any provider that fails keeps its static fallback list.
  */
 export function loadModelCatalog(): Promise<void> {
-  if (catalogScope !== scopeKey()) { resetModelCatalogFetch(); resetDynamicModelOptions(); catalogScope = scopeKey() }
+  if (catalogScope !== scopeKey()) {
+    resetModelCatalogFetch()
+    resetDynamicModelOptions()
+    catalogScope = scopeKey()
+    // A machine switched back to shows the models it listed last time while they are read again.
+    for (const [kind, options] of rememberedCatalogs.get(catalogScope) ?? []) setDynamicModelOptions(kind, options)
+  }
   if (inFlight) return inFlight
   if (Date.now() < nextFetchAt) return Promise.resolve()
   const request = fetchModelCatalog().finally(() => {
@@ -105,6 +116,8 @@ export function resetModelCatalogFetch() {
  * while the app stays open.
  */
 export function useModelOptions(agentKind: AgentKind, instanceId = "default"): readonly ModelOption[] {
+  // A background pane keeps showing its own machine's models, not the active one's.
+  const paneScope = JSON.stringify([deviceScope(useDeviceId()), getActiveIdentity()])
   const key = JSON.stringify([scopeKey(), agentKind, instanceId])
   const catalog = useMemo(() => instanceCatalogFor(key, agentKind, instanceId), [key, agentKind, instanceId])
   useEffect(() => {
@@ -112,7 +125,10 @@ export function useModelOptions(agentKind: AgentKind, instanceId = "default"): r
     void loadModelCatalog()
     return refreshModelCatalogOnFocus()
   }, [agentKind, instanceId])
-  const defaults = useSyncExternalStore(subscribeModelOptions, () => getModelOptions(agentKind))
+  const defaults = useSyncExternalStore(
+    subscribeModelOptions,
+    () => rememberedCatalogs.get(paneScope)?.get(agentKind) ?? getModelOptions(agentKind),
+  )
   const options = useSyncExternalStore(catalog.subscribe, catalog.snapshot)
   return instanceId === "default" ? defaults : options
 }

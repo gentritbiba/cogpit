@@ -3,7 +3,7 @@ import { History, Loader2 } from "lucide-react"
 
 import type { PendingSessionInfo } from "@/components/session-browser/types"
 import { Button } from "@/components/ui/button"
-import { deviceScopedKey } from "@/lib/device"
+import { useDeviceScopedKey } from "@/contexts/DevicePaneContext"
 import { dirNameToPath, parseWorktreePath } from "@/lib/format"
 import { revealSessionById } from "@/lib/revealSession"
 import { useListedPermissions } from "@/hooks/useListedPermissions"
@@ -104,7 +104,7 @@ export function SessionCardList({
     () => placeRows(ordered.topLevelSessions, ordered.buckets, frozen),
     [ordered, frozen],
   )
-  const [openCrews, setOpenCrews] = useLocalStorage<string[]>(deviceScopedKey("live-sessions-open-crews"), [])
+  const [openCrews, setOpenCrews] = useLocalStorage<string[]>(useDeviceScopedKey("live-sessions-open-crews"), [])
   const { teammatesByLead, crewOf } = ordered
   const openCrewIds = useMemo(() => new Set(Array.isArray(openCrews) ? openCrews : []), [openCrews])
   const toggleCrew = useCallback((rootId: string) => {

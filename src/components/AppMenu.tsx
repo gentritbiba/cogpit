@@ -29,7 +29,7 @@ import { UsageCostDialog } from "@/components/UsageCostDialog"
 import { useAppContext } from "@/contexts/AppContext"
 import { useCapability } from "@/hooks/useCapability"
 import { useCogpitUpdate } from "@/hooks/useCogpitUpdate"
-import { can } from "@/lib/capabilities"
+import { useCan } from "@/hooks/useCapability"
 import { shortcutLabel } from "@/lib/keybindings"
 import { copyToClipboard } from "@/lib/utils"
 import { DOCUMENTATION_URL, REPORT_ISSUE_URL } from "../../shared/helpLinks"
@@ -59,6 +59,7 @@ export function AppMenu({
   monitorOpen,
   onMonitorOpenChange,
 }: AppMenuProps) {
+  const can = useCan()
   const { config: { networkUrl } } = useAppContext()
   const canViewUsage = useCapability("viewUsage")
   const { update } = useCogpitUpdate()

@@ -110,7 +110,9 @@ Changes take effect without restarting. Headless services can use the environmen
 
 Enable Network Access to connect from another device. Remote browser access requires HTTPS. A non-loopback bind requires a network password of at least 16 characters. The [self-hosting guide](self-hosting.md) covers TLS proxies, forwarding headers, password policy, and session expiry.
 
-The device switcher shows one machine at a time and restores the view you left on each device. Use `Cmd+Shift+1–9` or `Ctrl+Shift+1–9` to select a machine, and `Cmd+Shift+0` or `Ctrl+Shift+0` to cycle.
+The device switcher shows one machine at a time. Use `Cmd+Shift+1–9` or `Ctrl+Shift+1–9` to select a machine, `Cmd+Shift+0` or `Ctrl+Shift+0` to cycle, or swipe sideways with two fingers on the trackpad wherever nothing on screen scrolls sideways. The machines slide past with dots that show where you are; turn the swipe off under **Appearance**. Up to five machines you opened stay loaded in the background, so switching back finds each one as you left it: the open session, its scroll position and your drafts.
+
+Each machine keeps its own theme. Choosing one under **Appearance** sets it on the machine on screen, so every computer that opens that machine shows it the same way. A machine running an older Cogpit keeps the choice on your computer only. In team edition, members see the machine's theme and can choose another for themselves; only admins change it for everyone.
 
 Under **Devices → Add device**, enter the address of a Cogpit app with Network Access enabled or a headless server. Use its network password for personal edition, or a username and password for team edition. Cogpit checks connectivity, authentication, bootstrap state, and version differences. The hub proxies traffic to the selected device.
 
@@ -130,4 +132,4 @@ Claude Code and Codex sessions can be shared with a guest through a passphrase-p
 
 GitHub, ClickUp, Vercel, and Cloudflare panels are read-only integrations. GitHub uses your authenticated `gh` CLI for Actions, pull requests, and issues. ClickUp uses a personal API token and supports a linked list per project. Vercel uses CLI 50.5.1 or newer and the project linked at the exact session root. Cloudflare uses Wrangler 4.65.0 or newer and the nearest Wrangler configuration in the workspace. The [plugin guide](plugins.md) covers setup, installation from signed `.cogpit-plugin` files, and the SDK for building custom panels. Runtime plugins can be installed through Plugins → Install from file without rebuilding Cogpit.
 
-Press `Cmd+K` to open the command palette. Press `?` to see and change keyboard shortcuts, with conflict detection. **Help & docs** in the ⋯ menu and the command palette (and the **Help** menu in the desktop app) link to this documentation, the shortcuts and the issue tracker. Cogpit includes Dark, Deep OLED, and Light themes.
+Press `Cmd+K` to open the command palette. Press `?` to see and change keyboard shortcuts, with conflict detection. **Help & docs** in the ⋯ menu and the command palette (and the **Help** menu in the desktop app) link to this documentation, the shortcuts and the issue tracker. Cogpit includes Layered Black, Layered Light, Default Dark, Deep OLED, and Light themes.

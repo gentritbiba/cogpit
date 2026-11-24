@@ -16,8 +16,12 @@
   ⌘K → "Check agent setup", which show each CLI's state and the command that
   fixes it. `GET /api/agent-check` returns the same as JSON, read from local
   state without calling a model.
-- **Devices.** One Cogpit can switch between other machines that run Cogpit.
-  Each session runs on one machine, and its file paths belong to that machine.
+- **Devices.** One Cogpit can switch between other machines that run Cogpit,
+  from the device menu, ⌘⇧1–9 or a two-finger sideways swipe. Machines already
+  opened stay loaded, so switching back finds them as they were. Each session
+  runs on one machine, and its file paths belong to that machine. Each machine
+  keeps its own theme (`GET`/`PUT /api/appearance`), so it looks the same from
+  every computer that opens it.
 
 ## What the user sees
 

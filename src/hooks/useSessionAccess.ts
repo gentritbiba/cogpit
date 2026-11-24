@@ -1,5 +1,6 @@
 import { useEffect, useSyncExternalStore } from "react"
 import { useCurrentUser } from "@/hooks/useCurrentUser"
+import { useDeviceId } from "@/contexts/DevicePaneContext"
 import {
   knownSessionAccess,
   subscribeSessionAccess,
@@ -31,8 +32,9 @@ const KNOWN: Record<Exclude<SessionAccessState, "unknown">, SessionAccess> = {
  */
 export function useSessionAccess(sessionId: string | null): SessionAccess {
   const { enforcesSessionAccess } = useCurrentUser()
+  const deviceId = useDeviceId()
   const checkedSessionId = enforcesSessionAccess ? sessionId : null
-  const readKnown = () => (checkedSessionId ? knownSessionAccess(checkedSessionId) : undefined)
+  const readKnown = () => (checkedSessionId ? knownSessionAccess(checkedSessionId, deviceId) : undefined)
   const known = useSyncExternalStore(subscribeSessionAccess, readKnown, readKnown)
 
   useEffect(() => (checkedSessionId ? watchSessionAccess(checkedSessionId) : undefined), [checkedSessionId])

@@ -11,8 +11,12 @@ import {
   ToggleGroup,
   ToggleGroupItem,
 } from "@/components/ui/toggle-group"
+import { Switch } from "@/components/ui/switch"
+import { useDeviceId, useMachines } from "@/contexts/DevicePaneContext"
+import { LOCAL_DEVICE_ID } from "@/lib/device"
 import { type ThemeId, themes } from "@/lib/themes"
 import { chatWidths, useChatWidth } from "@/lib/chatWidth"
+import { setMachineSwipe, useMachineSwipe } from "@/lib/machineSwipe"
 
 interface ThemeSelectorModalProps {
   open: boolean
@@ -31,6 +35,12 @@ export function ThemeSelectorModal({
 }: ThemeSelectorModalProps) {
   const [selectedIndex, setSelectedIndex] = useState(0)
   const [chatWidth, setChatWidth] = useChatWidth()
+  const machines = useMachines()
+  const deviceId = useDeviceId()
+  const machineName = deviceId === LOCAL_DEVICE_ID
+    ? "this machine"
+    : machines.find((machine) => machine.id === deviceId)?.name ?? "this machine"
+  const swipe = useMachineSwipe()
 
   // Reset selection to current theme when modal opens
   useEffect(() => {
@@ -70,7 +80,11 @@ export function ThemeSelectorModal({
             <Palette data-icon="inline-start" className="size-4 text-muted-foreground" />
             Appearance
           </DialogTitle>
-          <DialogDescription>Preview a color theme and set the chat width.</DialogDescription>
+          <DialogDescription>
+            {machines.length > 1
+              ? `The theme belongs to ${machineName}: every computer that opens it shows it this way.`
+              : "Preview a color theme and set the chat width."}
+          </DialogDescription>
         </DialogHeader>
 
         <ToggleGroup
@@ -106,6 +120,16 @@ export function ThemeSelectorModal({
             </ToggleGroupItem>
           ))}
         </ToggleGroup>
+
+        {machines.length > 1 && (
+          <label className="flex cursor-pointer items-center gap-3 border-t px-4 py-3">
+            <span className="flex flex-1 flex-col gap-0.5">
+              <span className="text-sm font-medium">Swipe between machines</span>
+              <span className="text-xs text-muted-foreground">Two fingers sideways on the trackpad, where nothing scrolls sideways.</span>
+            </span>
+            <Switch checked={swipe} onCheckedChange={setMachineSwipe} />
+          </label>
+        )}
 
         <div className="border-t p-3">
           <div className="px-1 pb-2 text-xs font-medium text-muted-foreground">Chat width</div>

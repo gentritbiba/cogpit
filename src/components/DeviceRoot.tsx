@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react"
+import { useCallback, useEffect, useLayoutEffect, useMemo, useState, useSyncExternalStore } from "react"
 import { WifiOff, Loader2 } from "lucide-react"
 import App from "@/App"
 import {
@@ -9,12 +9,17 @@ import {
   switchDevice,
   LOCAL_DEVICE_ID,
 } from "@/lib/device"
+import { knowsDeviceTheme, rememberDeviceTheme, shownDeviceTheme, subscribeDeviceThemes } from "@/lib/deviceThemes"
 import { matchDeviceSwitchIndex, matchDeviceCycle } from "@/lib/keybindings"
+import { useMachineSwipe } from "@/lib/machineSwipe"
 import { revealSessionPath } from "@/lib/revealSession"
-import { useDevices, type TestResult } from "@/hooks/useDevices"
+import { applyTheme } from "@/lib/themes"
+import { deviceTheme, useDevices, type TestResult } from "@/hooks/useDevices"
 import type { MintFailureCode } from "../../shared/contracts/hub"
 import { SessionInventoryProvider } from "@/contexts/SessionInventoryContext"
 import { PendingHumanInputProvider } from "@/contexts/PendingHumanInputContext"
+import { MachinesProvider } from "@/contexts/DevicePaneContext"
+import { DeviceStage, type StagePane } from "@/components/DeviceStage/DeviceStage"
 import { Button } from "@/components/ui/button"
 import {
   Alert,
@@ -67,35 +72,77 @@ function problemFromTest(result: TestResult): DeviceProblem | null {
   return { kind: "unreachable" }
 }
 
+/** Machines kept alive at once, the one on screen included. */
+const MAX_PANES = 5
+
+interface PaneEntry extends StagePane {
+  lastUsed: number
+}
+
 /**
- * Owns the active device identity and remounts the whole {@link App} subtree
- * (via a React `key`) whenever the active device changes.
+ * The panes after `activeDeviceId` comes on screen: it is (re)keyed and
+ * marked most recently used, background panes whose key went stale or whose
+ * device left the registry are dropped, and the least recently used go once
+ * there are more than {@link MAX_PANES}. Order is kept.
+ */
+export function nextPanes(
+  previous: readonly PaneEntry[],
+  { activeDeviceId, identityKey, retries, listedIds }: {
+    activeDeviceId: string
+    identityKey: string | null
+    retries: Readonly<Record<string, number>>
+    /** The registry's devices, or null while it loads. */
+    listedIds: readonly string[] | null
+  },
+): PaneEntry[] {
+  const keyOf = (deviceId: string) =>
+    `${deviceId}:${getDeviceConnectionRevision(deviceId)}:${identityKey ?? ""}:${retries[deviceId] ?? 0}`
+  const listed = (deviceId: string) => deviceId === LOCAL_DEVICE_ID || listedIds === null || listedIds.includes(deviceId)
+  const used = Math.max(0, ...previous.map((entry) => entry.lastUsed)) + 1
+  let next = previous
+    .filter((entry) => entry.deviceId === activeDeviceId || (entry.key === keyOf(entry.deviceId) && listed(entry.deviceId)))
+    .map((entry) => entry.deviceId === activeDeviceId ? { ...entry, key: keyOf(activeDeviceId), lastUsed: used } : entry)
+  if (!next.some((entry) => entry.deviceId === activeDeviceId)) {
+    next = [...next, { deviceId: activeDeviceId, key: keyOf(activeDeviceId), lastUsed: used }]
+  }
+  while (next.length > MAX_PANES) {
+    const oldest = next.reduce((a, b) => (a.lastUsed <= b.lastUsed ? a : b))
+    next = next.filter((entry) => entry !== oldest)
+  }
+  return next
+}
+
+/**
+ * Owns the active device and keeps every recently used machine's {@link App}
+ * mounted, one pane each, so switching back to a machine finds it as it was.
  *
- * A keyed remount tears down every App-level hook: PTY sockets, session
- * subscriptions, in-flight fetches. Switching devices therefore starts from a
- * clean slate instead of leaking one device's live state into another. Module
- * caches survive the remount but are device-scoped by key (see sessionCache /
- * sessionLoader / useSessionHistory / usePermissions), so a switch-back stays
- * warm without cross-device collisions.
+ * Only the active pane is visible and runs effects (DeviceStage hides the
+ * others under Activity), so sockets, polling and in-flight work belong to the
+ * machine on screen while the others keep their state. A pane is keyed by its
+ * device, that device's connection revision, the signed-in account and its
+ * retries: a same-id host/account change, a sign-in change or a retry after an
+ * outage remounts it, and a background pane whose key goes stale is dropped
+ * rather than remounted out of sight. Panes keep their DOM order, since moving
+ * a pane would reload every frame inside it.
  *
  * The device id is derived from the URL ("/d/:id/..." → id, else "local"). We
- * re-derive on `cogpit-device-changed` (explicit switchDevice) and on `popstate`
- * (back/forward across a device boundary), updating state only when the id
- * actually changes so intra-device navigation never forces a remount.
+ * re-derive on `cogpit-device-changed` (a committed switch) and on `popstate`
+ * (back/forward across a device boundary). Explicit switches go through
+ * DeviceStage, which slides the machines past before committing.
  *
  * The key also carries the signed-in account (`cogpit-identity-changed`,
  * dispatched by setActiveIdentity when useMe settles /api/me): login, logout,
  * and user switches remount App so every mount-time storage read (usePermissions,
  * useSessionHistory, useLocalStorage consumers) re-runs through the
- * identity-scoped deviceScopedKey. Personal edition never dispatches — no
- * remount, no hold, boot behavior is byte-identical to builds without sign-in.
+ * identity-scoped deviceScopedKey. Personal edition never dispatches.
  *
- * Also hosted here because they must survive the remount:
+ * Also hosted here because they span machines:
  * - device keyboard shortcuts (platform chord 1..9 jump, platform chord 0 cycle)
  * - the banner for an active remote device the hub cannot use
+ * - the page's theme, which is the active machine's own
  *
- * The session inventory provider is keyed here rather than inside App so the
- * sidebar and Mission Control share one poll, scoped to the active device.
+ * Each pane gets its own session inventory provider, so the sidebar and
+ * Mission Control share one poll scoped to that machine.
  */
 export function DeviceRoot() {
   const [activeDeviceId, setActiveDeviceId] = useState(getActiveDeviceId)
@@ -103,10 +150,11 @@ export function DeviceRoot() {
     () => getDeviceConnectionRevision(getActiveDeviceId()),
   )
   const [identityKey, setIdentityKey] = useState(getActiveIdentity)
-  const [retryNonce, setRetryNonce] = useState(0)
+  const [retries, setRetries] = useState<Readonly<Record<string, number>>>({})
   const [problem, setProblem] = useState<DeviceProblem | null>(null)
   const [retrying, setRetrying] = useState(false)
-  const { devices, testDevice } = useDevices()
+  const { devices, loading: devicesLoading, testDevice } = useDevices()
+  const swipeEnabled = useMachineSwipe()
 
   useEffect(() => {
     const sync = () => {
@@ -189,7 +237,7 @@ export function DeviceRoot() {
       if (!stillCurrent()) return
       setProblem(next)
       // Remount App so every data hook refetches from the recovered device.
-      if (next === null) setRetryNonce((n) => n + 1)
+      if (next === null) setRetries((current) => ({ ...current, [activeDeviceId]: (current[activeDeviceId] ?? 0) + 1 }))
     } finally {
       if (stillCurrent()) setRetrying(false)
     }
@@ -224,6 +272,45 @@ export function DeviceRoot() {
 
   const deviceName = devices.find((d) => d.id === activeDeviceId)?.name ?? activeDeviceId
 
+  // What the hub last heard each machine wear, for the swipe and first paint
+  // of a machine this browser has not met. Only a hint: the hello can be older
+  // than a pick or a read since, which a machine's own pane keeps current.
+  useEffect(() => {
+    for (const device of devices) {
+      const theme = deviceTheme(device)
+      if (theme && !knowsDeviceTheme(device.id)) rememberDeviceTheme(device.id, theme, "host")
+    }
+  }, [devices])
+
+  // The page, and everything portaled to it, wears the active machine's theme.
+  const activeTheme = useSyncExternalStore(subscribeDeviceThemes, () => shownDeviceTheme(activeDeviceId))
+  useLayoutEffect(() => applyTheme(activeTheme), [activeTheme])
+
+  const machines = useMemo(
+    () => [{ id: LOCAL_DEVICE_ID, name: "This machine" }, ...devices.map(({ id, name }) => ({ id, name }))],
+    [devices],
+  )
+
+  const listedIds = devicesLoading ? null : devices.map((device) => device.id)
+  const paneInputs = JSON.stringify([activeDeviceId, connectionRevision, identityKey, retries, listedIds])
+  const [paneState, setPaneState] = useState(() => ({
+    inputs: paneInputs,
+    panes: nextPanes([], { activeDeviceId, identityKey, retries, listedIds }),
+  }))
+  let panes = paneState.panes
+  if (paneState.inputs !== paneInputs) {
+    panes = nextPanes(paneState.panes, { activeDeviceId, identityKey, retries, listedIds })
+    setPaneState({ inputs: paneInputs, panes })
+  }
+
+  const renderPane = useCallback(() => (
+    <SessionInventoryProvider>
+      <PendingHumanInputProvider>
+        <App />
+      </PendingHumanInputProvider>
+    </SessionInventoryProvider>
+  ), [])
+
   return (
     <>
       {problem && activeDeviceId !== LOCAL_DEVICE_ID && (
@@ -256,11 +343,15 @@ export function DeviceRoot() {
           </div>
         </Alert>
       )}
-      <SessionInventoryProvider key={`${activeDeviceId}:${connectionRevision}:${retryNonce}:${identityKey ?? ""}`}>
-        <PendingHumanInputProvider>
-          <App />
-        </PendingHumanInputProvider>
-      </SessionInventoryProvider>
+      <MachinesProvider value={machines}>
+        <DeviceStage
+          panes={panes}
+          activeDeviceId={activeDeviceId}
+          machines={machines}
+          swipeEnabled={swipeEnabled}
+          renderPane={renderPane}
+        />
+      </MachinesProvider>
     </>
   )
 }

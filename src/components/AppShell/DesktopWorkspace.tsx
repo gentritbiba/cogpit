@@ -20,8 +20,8 @@ import { useAppContext } from "@/contexts/AppContext"
 import { useOpenSession, useSessionControls } from "@/contexts/SessionContext"
 import type { EditionMainView } from "@/edition/contract"
 import { useMainView } from "@/edition/hooks"
-import { can } from "@/lib/capabilities"
-import { isRemoteDeviceActive } from "@/lib/device"
+import { useCan } from "@/hooks/useCapability"
+import { useIsRemoteDevice } from "@/contexts/DevicePaneContext"
 import { isBuiltInEditorEnabled, openProject, revealInFolder } from "@/lib/fileOpener"
 import { dirNameToPath } from "@/lib/format"
 import { shortcutLabel } from "@/lib/keybindings"
@@ -102,9 +102,11 @@ function DesktopMainView({
   extensionView,
   floatingChrome,
 }: DesktopViewProps & { view: DesktopMainView; extensionView: EditionMainView | null; floatingChrome: ReactNode }) {
+  const can = useCan()
   const { state, config } = useAppContext()
   const { sessionSource } = useSessionControls()
   const sessionCwd = useOpenSession((open) => open?.cwd)
+  const remoteDevice = useIsRemoteDevice()
   const pendingPath = state.pendingCwd
     ?? (state.pendingDirName ? dirNameToPath(state.pendingDirName) : null)
 
@@ -155,7 +157,7 @@ function DesktopMainView({
     const hasPendingTurns = sessionView.pendingTurns.length > 0
     // These reach into the host filesystem, so they stay visible but explain
     // themselves when the active device is somewhere else.
-    const hostActionReason = isRemoteDeviceActive()
+    const hostActionReason = remoteDevice
       ? "Only on the machine running this session"
       : undefined
     // The built-in workspace reads the remote device's files over the proxy, so
@@ -244,6 +246,7 @@ export function DesktopWorkspace({
   project,
   chrome,
 }: DesktopAppShellProps) {
+  const can = useCan()
   const { state, config } = useAppContext()
   const { sessionSource } = useSessionControls()
   const sessionId = useOpenSession((open) => open?.sessionId ?? null)

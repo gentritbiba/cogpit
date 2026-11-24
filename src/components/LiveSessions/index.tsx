@@ -4,7 +4,7 @@ import { toast } from "sonner"
 import { Button } from "@/components/ui/button"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { authFetch } from "@/lib/auth"
-import { deviceScopedKey } from "@/lib/device"
+import { useDeviceScopedKey } from "@/contexts/DevicePaneContext"
 import { dirNameToPath } from "@/lib/format"
 import { sortSessionsByRecency } from "../../../shared/session-ordering"
 import type { ActiveSessionInfo } from "./types"
@@ -113,12 +113,12 @@ export const LiveSessions = memo(function LiveSessions({ activeSessionKey, onSel
   // per device, since projects differ between devices and DeviceRoot remounts
   // on a device change.
   const [projectScope, setProjectScope] = useLocalStorage<string | null>(
-    deviceScopedKey("live-sessions-project-scope"),
+    useDeviceScopedKey("live-sessions-project-scope"),
     null,
   )
   // Sessions another session started through Cogpit fold under it; a search lists every match on its own.
   const [groupCrewsSetting, setGroupCrews] = useLocalStorage<boolean>(
-    deviceScopedKey("live-sessions-group-crews"),
+    useDeviceScopedKey("live-sessions-group-crews"),
     true,
   )
   const groupCrewsPreferred = groupCrewsSetting !== false

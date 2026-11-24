@@ -11,7 +11,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
 import { cn } from "@/lib/utils"
-import { can } from "@/lib/capabilities"
+import { useCan } from "@/hooks/useCapability"
 import { LOCAL_DEVICE_ID, switchDevice } from "@/lib/device"
 import { deviceVersion, useDevices, type PublicDevice } from "@/hooks/useDevices"
 import { DevicesDialog } from "@/components/DevicesDialog"
@@ -48,6 +48,7 @@ function SlotHint({ slot }: { slot: number }) {
 }
 
 export function DeviceSwitcher({ compact = false }: { compact?: boolean }) {
+  const can = useCan()
   const { devices, activeDeviceId, activeDevice, refresh, testDevice } = useDevices()
   const [dialogMode, setDialogMode] = useState<null | "add" | "manage">(null)
 

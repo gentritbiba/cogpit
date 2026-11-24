@@ -21,7 +21,7 @@ vi.mock("@/contexts/SessionContext", () => ({
 vi.mock("@/contexts/SessionInventoryContext", () => ({
   useSessionInventoryOptional: () => ({ sessions: mocks.inventorySessions }),
 }))
-vi.mock("@/hooks/useCapability", () => ({ useCapability: () => true }))
+vi.mock("@/hooks/useCapability", () => ({ useCapability: () => true, useCan: () => () => true }))
 vi.mock("@/components/LeakIndicator", () => ({
   LeakIndicator: ({ onReview }: { onReview: () => void }) => <button onClick={onReview}>Leak monitor</button>,
 }))

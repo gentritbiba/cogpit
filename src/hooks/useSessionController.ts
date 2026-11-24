@@ -16,9 +16,13 @@ export function useSessionController(
   parse: (text: string) => Promise<SessionView>,
 ): { sessions: SessionController; dispatch: Dispatch<SessionAction> } {
   const [sessions] = useState(() => createSessionController({ parse, dispatch: dispatchState }))
-  // A shell that goes away (a closed share, a device switch) leaves its session,
-  // so the cache no longer keeps its screen and nothing lands after it.
-  useEffect(() => () => sessions.leave(), [sessions])
+  // A shell that goes away (a closed share, a machine's pane hidden in the
+  // background) suspends its session, so the cache no longer keeps its screen
+  // and nothing lands after it; a pane shown again resumes it as it was.
+  useEffect(() => {
+    sessions.resume()
+    return () => sessions.suspend()
+  }, [sessions])
 
   const dispatch = useCallback((action: SessionAction) => {
     if (LEAVES.has(action.type)) sessions.leave()

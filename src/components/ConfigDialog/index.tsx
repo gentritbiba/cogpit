@@ -26,8 +26,8 @@ import {
 import { useConfigValidation } from "@/hooks/useConfigValidation"
 import { useReportFeature } from "@/hooks/useReportFeature"
 import { authFetch } from "@/lib/auth"
-import { can } from "@/lib/capabilities"
-import { isRemoteDeviceActive } from "@/lib/device"
+import { useCan } from "@/hooks/useCapability"
+import { useIsRemoteDevice } from "@/contexts/DevicePaneContext"
 import { NetworkAccessSection } from "./NetworkAccessSection"
 import { ExecutableSection } from "./ExecutableSection"
 import { AccountSection } from "./AccountSection"
@@ -94,13 +94,14 @@ interface ConfigDialogProps {
 }
 
 export function ConfigDialog({ open, currentPath, onClose, onSaved }: ConfigDialogProps) {
+  const can = useCan()
   useReportFeature("settings.open", open)
   const [path, setPath] = useState(currentPath)
   const [saving, setSaving] = useState(false)
   const { status, error, debouncedValidate, reset, save } = useConfigValidation()
   // Editing a remote device's network access through the proxy could rotate its
   // password or disable its network access — either one locks this hub out.
-  const remoteDevice = isRemoteDeviceActive()
+  const remoteDevice = useIsRemoteDevice()
   // An account without configWrite gets a read-only view (the server refuses writes anyway).
   const canWriteConfig = can("configWrite")
   const [pluginsOpen, setPluginsOpen] = useState(false)

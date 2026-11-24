@@ -1,3 +1,7 @@
+import { parseThemeId, type ThemeId } from "../../shared/contracts/appearance"
+
+export type { ThemeId }
+
 export const themes = [
   {
     id: "layered",
@@ -47,34 +51,46 @@ export const themes = [
       "oklch(0.922 0 0)",
     ],
   },
-] as const
+] as const satisfies ReadonlyArray<{ id: ThemeId; className: string; name: string; swatches: readonly string[] }>
 
-export type ThemeId = (typeof themes)[number]["id"]
-const STORAGE_KEY = "cogpit-theme"
+export const DEFAULT_THEME: ThemeId = "dark"
+
+/** Where this browser kept its one theme before each machine had its own. */
+const LEGACY_STORAGE_KEY = "cogpit-theme"
 const themeClasses = [...new Set(themes.flatMap(theme => theme.className.split(" ").filter(Boolean)))]
 
-export function readSavedTheme(): ThemeId {
+function themeFor(id: ThemeId) {
+  return themes.find(theme => theme.id === id) ?? themes.find(theme => theme.id === DEFAULT_THEME)!
+}
+
+/** The theme this browser used before themes belonged to machines, if it saved one. */
+export function legacyTheme(): ThemeId | null {
   try {
-    const saved = localStorage.getItem(STORAGE_KEY)
-    return themes.find(theme => theme.id === saved)?.id ?? "dark"
+    return parseThemeId(localStorage.getItem(LEGACY_STORAGE_KEY))
   } catch {
-    return "dark"
+    return null
   }
 }
 
-export function saveTheme(id: ThemeId): void {
-  try { localStorage.setItem(STORAGE_KEY, id) } catch { /* Theme changes still work without storage. */ }
-}
-
 export function themeMode(id: ThemeId): "dark" | "light" {
-  return themes.find(theme => theme.id === id)!.className.split(" ").includes("dark") ? "dark" : "light"
+  return themeFor(id).className.split(" ").includes("dark") ? "dark" : "light"
 }
 
+/** The classes that give an element's subtree this theme (with `theme-scope`, see plugin-ui/theme.css). */
+export function themeClassName(id: ThemeId): string {
+  return themeFor(id).className
+}
+
+/** The page's background color in this theme, for the browser chrome around it. */
+function themeCanvasColor(id: ThemeId): string {
+  return themeFor(id).swatches[0]
+}
+
+/** Dress the whole document, and with it everything portaled to `<body>`, in this theme. */
 export function applyTheme(id: ThemeId): void {
-  const theme = themes.find(theme => theme.id === id)!
   const root = document.documentElement
   root.classList.remove(...themeClasses)
-  root.classList.add(...theme.className.split(" ").filter(Boolean))
+  root.classList.add(...themeClassName(id).split(" ").filter(Boolean))
   root.style.colorScheme = themeMode(id)
-  document.querySelector('meta[name="theme-color"]')?.setAttribute("content", theme.swatches[0])
+  document.querySelector('meta[name="theme-color"]')?.setAttribute("content", themeCanvasColor(id))
 }
