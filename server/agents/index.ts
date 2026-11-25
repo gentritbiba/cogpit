@@ -1,4 +1,4 @@
-import { acpStore } from "./acpStore"
+import { acpStore, antigravityStore } from "./acpStore"
 import {
   AGENT_KINDS,
   descriptorForDirName,
@@ -28,6 +28,7 @@ const STORES: Readonly<Record<AgentKind, AgentStore>> = Object.freeze({
   codex: codexStore,
   copilot: copilotStore,
   acp: acpStore,
+  antigravity: antigravityStore,
 })
 
 export interface StoreRegistry {
@@ -100,7 +101,7 @@ export function storeForDirName(dirName: string | null | undefined): AgentStore 
  * it preserves the historical resolution order, and the ids are near-unique
  * across agents anyway, so the order mostly decides which store pays first.
  */
-export const SESSION_LOOKUP_ORDER: readonly AgentKind[] = ["claude", "codex", "copilot", "acp"]
+export const SESSION_LOOKUP_ORDER: readonly AgentKind[] = ["claude", "codex", "copilot", "acp", "antigravity"]
 
 /** Every store, in agent-detection order. */
 export function allStores(): readonly AgentStore[] {

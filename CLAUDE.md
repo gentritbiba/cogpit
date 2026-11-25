@@ -35,7 +35,8 @@ test files individually to read their results.
 
 ## Agent Layer
 
-Cogpit drives three agent CLIs. New agent-specific knowledge belongs in
+Cogpit drives four agent CLIs (Claude Code, Codex, Copilot, Antigravity) and
+any ACP agent. New agent-specific knowledge belongs in
 `server/agents/`, `src/lib/agents/` and the `shared/session/` agent modules.
 
 Everything else asks the layer instead: `descriptorFor(kind)` /

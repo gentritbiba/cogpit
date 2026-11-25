@@ -210,7 +210,7 @@ describe.each(CASES)("$kind store", ({ kind, store, seed }) => {
 
 describe("store registry", () => {
   it("exposes every agent exactly once, in detection order", () => {
-    expect(agents.allStores().map((store) => store.kind)).toEqual(["acp", "codex", "copilot", "claude"])
+    expect(agents.allStores().map((store) => store.kind)).toEqual(["acp", "codex", "copilot", "antigravity", "claude"])
   })
 
   it("owns no path outside every root", () => {
@@ -226,10 +226,11 @@ describe("store registry", () => {
       codex: fake,
       copilot: fake,
       acp: fake,
+      antigravity: fake,
     })
     expect(registry.storeFor("claude")).toBe(fake)
     expect(registry.storeForPath("/anywhere")).toBe(fake)
-    expect(registry.allStores()).toEqual([fake, fake, fake, fake])
+    expect(registry.allStores()).toEqual([fake, fake, fake, fake, fake])
   })
 
   describe("allTopLevelSessions", () => {
@@ -245,6 +246,7 @@ describe("store registry", () => {
         codex: listing("codex", [20]),
         copilot: listing("copilot", []),
         acp: listing("acp", []),
+        antigravity: listing("antigravity", []),
       })
       const sessions = await registry.allTopLevelSessions()
       expect(sessions.map((session) => session.filePath)).toEqual(["/claude/30.jsonl", "/codex/20.jsonl", "/claude/10.jsonl"])
@@ -256,6 +258,7 @@ describe("store registry", () => {
         codex: listing("codex", [20]),
         copilot: listing("copilot", []),
         acp: listing("acp", []),
+        antigravity: listing("antigravity", []),
       })
       await expect(registry.allTopLevelSessions()).rejects.toThrow("EPERM")
     })
@@ -266,6 +269,7 @@ describe("store registry", () => {
         codex: listing("codex", [20, 40]),
         copilot: listing("copilot", []),
         acp: listing("acp", []),
+        antigravity: listing("antigravity", []),
       })
       const sessions = await registry.allTopLevelSessions({ skipUnreadable: true })
       expect(sessions.map((session) => session.filePath)).toEqual(["/codex/40.jsonl", "/codex/20.jsonl"])
@@ -462,6 +466,6 @@ describe("cross-agent lookup", () => {
 
   it("reports every configured storage root once", () => {
     expect(sessionPaths.sessionStorageRoots().map((source) => source.kind))
-      .toEqual(["acp", "codex", "copilot", "claude"])
+      .toEqual(["acp", "codex", "copilot", "antigravity", "claude"])
   })
 })

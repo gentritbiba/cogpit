@@ -1,8 +1,9 @@
 # Cogpit architecture — the agent layer
 
-Cogpit drives three agent CLIs: Claude Code, Codex and GitHub Copilot CLI. This
-document describes how the product stays one product instead of three, and how a
-fourth CLI is added.
+Cogpit drives four agent CLIs: Claude Code, Codex, GitHub Copilot CLI and
+Google Antigravity CLI, plus any agent that speaks the Agent Client Protocol
+(ACP). This document describes how the product stays one product instead of
+several, and how another CLI is added.
 
 The broader dependency rules — runtime layers, package boundaries, release
 gates — live in [`docs/architecture/README.md`](docs/architecture/README.md).
@@ -24,7 +25,7 @@ providers). The agent layer uses **agent**:
 
 | Term | What it is | Where it lives |
 | --- | --- | --- |
-| `AgentKind` | `"claude" \| "codex" \| "copilot"` | `shared/session/types.ts` |
+| `AgentKind` | `"claude" \| "codex" \| "copilot" \| "acp" \| "antigravity"` | `shared/session/types.ts` |
 | `AgentDescriptor` | Frozen data: dirName codecs, file naming, resume argv, launch flags, CLI install facts, config layout, context window, capabilities | `shared/session/agent-descriptors.ts` |
 | `AgentFormat` | Pure transcript grammar: detect, parse, append, status, metadata, turn boundaries | `shared/session/agents.ts` + one module per agent |
 | `AgentStore` | On-disk session storage (`node:fs`) | `server/agents/*Store.ts` |
@@ -73,8 +74,8 @@ Two properties keep this a DAG:
   transcript parsers along with it.
 
 Detection order is explicit rather than accidental: `AGENT_KINDS` is
-`["codex", "copilot", "claude"]`. Codex and Copilot carry positive
-discriminators; Claude is the terminal arm and its `detectsText` returns `true`
+`["acp", "codex", "copilot", "antigravity", "claude"]`. The others carry
+positive discriminators; Claude is the terminal arm and its `detectsText` returns `true`
 unconditionally. The *order* is the contract, so no implementation has to know
 about its siblings.
 
@@ -149,6 +150,23 @@ call sites. Comments count too — prose naming a CLI is how the knowledge leaks
 back in.
 
 Re-seed after a cleanup with `bun scripts/check-agents.ts --write`.
+
+## ACP agents
+
+`server/agents/acpRuntime.ts` drives any agent that speaks the Agent Client
+Protocol. `createAcpRuntime(profile)` owns the process, sessions, approvals,
+questions and the transcript; an `AcpProfile` supplies what differs: how to
+launch the agent, which config options a turn sets, which permission requests
+Cogpit answers itself, how tool calls map onto the timeline's tool cards, and
+which errors mean "sign in". Cogpit writes the transcript itself in Claude's
+grammar, under a header record naming the agent (`acpFormat` in
+`shared/session/agents.ts`), so parsing, status and summaries reuse Claude's.
+
+The generic `acp` kind runs whatever executable a provider instance names.
+`antigravity` (`server/agents/antigravityRuntime.ts`) runs `agy acp`: its
+session ids are the agent's own conversation ids, so `agy --conversation`
+resumes them, and its transcripts live in `ANTIGRAVITY_TRANSCRIPTS_DIR` under
+`~/.gemini`. A new ACP-speaking CLI is a descriptor plus a profile.
 
 ## How to add a fourth agent CLI
 

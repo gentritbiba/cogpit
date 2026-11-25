@@ -124,6 +124,7 @@ export function buildUpdateCommand(
   method: ProviderInstallMethod,
 ): UpdateCommand | null {
   const { binName, cli } = descriptorFor(provider)
+  if ((method === "bun" || method === "pnpm" || method === "npm") && !cli.packageName) return null
   switch (method) {
     case "native":
       return cli.selfUpdate
@@ -291,7 +292,7 @@ async function probeProvider(descriptor: AgentDescriptor): Promise<ProviderUpdat
   const installMethod = executable?.source === "bundled" ? "bundled" : detectInstallMethod(descriptor.kind, paths)
   const [currentVersion, latestVersion] = await Promise.all([
     probeCliVersion(base.binaryPath, descriptor.cli.versionArgs),
-    installMethod === "bundled" ? null : fetchLatestVersion(descriptor.cli.packageName),
+    installMethod === "bundled" || !descriptor.cli.packageName ? null : fetchLatestVersion(descriptor.cli.packageName),
   ])
   const command = buildUpdateCommand(descriptor.kind, installMethod)
 

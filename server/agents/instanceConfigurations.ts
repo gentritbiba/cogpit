@@ -16,7 +16,7 @@ import { providerInstanceEnvironment } from "./instanceRuntime"
 export function instanceAuthEnvironment(instance: ProviderInstance): Record<string, string> {
   const env = providerInstanceEnvironment(instance, process.env.COGPIT_ORCHESTRATION_ROOT || getDataRoot())
   const descriptor = descriptorFor(instance.agent)
-  const keys = ["HOME", "XDG_CONFIG_HOME", "XDG_CACHE_HOME", "XDG_DATA_HOME", descriptor.cli.homeEnvVar, descriptor.cli.bundledBySdk ? "CLAUDE_CONFIG_DIR" : null].filter((key): key is string => key !== null)
+  const keys = ["HOME", "XDG_CONFIG_HOME", "XDG_CACHE_HOME", "XDG_DATA_HOME", descriptor.cli.homeEnvVar, descriptor.cli.bundledBySdk ? "CLAUDE_CONFIG_DIR" : null, ...Object.keys(descriptor.cli.instanceEnv ?? {})].filter((key): key is string => key !== null)
   return Object.fromEntries(keys.flatMap((key) => env[key] ? [[key, env[key]!]] : []))
 }
 

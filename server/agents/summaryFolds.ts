@@ -525,6 +525,7 @@ const foldCodex: SummaryFold = (acc, entry) => {
 
 const FOLDS: Readonly<Record<AgentKind, SummaryFold>> = Object.freeze({
   acp: foldClaude,
+  antigravity: foldClaude,
   claude: foldClaude,
   codex: foldCodex,
   copilot: foldCopilot,

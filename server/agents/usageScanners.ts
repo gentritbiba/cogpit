@@ -422,7 +422,9 @@ export interface UsageScanner {
 }
 
 const SCANNERS: Readonly<Record<AgentKind, (filePath: string) => UsageScanner>> = Object.freeze({
+  // Cogpit has no prices for the models an ACP agent brokers.
   acp: () => ({ wantsLine: () => false, accept: () => [] }),
+  antigravity: () => ({ wantsLine: () => false, accept: () => [] }),
   claude: (): UsageScanner => ({
     // Stateless: every assistant record repeats its message's whole usage
     // object, so a line is either self-contained or of no interest.

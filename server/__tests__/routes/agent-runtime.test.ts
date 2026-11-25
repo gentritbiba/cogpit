@@ -14,6 +14,7 @@ import type { Middleware, UseFn } from "../../helpers"
 const { runtimes } = vi.hoisted(() => ({
   runtimes: {
     acp: { describeRuntime: vi.fn() },
+    antigravity: { describeRuntime: vi.fn() },
     claude: { describeRuntime: vi.fn() },
     codex: { describeRuntime: vi.fn() },
     copilot: { describeRuntime: vi.fn() },
@@ -75,6 +76,7 @@ describe("agent runtime routes", () => {
   it("registers one path per agent, named by its executable", () => {
     // Registration follows detection order, which is what the registry hands out.
     expect([...register().keys()].sort()).toEqual([
+      "/api/agy/runtime",
       "/api/claude/runtime",
       "/api/codex/runtime",
       "/api/copilot/runtime",

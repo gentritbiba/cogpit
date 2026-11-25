@@ -9,7 +9,7 @@ import { Github, Terminal } from "lucide-react"
 import type { ForwardRefExoticComponent, RefAttributes, SVGProps } from "react"
 import type { PermissionMode } from "../permissions"
 import { AGENT_KINDS, descriptorForDirName, type AgentKind } from "."
-import { AnthropicIcon, OpenAIIcon } from "./brandIcons"
+import { AnthropicIcon, GeminiIcon, OpenAIIcon } from "./brandIcons"
 
 /** Any SVG component that takes the same props as a lucide icon. */
 export type AgentIcon = ForwardRefExoticComponent<SVGProps<SVGSVGElement> & RefAttributes<SVGSVGElement>>
@@ -17,6 +17,7 @@ export type AgentIcon = ForwardRefExoticComponent<SVGProps<SVGSVGElement> & RefA
 /** Each agent's vendor mark, since the product names alone don't say who runs the model. */
 const ICONS: Record<AgentKind, AgentIcon> = {
   acp: Terminal,
+  antigravity: GeminiIcon,
   claude: AnthropicIcon,
   codex: OpenAIIcon,
   copilot: Github,
@@ -25,6 +26,7 @@ const ICONS: Record<AgentKind, AgentIcon> = {
 /** Short name for chips and dropdown rows, where the full product name is too long. */
 const SHORT_NAMES: Record<AgentKind, string> = {
   acp: "ACP",
+  antigravity: "Antigravity",
   claude: "Claude",
   codex: "Codex",
   copilot: "Copilot",
@@ -33,6 +35,7 @@ const SHORT_NAMES: Record<AgentKind, string> = {
 /** Name used when the row has space, e.g. the project switcher's folder hint. */
 const SWITCHER_NAMES: Record<AgentKind, string> = {
   acp: "ACP agent",
+  antigravity: "Google Antigravity",
   claude: "Claude",
   codex: "Codex",
   copilot: "GitHub Copilot",
@@ -44,6 +47,7 @@ const SWITCHER_NAMES: Record<AgentKind, string> = {
  */
 const PROJECT_BADGES: Record<AgentKind, string | null> = {
   acp: "ACP",
+  antigravity: "Antigravity",
   claude: null,
   codex: "Codex",
   copilot: "Copilot",
@@ -52,6 +56,7 @@ const PROJECT_BADGES: Record<AgentKind, string | null> = {
 /** Single letter plus tooltip for the config browser's "loaded by" badge. */
 const CONFIG_BADGES: Record<AgentKind, { letter: string; label: string }> = {
   acp: { letter: "A", label: "Loaded by ACP agent" },
+  antigravity: { letter: "Y", label: "Loaded by Antigravity CLI" },
   claude: { letter: "C", label: "Loaded by Claude Code" },
   codex: { letter: "X", label: "Loaded by Codex CLI" },
   copilot: { letter: "G", label: "Loaded by GitHub Copilot CLI" },
@@ -60,6 +65,7 @@ const CONFIG_BADGES: Record<AgentKind, { letter: string; label: string }> = {
 /** A provider's brand color for its mark; null where the brand mark is monochrome. */
 const MARK_COLORS: Record<AgentKind, string | null> = {
   acp: null,
+  antigravity: "#3186FF",
   claude: "#D97757",
   codex: null,
   copilot: null,
@@ -68,6 +74,7 @@ const MARK_COLORS: Record<AgentKind, string | null> = {
 /** Series colour, so one agent keeps one colour across every chart and legend. */
 const CHART_COLORS: Record<AgentKind, string> = {
   acp: "var(--chart-4)",
+  antigravity: "var(--chart-5)",
   claude: "var(--chart-1)",
   codex: "var(--chart-2)",
   copilot: "var(--chart-3)",
@@ -76,6 +83,7 @@ const CHART_COLORS: Record<AgentKind, string> = {
 /** What the composer's interrupt button says while a turn is running. */
 const INTERRUPT_LABELS: Record<AgentKind, string> = {
   acp: "Cancel ACP turn",
+  antigravity: "Stop Antigravity turn",
   claude: "Interrupt agent",
   codex: "Stop active turn",
   copilot: "Stop Copilot turn",
@@ -93,6 +101,12 @@ export interface PermissionModeOption {
  */
 const PERMISSION_MODES: Record<AgentKind, readonly PermissionModeOption[]> = {
   acp: [{ value: "default", label: "Ask", description: "Use the provider’s permission requests" }],
+  antigravity: [
+    { value: "default", label: "Ask", description: "Ask before running commands or changing files" },
+    { value: "plan", label: "Plan", description: "Research and plan without changing files" },
+    { value: "acceptEdits", label: "Accept Edits", description: "Allow file edits; ask for other actions" },
+    { value: "bypassPermissions", label: "Full access", description: "Allow every tool without asking" },
+  ],
   claude: [
     { value: "default", label: "Ask", description: "Ask before sensitive actions" },
     { value: "plan", label: "Plan", description: "Read and plan without changing files" },

@@ -222,7 +222,9 @@ FTS5 search is sublinear — doubling the index size does not double query time.
 
 Session discovery and context commands read Claude Code JSONL history from
 `~/.claude/projects/`, Codex history from `~/.codex/sessions/`, and GitHub
-Copilot CLI history from `~/.copilot/session-state/`. The shared parser
+Copilot CLI history from `~/.copilot/session-state/`. Antigravity sessions
+started in Cogpit are read from the transcripts Cogpit keeps in
+`~/.gemini/antigravity-cli/cogpit-sessions/`. The shared parser
 normalizes each provider into the same conversation structure for layered
 drill-down.
 

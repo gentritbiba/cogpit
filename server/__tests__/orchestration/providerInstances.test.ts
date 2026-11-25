@@ -2,7 +2,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { readFile, writeFile } from "node:fs/promises"
 import { resolve, join } from "node:path"
-import { createProviderInstance } from "../../agents/instanceConfigurations"
+import { createProviderInstance, instanceAuthEnvironment } from "../../agents/instanceConfigurations"
 import { createInstanceRuntime, providerInstanceEnvironment } from "../../agents/instanceRuntime"
 import { createInstanceStore } from "../../agents/instanceStores"
 import { descriptorFor } from "../../../shared/session/agent-descriptors"
@@ -40,6 +40,14 @@ describe("provider instance environment", () => {
     const { configuration } = await instance("Memory")
     vi.stubEnv("COGPIT_MEMORY_DIR", "/data/memory")
     expect(providerInstanceEnvironment(configuration, process.env.COGPIT_ORCHESTRATION_ROOT!).COGPIT_MEMORY_DIR).toBe("/data/memory")
+  })
+
+  it("keeps an Antigravity account's sign-in in its own home, for its sessions and its sign-in alike", async () => {
+    const configuration = await createProviderInstance({ agent: "antigravity", label: "Work Google" })
+    expect(providerInstanceEnvironment(configuration, process.env.COGPIT_ORCHESTRATION_ROOT!).SSH_CONNECTION).toBe("127.0.0.1 0 127.0.0.1 0")
+    expect(instanceAuthEnvironment(configuration)).toMatchObject({ SSH_CONNECTION: "127.0.0.1 0 127.0.0.1 0", COGPIT_ANTIGRAVITY_HOME: configuration.homeDir })
+    const { configuration: other } = await instance("Plain ACP")
+    expect(providerInstanceEnvironment(other, process.env.COGPIT_ORCHESTRATION_ROOT!).SSH_CONNECTION).toBeUndefined()
   })
 })
 
