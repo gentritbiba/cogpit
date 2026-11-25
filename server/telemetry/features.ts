@@ -30,6 +30,21 @@ const ROUTE_FEATURES: ReadonlyArray<readonly [method: string, path: RegExp, feat
   ["POST", /^\/api\/provider-updates\/run$/, "agent.update"],
   ["POST", /^\/api\/kill-port$/, "port.kill"],
   ["POST", /^\/api\/worktrees\/[^/]+\/create-pr$/, "worktree.create_pr"],
+  ["DELETE", /^\/api\/worktrees\/[^/]+$/, "worktree.delete"],
+  ["POST", /^\/api\/worktrees\/[^/]+\/cleanup$/, "worktree.cleanup"],
+  ["POST", /^\/api\/automations$/, "automation.create"],
+  ["PUT", /^\/api\/automations\/[^/]+$/, "automation.update"],
+  ["DELETE", /^\/api\/automations\/[^/]+$/, "automation.delete"],
+  ["POST", /^\/api\/elicitation-answer$/, "elicitation.answer"],
+  ["POST", /^\/api\/user-dialog-answer$/, "dialog.answer"],
+  ["POST", /^\/api\/workflow-stop$/, "workflow.stop"],
+  ["POST", /^\/api\/team-message$/, "team.message"],
+  ["POST", /^\/api\/kill-process$/, "process.kill"],
+  ["DELETE", /^\/api\/library\/items\/\d+$/, "library.remove"],
+  ["POST", /^\/api\/config$/, "settings.save"],
+  ["PUT", /^\/api\/appearance$/, "appearance.change"],
+  ["POST", /^\/api\/config-browser\/file$/, "config_file.save"],
+  ["POST", /^\/api\/config-browser\/create$/, "config_file.create"],
 ]
 
 export function routeFeature(method: string | undefined, path: string): string | undefined {

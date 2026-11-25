@@ -22,12 +22,16 @@ The events themselves:
 | `app.heartbeat` | When Cogpit starts, then once a day | Whether this is a new install, and the default agent |
 | `session.started` | You or an agent start a session in Cogpit | Agent, model, effort, permission mode, fast mode, whether it runs in a worktree, and which kind of client started it (desktop, browser, phone, agent) |
 | `message.sent` | A message reaches a session | The same, plus whether it started a turn or joined one |
+| `turn.completed` | A turn in a session you started or messaged from Cogpit finishes | Agent, model, effort, how long it took, its input, output, cache and reasoning tokens, whether it ran in fast mode, how many tool calls it made and how many failed, lines added and removed, how many subagents it started, whether it compacted, whether a skill, plugin or MCP server took part (never which one), and how many images you attached |
+| `tool.used` | With each finished turn | For each tool the turn used: the tool's name, how often it was called and how often it failed. Only names the agents ship, such as `Bash` or `apply_patch`, are sent; an MCP server's tool counts as `mcp` and any other tool as `other` |
+| `agent.status` | A couple of minutes after Cogpit starts, then once a day | For each agent: whether it is installed, whether you are signed in, and its version number |
+| `agent.error` | An agent fails to start or a turn fails | The agent, whether it was the start or a turn, the kind of failure (such as not installed, not signed in, or a model that is not available) and its HTTP status code |
 | `usage.daily` | Once a day, for the day before | For each agent and model: input, cached input, cache write, output and reasoning tokens, number of responses and sessions, and the estimated cost |
-| `feature.used` | You use a feature such as branching a session, answering a permission, sharing a session, opening the Browser panel or a `cogpit-session` command | The feature's name and which kind of client used it |
+| `feature.used` | You use a feature such as branching a session, answering a permission, sharing a session, opening the Browser panel, saving settings, managing automations or worktrees, or a `cogpit-session` command | The feature's name and which kind of client used it |
 
-Token counts cover only sessions you started or messaged from Cogpit, never agent work you
-ran elsewhere. They start from the day Cogpit first sent usage data and are never sent for days
-before it.
+Token counts and turns cover only sessions you started or messaged from Cogpit, never agent
+work you ran elsewhere. They start from the day Cogpit first sent usage data and are never sent
+for days before it.
 
 Model names are sent only when they are a vendor's public model name, such as
 `claude-opus-5-5` or `gpt-5.5-codex`. Any other name, for example a local or fine-tuned model,
@@ -35,10 +39,11 @@ is sent as `other`.
 
 ## What is never sent
 
-- prompts, replies, tool calls or their output
+- prompts, replies, tool inputs or their output
 - code, file contents, file or folder names, paths, project or repository names, branch names
 - session IDs, titles or anything you typed
-- error messages
+- error messages: a failure is sent only as its kind
+- the names of skills, plugins, MCP servers or their tools
 - your name, email, account IDs for Claude, OpenAI, GitHub or any other service
 - your computer's name or user name
 - your IP address
@@ -73,6 +78,7 @@ Each device in a multi-device hub follows its own environment and sends its own 
 ## Files
 
 The install ID is stored in `telemetry.json` in Cogpit's data folder. It also
-remembers which sessions you used from Cogpit, so their tokens can be counted. That list never
-leaves your computer, and entries older than 45 days are dropped. Deleting the file gives the
+remembers which sessions you used from Cogpit and when their last reported turn started, so
+their tokens and turns are counted once. That list never leaves your computer, and entries
+older than 45 days are dropped. Deleting the file gives the
 install a new ID.

@@ -8,6 +8,7 @@ import { closeCommandDispatcher } from "./lib/durableSend"
 import { beginServerStart, installState } from "./lib/installState"
 import { readUsageCostSummary } from "./lib/usageCost/service"
 import { startTelemetry, stopTelemetry } from "./telemetry"
+import { readAgentStatus, readSessionTurns } from "./telemetry/sources"
 import type { TelemetryDistribution } from "./telemetry/context"
 import { closeOrchestrationStore } from "./orchestration/storage"
 import {
@@ -201,6 +202,8 @@ export async function createServerComposition(
     development: Boolean(environment.viteDevUrl),
     defaultAgent: getConfig()?.defaultAgent,
     readDailyUsage: (day, sessionIds) => readUsageCostSummary({ sinceDay: day, untilDay: day, timeZone: "UTC", sessionIds }),
+    readSessionTurns,
+    readAgentStatus,
   })
 
   const browserSupport = initBrowserSupport(isSessionActive)

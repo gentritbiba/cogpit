@@ -32,6 +32,48 @@ export interface TelemetryEvents {
     costUsd: number
     costSource: string
   }
+  "turn.completed": {
+    agent: string
+    model?: string
+    effort?: string
+    durationMs?: number
+    inputTokens: number
+    outputTokens: number
+    cacheReadTokens: number
+    cacheWriteTokens: number
+    reasoningTokens: number
+    fastMode: boolean
+    toolCalls: number
+    toolErrors: number
+    linesAdded: number
+    linesRemoved: number
+    subagents: number
+    compaction?: string
+    /** Whether a skill, plugin or MCP server took part; never which one. */
+    skill: boolean
+    plugin: boolean
+    mcp: boolean
+    images: number
+  }
+  "tool.used": {
+    agent: string
+    /** A built-in tool's name, or `mcp` / `other`. */
+    tool: string
+    calls: number
+    errors: number
+  }
+  "agent.status": {
+    agent: string
+    installed: boolean
+    signedIn: boolean | "unknown"
+    version?: string
+  }
+  "agent.error": {
+    agent: string
+    phase: "start" | "turn"
+    reason: string
+    httpStatus?: number
+  }
   "feature.used": {
     feature: string
     client: ClientSurface

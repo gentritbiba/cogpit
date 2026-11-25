@@ -1,5 +1,6 @@
 import type { AgentKind } from "../../shared/session/agent-descriptors"
 import { classifyAgentFailure, type AgentFailureReason } from "../../shared/session/agentFailures"
+import { recordTelemetry } from "../telemetry"
 
 export interface FailedAgentWork {
   sessionId?: string | null
@@ -19,5 +20,12 @@ export function logAgentFailure(phase: "start" | "turn", work: FailedAgentWork):
   const failure = classifyAgentFailure(work.message, work.httpStatus)
   const status = failure.httpStatus === undefined ? "" : ` status=${failure.httpStatus}`
   const firstLine = work.message.split(/\r?\n/, 1)[0].slice(0, 300)
-  console.warn(`[agent] ${phase} failed session=${work.sessionId || "-"} agent=${work.kind} reason=${work.reason ?? failure.reason}${status}: ${firstLine}`)
+  const reason = work.reason ?? failure.reason
+  console.warn(`[agent] ${phase} failed session=${work.sessionId || "-"} agent=${work.kind} reason=${reason}${status}: ${firstLine}`)
+  recordTelemetry("agent.error", {
+    agent: work.kind,
+    phase,
+    reason,
+    ...(failure.httpStatus === undefined ? {} : { httpStatus: failure.httpStatus }),
+  })
 }

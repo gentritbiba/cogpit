@@ -15,6 +15,8 @@ export interface TelemetryState {
    * Kept on this computer.
    */
   sessions: Record<string, number>
+  /** Per session, when the last turn already reported started. */
+  turns: Record<string, number>
 }
 
 const FILE = "telemetry.json"
@@ -26,7 +28,7 @@ export function statePath(dataDir: string): string {
 }
 
 export function initialState(): TelemetryState {
-  return { installId: randomBytes(16).toString("hex"), usageReportedThrough: null, sessions: {} }
+  return { installId: randomBytes(16).toString("hex"), usageReportedThrough: null, sessions: {}, turns: {} }
 }
 
 /** The saved state, or null when there is none or it cannot be read as one. */
@@ -38,19 +40,23 @@ export async function readState(dataDir: string): Promise<TelemetryState | null>
     return null
   }
   if (typeof parsed?.installId !== "string" || !/^[0-9a-f]{32}$/.test(parsed.installId)) return null
-  const sessions: Record<string, number> = {}
-  if (parsed.sessions && typeof parsed.sessions === "object") {
-    for (const [id, seen] of Object.entries(parsed.sessions)) {
-      if (typeof seen === "number" && Number.isFinite(seen)) sessions[id] = seen
-    }
-  }
   return {
     installId: parsed.installId,
     usageReportedThrough: typeof parsed.usageReportedThrough === "string" && /^\d{4}-\d{2}-\d{2}$/.test(parsed.usageReportedThrough)
       ? parsed.usageReportedThrough
       : null,
-    sessions,
+    sessions: timestamps(parsed.sessions),
+    turns: timestamps(parsed.turns),
   }
+}
+
+function timestamps(value: unknown): Record<string, number> {
+  const kept: Record<string, number> = {}
+  if (!value || typeof value !== "object") return kept
+  for (const [id, at] of Object.entries(value)) {
+    if (typeof at === "number" && Number.isFinite(at)) kept[id] = at
+  }
+  return kept
 }
 
 /** Drop sessions too old to report on, keeping the newest when there are too many. */

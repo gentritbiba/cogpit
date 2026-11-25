@@ -3,6 +3,7 @@ import type { IncomingMessage } from "node:http"
 import { describe, expect, it } from "vitest"
 import { publicModelName } from "../../agents/publicModels"
 import { clientSurface, sanitizeProperties, settingToken } from "../../telemetry/events"
+import { builtInToolName } from "../../../shared/session/toolSummary"
 import { routeFeature } from "../../telemetry/features"
 import { daysToReport } from "../../telemetry/usage"
 
@@ -68,11 +69,23 @@ describe("clientSurface", () => {
   })
 })
 
+describe("builtInToolName", () => {
+  it("keeps the names agents ship and hides the ones people give", () => {
+    expect(builtInToolName("Bash")).toBe("Bash")
+    expect(builtInToolName("functions.apply_patch")).toBe("apply_patch")
+    expect(builtInToolName("WebSearch")).toBe("WebSearch")
+    expect(builtInToolName("mcp__acme__deploy")).toBe("mcp")
+    expect(builtInToolName("Read /home/someone/file.txt")).toBe("other")
+  })
+})
+
 describe("routeFeature", () => {
   it("names features by method and path, never by the ids in it", () => {
     expect(routeFeature("POST", "/api/permissions/session-123/respond")).toBe("permission.answer")
     expect(routeFeature("POST", "/api/worktrees/my-branch/create-pr")).toBe("worktree.create_pr")
     expect(routeFeature("POST", "/api/shares")).toBe("share.create")
+    expect(routeFeature("DELETE", "/api/library/items/12")).toBe("library.remove")
+    expect(routeFeature("PUT", "/api/automations/task-1")).toBe("automation.update")
   })
 
   it("ignores reads and unknown paths", () => {

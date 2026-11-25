@@ -1,12 +1,15 @@
 // @vitest-environment node
-import { mkdtemp, readFile, rm, stat } from "node:fs/promises"
+import { mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import type { IncomingMessage } from "node:http"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import type { UsageCostSummary } from "../../../shared/contracts/usageCost"
+import type { Turn } from "../../../shared/session/types"
+import { logAgentFailure } from "../../agents/failureLog"
 import type { AgentRuntime } from "../../agents/runtimeTypes"
 import {
+  __checkTurnsForTest,
   __checkUsageForTest,
   __flushTelemetryForTest,
   recordMessageSent,
@@ -181,5 +184,87 @@ describe("daily usage", () => {
     await __checkUsageForTest()
     expect(readDailyUsage).not.toHaveBeenCalled()
     expect((await savedState()).usageReportedThrough).toBe("2026-11-24")
+  })
+})
+
+function turn(timestamp: string, fields: Partial<Turn> = {}): Turn {
+  return {
+    id: timestamp, userMessage: "secret prompt", contentBlocks: [], thinking: [], assistantText: ["secret reply"],
+    toolCalls: [], subAgentActivity: [], timestamp, durationMs: 5_000, model: "claude-opus-5-5",
+    tokenUsage: { input_tokens: 10, output_tokens: 20, cache_read_input_tokens: 30, cache_creation_input_tokens: 40 },
+    ...fields,
+  }
+}
+
+const at = (offsetMs: number) => new Date(NOW + offsetMs).toISOString()
+
+describe("finished turns", () => {
+  it("reports each turn Cogpit drove once it finishes, with its tools", async () => {
+    let session = { agent: "claude", mtimeMs: 1, running: true, turns: [turn(at(-60_000)), turn(at(1_000), {
+      toolCalls: [
+        { id: "a", name: "Bash", input: { command: "cat /secret" }, result: "secret", isError: true, timestamp: at(1_000) },
+        { id: "b", name: "Edit", input: {}, result: null, isError: false, timestamp: at(1_000), diffLineCounts: { add: 3, del: 1 } },
+        { id: "c", name: "mcp__private__thing", input: {}, result: null, isError: false, timestamp: at(1_000) },
+      ],
+    }), turn(at(2_000))] }
+    const readSessionTurns = vi.fn(async (_id: string, known: number | undefined) => known === session.mtimeMs ? null : session)
+    await start({ readSessionTurns })
+    recordSessionStarted(browserRequest, runtime, { dirName: "d", cwd: "/c" }, { sessionId: "s1", dirName: "d", fileName: "f", filePath: "/p" })
+
+    await __checkTurnsForTest()
+    let events = (await sent()).events.filter((event) => event.event === "turn.completed" || event.event === "tool.used")
+    expect(events.map((event) => event.event)).toEqual(["turn.completed", "tool.used", "tool.used", "tool.used"])
+    expect(events[0]).toMatchObject({ timestamp: at(1_000), properties: { agent: "claude", model: "claude-opus-5-5", durationMs: 5_000, inputTokens: 10, outputTokens: 20, cacheReadTokens: 30, cacheWriteTokens: 40, toolCalls: 3, toolErrors: 1, linesAdded: 3, linesRemoved: 1, mcp: true } })
+    expect(events.slice(1).map((event) => event.properties)).toEqual([
+      expect.objectContaining({ tool: "Bash", calls: 1, errors: 1 }),
+      expect.objectContaining({ tool: "Edit", calls: 1, errors: 0 }),
+      expect.objectContaining({ tool: "mcp", calls: 1, errors: 0 }),
+    ])
+    expect(JSON.stringify(events)).not.toMatch(/secret|private/)
+
+    fetchMock.mockClear()
+    await __checkTurnsForTest()
+    expect(readSessionTurns).toHaveBeenLastCalledWith("s1", 1)
+    expect((await sent()).events.filter((event) => event.event === "turn.completed")).toEqual([])
+
+    session = { ...session, mtimeMs: 2, running: false }
+    await __checkTurnsForTest()
+    events = (await sent()).events.filter((event) => event.event === "turn.completed")
+    expect(events.map((event) => event.timestamp)).toEqual([at(2_000)])
+    await stopTelemetry()
+    expect((await savedState()).turns.s1).toBe(NOW + 2_000)
+  })
+
+  it("does not report turns of a session noted before turns were counted", async () => {
+    const readSessionTurns = vi.fn(async () => ({ agent: "codex", mtimeMs: 1, running: false, turns: [turn(at(-1_000))] }))
+    await start({ readSessionTurns })
+    recordSessionStarted(browserRequest, runtime, { dirName: "d", cwd: "/c" }, { sessionId: "s1", dirName: "d", fileName: "f", filePath: "/p" })
+    await stopTelemetry()
+    const state = await savedState()
+    delete state.turns
+    await writeFile(join(dataDir, "telemetry.json"), JSON.stringify(state))
+
+    await start({ readSessionTurns })
+    await __checkTurnsForTest()
+    expect(readSessionTurns).not.toHaveBeenCalled()
+    expect((await sent()).events.filter((event) => event.event === "turn.completed")).toEqual([])
+  })
+})
+
+describe("agents", () => {
+  it("reports each agent's status", async () => {
+    await start({ readAgentStatus: async () => [{ agent: "codex", installed: true, signedIn: "unknown", version: "0.200.1" }] })
+    await __checkTurnsForTest()
+    const status = (await sent()).events.find((event) => event.event === "agent.status")
+    expect(status?.properties).toMatchObject({ agent: "codex", installed: true, signedIn: "unknown", version: "0.200.1" })
+  })
+
+  it("records a failed turn by its category, never its message", async () => {
+    await start()
+    vi.spyOn(console, "warn").mockImplementation(() => {})
+    logAgentFailure("turn", { sessionId: "s1", kind: "codex", message: "secret: 401 Unauthorized", httpStatus: 401 })
+    const failure = (await sent()).events.find((event) => event.event === "agent.error")
+    expect(failure?.properties).toMatchObject({ agent: "codex", phase: "turn", reason: "not_signed_in", httpStatus: 401 })
+    expect(JSON.stringify(failure)).not.toMatch(/secret/)
   })
 })

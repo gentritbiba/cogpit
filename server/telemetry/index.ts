@@ -12,6 +12,7 @@ import {
   type TelemetryProperties,
 } from "./events"
 import { initialState, pruneSessions, readState, writeState, type TelemetryState } from "./state"
+import { finishedTurns, type ReadSessionTurns } from "./turns"
 import { daysToReport, usageEvents, utcDay, type ReadDailyUsage } from "./usage"
 
 /**
@@ -27,8 +28,11 @@ export const DEFAULT_TELEMETRY_ENDPOINT = "https://telemetry.cogpit.dev/v1/batch
 const DAY_MS = 24 * 60 * 60 * 1000
 const FLUSH_INTERVAL_MS = 10_000
 const USAGE_CHECK_INTERVAL_MS = 60 * 60 * 1000
-/** The first usage check waits until start-up work has settled. */
-const FIRST_USAGE_CHECK_MS = 2 * 60 * 1000
+const TURN_CHECK_INTERVAL_MS = 5 * 60 * 1000
+/** Turns are looked for in sessions Cogpit drove this recently. */
+const TURN_SESSION_WINDOW_MS = 2 * DAY_MS
+/** The first checks wait until start-up work has settled. */
+const FIRST_CHECK_MS = 2 * 60 * 1000
 const SHUTDOWN_FLUSH_MS = 1_000
 const STATE_SAVE_DELAY_MS = 30_000
 
@@ -43,6 +47,8 @@ export interface TelemetryOptions {
   defaultAgent?: string
   /** Reads one UTC day of usage for the given sessions; passed in so this module stays a leaf. */
   readDailyUsage: ReadDailyUsage
+  readSessionTurns?: ReadSessionTurns
+  readAgentStatus?: () => Promise<TelemetryEvents["agent.status"][]>
   env?: NodeJS.ProcessEnv
   fetch?: typeof fetch
   now?: () => number
@@ -57,6 +63,9 @@ interface Running {
   saveTimer: ReturnType<typeof setTimeout> | null
   saving: Promise<void>
   checkingUsage: Promise<void> | null
+  checkingTurns: Promise<void> | null
+  /** Transcript times already read, so an unchanged session is not parsed again. */
+  transcriptTimes: Map<string, number>
   now: () => number
 }
 
@@ -65,7 +74,9 @@ let running: Running | null = null
 function save(run: Running): Promise<void> {
   if (run.saveTimer) clearTimeout(run.saveTimer)
   run.saveTimer = null
-  run.state = { ...run.state, sessions: pruneSessions(run.state.sessions, run.now()) }
+  const sessions = pruneSessions(run.state.sessions, run.now())
+  const turns = Object.fromEntries(Object.entries(run.state.turns).filter(([id]) => Object.hasOwn(sessions, id)))
+  run.state = { ...run.state, sessions, turns }
   const state = run.state
   run.saving = run.saving.then(() => writeState(run.options.dataDir, state)).catch((error: unknown) => {
     console.warn(`[telemetry] Could not save its state: ${error instanceof Error ? error.message : String(error)}`)
@@ -95,6 +106,12 @@ function heartbeat(run: Running, reason: "start" | "daily"): void {
   } satisfies TelemetryEvents["app.heartbeat"])
 }
 
+async function reportAgentStatus(run: Running): Promise<void> {
+  const statuses = await run.options.readAgentStatus?.().catch(() => [])
+  if (running !== run) return
+  for (const status of statuses ?? []) enqueue(run, "agent.status", status)
+}
+
 async function reportUsage(run: Running): Promise<void> {
   const now = run.now()
   if (!run.state.usageReportedThrough) {
@@ -118,6 +135,49 @@ async function reportUsage(run: Running): Promise<void> {
   await save(run)
 }
 
+async function reportTurns(run: Running): Promise<void> {
+  const read = run.options.readSessionTurns
+  if (!read) return
+  const now = run.now()
+  let changed = false
+  for (const [sessionId, seen] of Object.entries(run.state.sessions)) {
+    if (now - seen > TURN_SESSION_WINDOW_MS) continue
+    const reportedThrough = run.state.turns[sessionId]
+    if (reportedThrough === undefined) {
+      // Noted before turns were counted: only turns from now on are reported.
+      run.state.turns[sessionId] = now
+      changed = true
+      continue
+    }
+    const session = await read(sessionId, run.transcriptTimes.get(sessionId))
+    if (running !== run) return
+    if (!session) continue
+    run.transcriptTimes.set(sessionId, session.mtimeMs)
+    for (const finished of finishedTurns(session, reportedThrough)) {
+      run.state.turns[sessionId] = Math.max(run.state.turns[sessionId] ?? 0, finished.startedAt)
+      changed = true
+      // The endpoint refuses a batch holding anything this old.
+      if (now - finished.startedAt > TURN_SESSION_WINDOW_MS + DAY_MS) continue
+      const timestamp = new Date(finished.startedAt)
+      enqueue(run, "turn.completed", finished.turn, timestamp)
+      for (const tool of finished.tools) enqueue(run, "tool.used", tool, timestamp)
+    }
+  }
+  for (const sessionId of run.transcriptTimes.keys()) {
+    if (!Object.hasOwn(run.state.sessions, sessionId)) run.transcriptTimes.delete(sessionId)
+  }
+  if (changed) saveSoon(run)
+}
+
+function checkTurns(run: Running): Promise<void> {
+  run.checkingTurns ??= reportTurns(run)
+    .catch((error: unknown) => {
+      console.warn(`[telemetry] Could not read turns: ${error instanceof Error ? error.message : String(error)}`)
+    })
+    .finally(() => { run.checkingTurns = null })
+  return run.checkingTurns
+}
+
 function checkUsage(run: Running): Promise<void> {
   run.checkingUsage ??= reportUsage(run)
     .catch((error: unknown) => {
@@ -134,9 +194,16 @@ function schedule(run: Running): void {
     run.timers.push(timer)
   }
   every(FLUSH_INTERVAL_MS, () => { void run.delivery.flushWhenDue() })
-  every(DAY_MS, () => heartbeat(run, "daily"))
+  every(DAY_MS, () => {
+    heartbeat(run, "daily")
+    void reportAgentStatus(run)
+  })
   every(USAGE_CHECK_INTERVAL_MS, () => { void checkUsage(run) })
-  const first = setTimeout(() => { void checkUsage(run) }, FIRST_USAGE_CHECK_MS)
+  every(TURN_CHECK_INTERVAL_MS, () => { void checkTurns(run) })
+  const first = setTimeout(() => {
+    void checkUsage(run)
+    void reportAgentStatus(run)
+  }, FIRST_CHECK_MS)
   first.unref?.()
   run.timers.push(first)
 }
@@ -163,6 +230,8 @@ export async function startTelemetry(options: TelemetryOptions): Promise<void> {
     saveTimer: null,
     saving: Promise.resolve(),
     checkingUsage: null,
+    checkingTurns: null,
+    transcriptTimes: new Map(),
     now,
   }
   running = run
@@ -186,7 +255,13 @@ export async function stopTelemetry(): Promise<void> {
 
 /** Remember a session Cogpit drives, so its usage can be counted. */
 function noteSession(run: Running, sessionId: string): void {
-  run.state.sessions[sessionId] = run.now()
+  const now = run.now()
+  const seen = run.state.sessions[sessionId]
+  if (seen === undefined || now - seen > TURN_SESSION_WINDOW_MS || run.state.turns[sessionId] === undefined) {
+    // The turn this starts begins after now; a second back allows for clock rounding.
+    run.state.turns[sessionId] = now - 1_000
+  }
+  run.state.sessions[sessionId] = now
   saveSoon(run)
 }
 
@@ -230,6 +305,13 @@ export async function __checkUsageForTest(): Promise<void> {
   if (!run) return
   await checkUsage(run)
   await save(run)
+}
+
+/** For tests: look for finished turns and agent status now. */
+export async function __checkTurnsForTest(): Promise<void> {
+  const run = running
+  if (!run) return
+  await Promise.all([checkTurns(run), reportAgentStatus(run)])
 }
 
 /** For tests: send what is queued now. */

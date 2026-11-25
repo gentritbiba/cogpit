@@ -690,6 +690,19 @@ export function getToolPresentation(tc: SummarizableToolCall): ToolPresentation 
   }
 }
 
+/** Tools the agents ship that have no label of their own here. */
+const UNLABELLED_BUILT_IN_TOOLS = new Set(["WebSearch", "web_search", "web__run", "web.run", "exec"])
+
+/**
+ * A tool's name when the agent itself provides it; `mcp` for an MCP server's
+ * tool and `other` for anything else, since those names are somebody's own.
+ */
+export function builtInToolName(name: string): string {
+  if (name.startsWith("mcp__")) return "mcp"
+  const normalized = normalizeFunctionName(name)
+  return Object.hasOwn(TOOL_LABELS, normalized) || UNLABELLED_BUILT_IN_TOOLS.has(normalized) ? normalized : "other"
+}
+
 export function getToolSummary(tc: SummarizableToolCall): string {
   return getToolPresentation(tc).summary
 }
