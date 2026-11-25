@@ -204,6 +204,53 @@ describe("useDeviceSwipe", () => {
     expect(onMove.mock.calls.at(-1)![0]).toBeLessThan(-350)
   })
 
+  it("keeps reading a momentum tail as momentum when one frame arrives early and the next late", () => {
+    const onStart = vi.fn()
+    const { getByTestId } = render(<Surface onStart={onStart} onMove={vi.fn()} onRelease={vi.fn()} />)
+    const text = getByTestId("text")
+    wheel(text, fingers(10, 24))
+    const tail: number[] = []
+    for (let n = 1, d = 24; d > 0; n++) tail.push(d = Math.round(24 * 0.98 ** n))
+    tail.forEach((deltaX, i) => {
+      text.dispatchEvent(new WheelEvent("wheel", { deltaX, bubbles: true }))
+      vi.advanceTimersByTime(i === 12 ? 6 : i === 13 ? 10 : 8)
+    })
+    expect(onStart).toHaveBeenCalledOnce()
+  })
+
+  it("starts a very slow second swipe once momentum has died out, with or without a pause", () => {
+    for (const pause of [150, 0]) {
+      const onStart = vi.fn()
+      const onMove = vi.fn()
+      const { getByTestId, unmount } = render(<Surface onStart={onStart} onMove={onMove} onRelease={vi.fn()} />)
+      const text = getByTestId("text")
+      wheel(text, fingers(10, 24))
+      wheel(text, momentum(24, 60).filter((delta) => delta > 0))
+      vi.advanceTimersByTime(pause)
+      wheel(text, fingers(200, 2))
+      expect(onStart).toHaveBeenCalledTimes(2)
+      expect(onMove.mock.calls.at(-1)![0]).toBeLessThan(-380)
+      unmount()
+    }
+  })
+
+  it("counts the first frame of a flick thrown a second after the last one", () => {
+    const onRelease = vi.fn()
+    const { getByTestId } = render(<Surface onMove={vi.fn()} onRelease={onRelease} />)
+    const text = getByTestId("text")
+    const flick = () => {
+      for (const deltaX of [20, 19, 18, 17, 16]) {
+        text.dispatchEvent(new WheelEvent("wheel", { deltaX, bubbles: true }))
+        vi.advanceTimersByTime(16)
+      }
+    }
+    flick()
+    vi.advanceTimersByTime(1000)
+    flick()
+    expect(onRelease).toHaveBeenCalledTimes(2)
+    expect(onRelease.mock.calls[1][0]).toBe(-90)
+  })
+
   it("starts the next swipe after a pause, wherever the last one was", () => {
     const onStart = vi.fn()
     const onRelease = vi.fn()

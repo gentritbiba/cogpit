@@ -214,6 +214,20 @@ describe("DeviceStage", () => {
     await waitFor(() => expect(window.location.pathname).toBe("/d/dev_1/"))
   })
 
+  it("switches one machine per swipe, however long its momentum runs", async () => {
+    reduceMotion(false)
+    playAnimations()
+    const three = [...machines, { id: "dev_2", name: "Garage" }]
+    const panes = [...bothPanes, { key: "dev_2", deviceId: "dev_2" }]
+    render(<DeviceStage panes={panes} activeDeviceId="local" machines={three} swipeEnabled renderPane={() => <PaneContent />} />)
+    const push = vi.spyOn(window.history, "pushState")
+    const tail: number[] = []
+    for (let n = 1, d = 24; d > 0; n++) tail.push(d = Math.round(24 * 0.98 ** n))
+    await swipe([...Array.from({ length: 10 }, () => 24), ...tail])
+    await new Promise((resolve) => setTimeout(resolve, 600))
+    expect(push.mock.calls.map((call) => call[2])).toEqual(["/d/dev_1/"])
+  })
+
   it("springs a short pull back without switching, and covers the next machine again", async () => {
     reduceMotion(false)
     const played = playAnimations()

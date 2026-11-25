@@ -35,13 +35,15 @@ const MOMENTUM_DECAY = 0.95
 const COMPARABLE_GAP_MS = 34
 /** Momentum never pauses this long: what comes after is fingers. */
 const MOMENTUM_GAP_MS = 300
+/** Momentum this slow (px a frame) has run out: after a pause, what comes next is fingers. */
+const SPENT_FRAME = 2
 /**
- * Momentum never grows back past the least it has moved in a frame. Two
- * frames in a row clearly above that floor are fingers on the trackpad again.
+ * Momentum never moves more than the least it has moved in a frame again.
+ * This many frames in a row above that floor are fingers on the trackpad.
  */
-const RENEWED_FRAMES = 2
-const RENEWED_MARGIN = 2
-const RENEWED_RATIO = 1.25
+const RENEWED_FRAMES = 3
+/** A gesture's first event after a pause counts this much at most: it may be momentum a busy page merged. */
+const FIRST_EVENT_MAX = 40
 /** Velocity is measured over the latest movement this long. */
 const VELOCITY_WINDOW_MS = 50
 /** Where a release is headed: on at its velocity for this long. */
@@ -80,11 +82,11 @@ type Phase = "idle" | "deciding" | "swiping" | "coasting" | "ignored"
  * nothing scrolls sideways moves the machine on screen with the fingers, and
  * the release decides where it lands. The browser does not say when fingers
  * leave a trackpad, so a release is the fingers going still or the momentum
- * that follows a lift. Momentum only ever slows down: growing past its
- * slowest frame, holding still longer than rounding explains, or turning
- * around is fingers back on the trackpad, and starts the next swipe at once.
- * Movement is compared per display frame, because a busy page merges several
- * frames into one larger event.
+ * that follows a lift. Momentum only ever slows down: moving more than its
+ * slowest frame again, holding still longer than rounding explains, or
+ * turning around is fingers back on the trackpad, and starts the next swipe
+ * at once. Movement is compared per display frame, because a busy page
+ * merges several frames into one larger event.
  */
 export function useDeviceSwipe(enabled: boolean, handlers: SwipeHandlers): void {
   const latest = useRef(handlers)
@@ -104,9 +106,9 @@ export function useDeviceSwipe(enabled: boolean, handlers: SwipeHandlers): void 
     let lastFrame = 0
     let slowing = 0
     let slowingFrom = 0
-    /** While coasting: the least momentum has moved in a frame, and the frames since that did not shrink it. */
+    /** While coasting: the least momentum has moved in a frame, and the frames since that did not lower it. */
     let floor = 0
-    let renewed = 0
+    let above = 0
     let stalled = 0
     let samples: { time: number; x: number }[] = []
     let releaseTimer: ReturnType<typeof setTimeout> | null = null
@@ -124,7 +126,7 @@ export function useDeviceSwipe(enabled: boolean, handlers: SwipeHandlers): void 
       phase = "coasting"
       momentum = onMomentum
       floor = lastFrame
-      renewed = 0
+      above = 0
       stalled = 0
       // Fingers that went still are not moving; momentum carries the speed they lifted at.
       const speed = onMomentum ? velocity() : 0
@@ -145,17 +147,17 @@ export function useDeviceSwipe(enabled: boolean, handlers: SwipeHandlers): void 
      */
     const fingersAgain = (x: number, frame: number | null, gap: number) => {
       if (x !== 0 && lastX !== 0 && Math.sign(x) !== Math.sign(lastX)) return true
-      if (frame === null) return gap > MOMENTUM_GAP_MS
+      if (gap > MOMENTUM_GAP_MS || (gap > RELEASE_AFTER_MS && floor <= SPENT_FRAME)) return true
+      if (frame === null) return false
       if (frame < floor) {
         floor = frame
-        renewed = 0
+        above = 0
         stalled = 0
         return false
       }
-      if (frame >= floor + RENEWED_MARGIN && frame >= floor * RENEWED_RATIO) return ++renewed >= RENEWED_FRAMES
-      renewed = 0
+      above = frame > floor + 0.5 ? above + 1 : 0
       // Rounding can hold momentum at one size for about 1 / (size x 0.5%) frames, never longer.
-      return ++stalled > 200 / Math.max(floor, 1) + MOMENTUM_EVENTS
+      return above >= RENEWED_FRAMES || ++stalled > 200 / Math.max(floor, 1) + MOMENTUM_EVENTS
     }
 
     /** Whether this event starts a new gesture rather than continuing the last. */
@@ -185,17 +187,14 @@ export function useDeviceSwipe(enabled: boolean, handlers: SwipeHandlers): void 
       const comparable = gap <= COMPARABLE_GAP_MS
       if (comparable) gaps = [...gaps.slice(-7), Math.max(gap, 1)]
       // A frame's worth of movement: an event a busy page merged from two frames moved two frames' worth.
-      // Whole frames only, so the jitter of ordinary events does not read as speeding up or slowing down.
-      const frame = comparable ? size / Math.max(1, Math.floor(gap / Math.min(...gaps) + 0.35)) : null
-      // After a long pause, more of momentum's way may be frames a busy page merged: it starts the next gesture but moves nothing.
-      const merged = phase === "coasting" && momentum && frame === null && Math.sign(x) === Math.sign(lastX)
+      // Whole frames of the usual (median) gap, so the jitter of single events is not read as a speed change.
+      const usual = [...gaps].sort((a, b) => a - b)[gaps.length >> 1]
+      const frame = comparable ? size / Math.max(1, Math.floor(gap / usual + 0.35)) : null
+      const afterMomentum = phase === "coasting" && momentum && frame === null
       const fresh = starts(x, frame, gap)
       lastX = x
       if (fresh) begin(event)
-      if (fresh && merged) {
-        lastFrame = size
-        return
-      }
+      const scale = fresh && afterMomentum && size > FIRST_EVENT_MAX ? FIRST_EVENT_MAX / size : 1
       // The first event of a gesture counts as one frame.
       const thisFrame = frame ?? size
       if (!fresh) {
@@ -207,8 +206,8 @@ export function useDeviceSwipe(enabled: boolean, handlers: SwipeHandlers): void 
       lastFrame = thisFrame
       if (phase === "coasting" || phase === "ignored") return
 
-      moved = [moved[0] + x, moved[1] + y]
-      samples.push({ time: event.timeStamp, x })
+      moved = [moved[0] + x * scale, moved[1] + y * scale]
+      samples.push({ time: event.timeStamp, x: x * scale })
       while (samples.length > 2 && event.timeStamp - samples[0].time > VELOCITY_WINDOW_MS) samples.shift()
 
       if (phase === "deciding") {
