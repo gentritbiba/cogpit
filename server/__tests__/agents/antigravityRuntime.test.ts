@@ -9,6 +9,7 @@ import { antigravityProfile, antigravityToolUse, antigravityTurnSettings } from 
 import type { AgentRuntime } from "../../agents/runtimeTypes"
 import { descriptorFor } from "../../../shared/session/agent-descriptors"
 import { formatFor, formatForText } from "../../../shared/session/agents"
+import { instanceSessionId } from "../../../shared/session/instances"
 
 const fixture = resolve("server/__tests__/fixtures/antigravity-agent.mjs")
 const descriptor = descriptorFor("antigravity")
@@ -205,6 +206,7 @@ describe("Antigravity descriptor", () => {
     expect(descriptor.resume.command("6f9619ff-8b86-d011-b42d-00cf4fc964ff", "/work/app")).toBe("cd '/work/app' && agy --conversation 6f9619ff-8b86-d011-b42d-00cf4fc964ff")
     expect(descriptor.launchArgs.permissions({ mode: "bypassPermissions" })).toEqual(["--dangerously-skip-permissions"])
     expect(descriptor.launchArgs.permissions({ mode: "acceptEdits" })).toEqual(["--mode", "accept-edits"])
+    expect(descriptor.resume.command(instanceSessionId("work", "6f9619ff-8b86-d011-b42d-00cf4fc964ff"), "/work/app")).toBe("Resume this session in Cogpit")
     expect(descriptor.cli.process.sessionIdFromCommand("agy --conversation 6f9619ff-8b86-d011-b42d-00cf4fc964ff")).toBe("6f9619ff-8b86-d011-b42d-00cf4fc964ff")
     expect(descriptor.cli.install?.command("linux")).toBe("curl -fsSL https://antigravity.google/cli/install.sh | bash")
     expect(descriptor.cli.signIn?.args).toEqual(["acp", "--login"])

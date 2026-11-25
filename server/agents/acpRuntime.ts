@@ -62,6 +62,8 @@ export interface AcpToolCallState {
   rawOutput?: unknown
   content?: acp.ToolCallContent[] | null
   locations?: acp.ToolCallLocation[] | null
+  /** The agent announced the call; a progress update alone never becomes a tool card. */
+  announced?: boolean
   written?: boolean
 }
 
@@ -107,7 +109,7 @@ export function createAcpRuntime(profile: AcpProfile): AgentRuntime {
   function finishPrompt(sessionId: string, session: LiveSession, result: string, isError: boolean, usage?: acp.Usage | null): void {
     if (sessions.get(sessionId) !== session || session.terminalWritten) return
     session.terminalWritten = true
-    for (const tool of session.tools.values()) writeTool(sessionId, session, tool)
+    for (const tool of session.tools.values()) if (tool.announced) writeTool(sessionId, session, tool)
     append(sessionId, { type: "assistant", message: { role: "assistant", content: [], stop_reason: "end_turn", ...usage ? { usage: claudeUsage(usage) } : {} } })
     append(sessionId, { type: "result", subtype: isError ? "error_during_execution" : "success", result })
   }
@@ -150,7 +152,8 @@ export function createAcpRuntime(profile: AcpProfile): AgentRuntime {
     session.tools.set(update.toolCallId, tool)
     if (update.sessionUpdate === "tool_call_update") publishAgentProgress(id, update.toolCallId, update.title ?? update.status ?? "Working")
     const done = update.status === "completed" || update.status === "failed"
-    if (done || !profile.deferToolCalls || tool.rawInput !== undefined) writeTool(id, session, tool)
+    if (update.sessionUpdate === "tool_call") tool.announced = true
+    if (tool.announced && (!profile.deferToolCalls || done || tool.rawInput !== undefined)) writeTool(id, session, tool)
     if (done) {
       session.tools.delete(update.toolCallId)
       append(id, { type: "user", message: { role: "user", content: [{ type: "tool_result", tool_use_id: update.toolCallId, content: profile.toolResult?.(tool) ?? toolResultText(tool), is_error: update.status === "failed" }] } })

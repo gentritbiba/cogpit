@@ -1126,7 +1126,11 @@ const antigravity: AgentDescriptor = {
   ...acp, kind: "antigravity", displayName: "Antigravity", binName: "agy",
   dirName: base64DirNameCodec("agy__"),
   resume: {
-    command: (sessionId, cwd) => cwd ? `cd ${shellQuote(cwd)} && agy --conversation ${sessionId}` : `agy --conversation ${sessionId}`,
+    command: (sessionId, cwd) => {
+      // An account instance's sign-in lives in its own home, which a plain terminal does not use.
+      if (splitInstanceSessionId(sessionId).instanceId !== "default") return "Resume this session in Cogpit"
+      return cwd ? `cd ${shellQuote(cwd)} && agy --conversation ${sessionId}` : `agy --conversation ${sessionId}`
+    },
     args: (sessionId) => ["--conversation", sessionId],
   },
   launchArgs: {

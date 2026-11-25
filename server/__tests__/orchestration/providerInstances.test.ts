@@ -155,6 +155,8 @@ describe("provider instances and ACP", () => {
       expect(account.runtime.activity(a.sessionId).running).toBe(false)
       await until(() => events.some((event) => event.type === "agent_progress"))
       expect(events).toContainEqual({ type: "agent_progress", toolUseId: "native-tool-42", summary: "Fixture progress" })
+      // Progress for a call the agent never announced is not a tool card.
+      expect(await readFile(a.filePath, "utf8")).not.toContain('"type":"tool_use"')
       expect((await account.runtime.listModels())?.map((option) => option.value)).toContain("fixture-alt")
       await expect(account.runtime.send(a.sessionId, { message: "rejected", model: "unknown-model" })).rejects.toMatchObject({ status: 400 })
       await expect(account.runtime.send(a.sessionId, { message: "rejected", effort: "high" })).rejects.toMatchObject({ status: 400 })
