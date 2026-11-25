@@ -18,6 +18,7 @@ app.onRequest("session/prompt", async ({ params, client }) => {
   const text = params.prompt.filter((value) => value.type === "text").map((value) => value.text).join("")
   if (text === "wait") return new Promise((resolve) => cancellations.set(params.sessionId, resolve))
   if (text === "crash") process.exit(12)
+  if (text === "tool") await client.notify("session/update", { sessionId: params.sessionId, update: { sessionUpdate: "tool_call", toolCallId: "native-tool-7", title: "Fixture tool", status: "pending" } })
   if (text === "progress") await client.notify("session/update", { sessionId: params.sessionId, update: { sessionUpdate: "tool_call_update", toolCallId: "native-tool-42", status: "in_progress", title: "Fixture progress" } })
   let output = `Echo: ${text}. Home: ${process.env.HOME}`
   if (text === "permission") {

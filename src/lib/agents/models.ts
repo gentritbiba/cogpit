@@ -74,6 +74,7 @@ const COPILOT_MODELS: readonly ModelOption[] = [
 
 const FALLBACK_MODELS: Record<AgentKind, readonly ModelOption[]> = {
   acp: [{ value: "", label: "Provider default" }],
+  antigravity: [{ value: "", label: "Default", supportsEffort: false }],
   claude: CLAUDE_MODELS,
   codex: CODEX_MODELS,
   copilot: COPILOT_MODELS,

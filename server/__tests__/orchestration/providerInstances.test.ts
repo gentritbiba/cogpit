@@ -2,7 +2,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { readFile, writeFile } from "node:fs/promises"
 import { resolve, join } from "node:path"
-import { createProviderInstance } from "../../agents/instanceConfigurations"
+import { createProviderInstance, instanceAuthEnvironment } from "../../agents/instanceConfigurations"
 import { createInstanceRuntime, providerInstanceEnvironment } from "../../agents/instanceRuntime"
 import { createInstanceStore } from "../../agents/instanceStores"
 import { descriptorFor } from "../../../shared/session/agent-descriptors"
@@ -40,6 +40,14 @@ describe("provider instance environment", () => {
     const { configuration } = await instance("Memory")
     vi.stubEnv("COGPIT_MEMORY_DIR", "/data/memory")
     expect(providerInstanceEnvironment(configuration, process.env.COGPIT_ORCHESTRATION_ROOT!).COGPIT_MEMORY_DIR).toBe("/data/memory")
+  })
+
+  it("keeps an Antigravity account's sign-in in its own home, for its sessions and its sign-in alike", async () => {
+    const configuration = await createProviderInstance({ agent: "antigravity", label: "Work Google" })
+    expect(providerInstanceEnvironment(configuration, process.env.COGPIT_ORCHESTRATION_ROOT!).SSH_CONNECTION).toBe("127.0.0.1 0 127.0.0.1 0")
+    expect(instanceAuthEnvironment(configuration)).toMatchObject({ SSH_CONNECTION: "127.0.0.1 0 127.0.0.1 0", COGPIT_ANTIGRAVITY_HOME: configuration.homeDir })
+    const { configuration: other } = await instance("Plain ACP")
+    expect(providerInstanceEnvironment(other, process.env.COGPIT_ORCHESTRATION_ROOT!).SSH_CONNECTION).toBeUndefined()
   })
 })
 
@@ -147,6 +155,8 @@ describe("provider instances and ACP", () => {
       expect(account.runtime.activity(a.sessionId).running).toBe(false)
       await until(() => events.some((event) => event.type === "agent_progress"))
       expect(events).toContainEqual({ type: "agent_progress", toolUseId: "native-tool-42", summary: "Fixture progress" })
+      // Progress for a call the agent never announced is not a tool card.
+      expect(await readFile(a.filePath, "utf8")).not.toContain('"type":"tool_use"')
       expect((await account.runtime.listModels())?.map((option) => option.value)).toContain("fixture-alt")
       await expect(account.runtime.send(a.sessionId, { message: "rejected", model: "unknown-model" })).rejects.toMatchObject({ status: 400 })
       await expect(account.runtime.send(a.sessionId, { message: "rejected", effort: "high" })).rejects.toMatchObject({ status: 400 })
@@ -198,6 +208,9 @@ describe("provider instances and ACP", () => {
     expect(account.runtime.activity(started.sessionId).running).toBe(false)
     expect(account.runtime.listPendingApprovals(started.sessionId)).toEqual([])
     expect(await readFile(started.filePath, "utf8")).toContain("native-allow-42")
+    // A tool call the agent sends without input is recorded as soon as it is announced.
+    await (await account.runtime.send(started.sessionId, { message: "tool" })).completion
+    expect(await readFile(started.filePath, "utf8")).toContain('"type":"tool_use","id":"native-tool-7","name":"Fixture tool","input":{}')
     const waiting = await account.runtime.send(started.sessionId, { message: "wait" })
     await until(() => account.runtime.activity(started.sessionId).running)
     expect((await account.runtime.send(started.sessionId, { message: "busy" })).delivery).toBe("busy")

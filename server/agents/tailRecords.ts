@@ -210,6 +210,7 @@ const copilotTail: AgentTailFormat = {
 
 const TAIL_FORMATS: Readonly<Record<AgentKind, AgentTailFormat>> = Object.freeze({
   acp: claudeTail,
+  antigravity: claudeTail,
   claude: claudeTail,
   codex: codexTail,
   copilot: copilotTail,

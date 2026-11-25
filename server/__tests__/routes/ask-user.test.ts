@@ -53,6 +53,7 @@ function registryOf(
 ): QuestionRuntimes {
   const table: Record<AgentKind, FakeRuntime> = {
     acp: runtimes.acp ?? fakeRuntime("acp"),
+    antigravity: runtimes.antigravity ?? fakeRuntime("antigravity"),
     claude: runtimes.claude ?? fakeRuntime("claude"),
     codex: runtimes.codex ?? fakeRuntime("codex"),
     copilot: runtimes.copilot ?? fakeRuntime("copilot"),

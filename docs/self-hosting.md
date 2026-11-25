@@ -10,13 +10,14 @@ from [Releases](https://github.com/gentritbiba/cogpit/releases) and open it.
 
 ## What you need first
 
-Cogpit drives the Claude Code, Codex, and GitHub Copilot CLIs. It does not replace them and
+Cogpit drives the Claude Code, Codex, GitHub Copilot and Google Antigravity CLIs. It does not replace them and
 it has no models of its own.
 
 - At least one supported CLI installed and logged in on the machine that will run Cogpit:
   [Claude Code](https://docs.anthropic.com/en/docs/claude-code),
-  [Codex](https://github.com/openai/codex), or
-  [GitHub Copilot CLI](https://docs.github.com/en/copilot/how-tos/copilot-cli/set-up-copilot-cli/install-copilot-cli).
+  [Codex](https://github.com/openai/codex),
+  [GitHub Copilot CLI](https://docs.github.com/en/copilot/how-tos/copilot-cli/set-up-copilot-cli/install-copilot-cli), or
+  [Google Antigravity CLI](https://antigravity.google/docs/cli/install).
 - [Bun](https://bun.sh) and the [Rust toolchain](https://rustup.rs) if you are running from source.
 - No API keys. Cogpit uses whatever login those CLIs already have.
 

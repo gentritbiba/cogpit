@@ -220,7 +220,7 @@ Agents launched outside Cogpit, legacy `exec` fallbacks, and other non-SDK integ
 
 ## Agent Skill
 
-Cogpit ships one skill, `cogpit`, and copies it into each agent CLI's global skills directory (`~/.claude/skills`, `~/.codex/skills`, `~/.copilot/skills`) **automatically on every launch**. Sessions Cogpit starts, one-shot runs and agents started outside Cogpit all read that copy. Its `SKILL.md` is a short index; the browser guide is `references/browser.md`, with advanced procedures in `references/browser-advanced.md`, and agents load each only when needed.
+Cogpit ships one skill, `cogpit`, and copies it into each agent CLI's global skills directory (`~/.claude/skills`, `~/.codex/skills`, `~/.copilot/skills`, `~/.gemini/config/skills`) **automatically on every launch**. Sessions Cogpit starts, one-shot runs and agents started outside Cogpit all read that copy. Its `SKILL.md` is a short index; the browser guide is `references/browser.md`, with advanced procedures in `references/browser-advanced.md`, and agents load each only when needed.
 
 The refresh writes into every existing agent config root and is idempotent: an unchanged file is left alone, and one CLI failing does not stop the others. Custom configured homes are respected, including isolated provider accounts when their worker starts; when the Claude home an SDK session inherits (`CLAUDE_CONFIG_DIR`, else `~/.claude`) differs from the configured one, both get the skill. Unrelated skills and files are left alone; linked source files are updated without replacing their symlinks. No network download is needed: the Markdown is embedded in the Electron, npm and headless server bundles by `sync-cogpit-skill`.
 

@@ -12,6 +12,7 @@ import type { AgentKind } from "../../shared/session/agent-descriptors"
 const seedPrompts: Record<AgentKind, Record<string, unknown>[]> = {
   claude: [{ type: "user", message: { role: "user", content: "Recovery identity seed" } }],
   acp: [{ type: "user", message: { role: "user", content: "Recovery identity seed" } }],
+  antigravity: [{ type: "user", message: { role: "user", content: "Recovery identity seed" } }],
   codex: [],
   copilot: [],
 }

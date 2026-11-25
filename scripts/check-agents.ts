@@ -36,7 +36,7 @@ const budgetFile = join(root, "scripts/agent-vocabulary.json")
 const teamBudgetFile = join(root, TEAM_EDITION_ROOT, "agent-vocabulary.json")
 const teamPrefix = `${TEAM_EDITION_ROOT}/`
 
-const AGENT_WORDS = ["claude", "codex", "copilot"] as const
+const AGENT_WORDS = ["claude", "codex", "copilot", "antigravity"] as const
 
 /**
  * Files allowed to name an agent. These ARE the agent layer: the descriptor

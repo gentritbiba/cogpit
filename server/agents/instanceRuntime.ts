@@ -29,6 +29,7 @@ export function providerInstanceEnvironment(instance: ProviderInstance, dataRoot
   Object.assign(env, { HOME: userRoot, USERPROFILE: userRoot, XDG_CONFIG_HOME: join(userRoot, ".config"), XDG_CACHE_HOME: join(userRoot, ".cache"), XDG_DATA_HOME: join(userRoot, ".local/share"), TMPDIR: join(userRoot, "tmp"), TEMP: join(userRoot, "tmp"), TMP: join(userRoot, "tmp"), COGPIT_AGENT_WORKER: "1", COGPIT_AGENT_INSTANCE_ID: instance.id, COGPIT_WORKER_AGENT: instance.agent, COGPIT_WORKER_DATA_ROOT: join(instance.homeDir, "cogpit"), COGPIT_WORKER_CONFIG_PATH: join(instance.homeDir, "config.json"), COGPIT_ORCHESTRATION_ROOT: dataRoot, ELECTRON_RUN_AS_NODE: "1" })
   if (descriptor.cli.homeEnvVar) env[descriptor.cli.homeEnvVar] = instance.homeDir
   if (descriptor.cli.bundledBySdk) env.CLAUDE_CONFIG_DIR = instance.homeDir
+  Object.assign(env, descriptor.cli.instanceEnv)
   env.COGPIT_BROWSER_HOME = browserHome()
   // The worker's HOME is its own, so it is told where the shared memory store is.
   env[MEMORY_DIR_ENV] = memoryDir()

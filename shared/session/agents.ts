@@ -238,14 +238,23 @@ const claudeFormat: AgentFormat = {
   projectResults: projectClaudeResults,
 }
 
+/**
+ * An ACP agent's transcript: Cogpit writes it in Claude's grammar, under a
+ * header record whose type names the agent.
+ */
+function acpFormat(kind: AgentKind, headerType: string): AgentFormat {
+  return {
+    ...claudeFormat, kind, descriptor: descriptorFor(kind),
+    detectsText: (text) => text.split("\n", 1)[0]?.includes(`"type":"${headerType}"`) ?? false,
+    detectsRecords: (records) => records[0]?.type === headerType,
+    parse: (text, options) => ({ ...parseClaudeSession(text, options), agentKind: kind }),
+    append: (session, text, inPlace) => ({ ...appendClaudeSession(session, text, inPlace), agentKind: kind }),
+  }
+}
+
 const FORMATS: Readonly<Record<AgentKind, AgentFormat>> = Object.freeze({
-  acp: {
-    ...claudeFormat, kind: "acp", descriptor: descriptorFor("acp"),
-    detectsText: (text) => text.split("\n", 1)[0]?.includes('"type":"acp_session"') ?? false,
-    detectsRecords: (records) => records[0]?.type === "acp_session",
-    parse: (text, options) => ({ ...parseClaudeSession(text, options), agentKind: "acp" }),
-    append: (session, text, inPlace) => ({ ...appendClaudeSession(session, text, inPlace), agentKind: "acp" }),
-  },
+  acp: acpFormat("acp", "acp_session"),
+  antigravity: acpFormat("antigravity", "antigravity_session"),
   claude: claudeFormat,
   codex: codexFormat,
   copilot: copilotFormat,

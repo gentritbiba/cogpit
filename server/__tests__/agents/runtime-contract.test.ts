@@ -141,7 +141,7 @@ beforeEach(() => {
 
 describe("runtime registry", () => {
   it("exposes one runtime per agent, in detection order", () => {
-    expect(allRuntimes().map(({ kind }) => kind)).toEqual(["acp", "codex", "copilot", "claude"])
+    expect(allRuntimes().map(({ kind }) => kind)).toEqual(["acp", "codex", "copilot", "antigravity", "claude"])
   })
 
   it("resolves a runtime from a project dirName, with Claude as the terminal arm", () => {
