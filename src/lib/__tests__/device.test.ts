@@ -15,6 +15,8 @@ import {
   __resetIdentityForTest,
   saveLastPath,
   switchDevice,
+  commitDeviceSwitch,
+  setDeviceSwitchTransition,
 } from "@/lib/device"
 
 function setPath(pathname: string) {
@@ -150,6 +152,14 @@ describe("device", () => {
       expect(deviceScopedKey("cogpit:permissions")).toBe("cogpit:permissions::dev_x")
     })
 
+    it("scopes to a named device, whichever one is active", () => {
+      setPath("/d/dev_x/")
+      expect(deviceScopedKey("cogpit:permissions", LOCAL_DEVICE_ID)).toBe("cogpit:permissions")
+      recordDeviceConnectionRevision("dev_y", 3)
+      expect(deviceScopedKey("cogpit:permissions", "dev_y")).toBe("cogpit:permissions::dev_y@3")
+      __resetDeviceRevisionsForTest()
+    })
+
     it("stays byte-identical to the legacy shapes when no identity is set", () => {
       setActiveIdentity(null)
       setPath("/")
@@ -281,6 +291,20 @@ describe("device", () => {
       const pushSpy = vi.spyOn(window.history, "pushState").mockImplementation(() => {})
       switchDevice(LOCAL_DEVICE_ID)
       expect(pushSpy).toHaveBeenCalledWith(null, "", "/")
+    })
+
+    it("hands an explicit switch to the transition DeviceRoot installs, which commits it", () => {
+      const pushSpy = vi.spyOn(window.history, "pushState").mockImplementation(() => {})
+      const transition = vi.fn()
+      setDeviceSwitchTransition(transition)
+
+      switchDevice("dev_x")
+      expect(transition).toHaveBeenCalledWith("dev_x")
+      expect(pushSpy).not.toHaveBeenCalled()
+
+      commitDeviceSwitch("dev_x")
+      expect(pushSpy).toHaveBeenCalledWith(null, "", "/d/dev_x/")
+      setDeviceSwitchTransition(null)
     })
 
     it("restores the saved last path when present", () => {

@@ -4,8 +4,12 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest"
 vi.mock("../../config", () => ({
   getConfig: vi.fn(),
 }))
+vi.mock("../../lib/appearance", () => ({
+  getHostTheme: vi.fn(() => null),
+}))
 
 import { getConfig } from "../../config"
+import { getHostTheme } from "../../lib/appearance"
 import { collectRoutes, createMockReqRes, getRouteHandler } from "../http-fixtures"
 import { registerHelloRoutes, getInstanceId } from "../../routes/hello"
 import { __resetEditionForTest } from "../../edition"
@@ -54,6 +58,17 @@ describe("GET /api/hello", () => {
     expect(body.version.length).toBeGreaterThan(0)
     expect(body.instanceId).toMatch(/^[0-9a-f]{16}$/)
     expect(res._getHeaders()["Content-Type"]).toBe("application/json")
+  })
+
+  it("carries the machine's theme so a hub can show it before opening the machine", () => {
+    const handler = register()
+    mockedGetConfig.mockReturnValueOnce(null)
+    vi.mocked(getHostTheme).mockReturnValueOnce("layered-light")
+    const { req, res, next } = createMockReqRes("GET")
+
+    handler(req, res, next)
+
+    expect(JSON.parse(res._getData()).theme).toBe("layered-light")
   })
 
   it("reports the personal edition before any loadEdition runs", () => {

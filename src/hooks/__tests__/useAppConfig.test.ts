@@ -402,7 +402,7 @@ describe("useAppConfig", () => {
   })
 
   describe("retryConfig edge cases", () => {
-    it("sets configError on network failure during retry", async () => {
+    it("keeps the last good config, without a loading screen, when a later read fails", async () => {
       // First load succeeds
       mockConfigResponse("/home/user/.claude")
 
@@ -428,11 +428,10 @@ describe("useAppConfig", () => {
         result.current.retryConfig()
       })
 
-      await waitFor(() => {
-        expect(result.current.configLoading).toBe(false)
-      })
-      expect(result.current.configError).toBe("Retry failed")
-      expect(result.current.claudeDir).toBeNull()
+      expect(result.current.configLoading).toBe(false)
+      await waitFor(() => expect(mockAuthFetch.mock.calls.filter(([input]) => String(input).includes("/api/config")).length).toBe(2))
+      expect(result.current.configError).toBeNull()
+      expect(result.current.claudeDir).toBe("/home/user/.claude")
     })
 
     it("sets non-Error configError message for non-Error exceptions", async () => {

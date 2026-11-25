@@ -6,7 +6,7 @@ import { useBrowserSessions, type BrowserActionResult } from "@/hooks/useBrowser
 import { useBrowserSocket } from "@/hooks/useBrowserSocket"
 import { useLocalStorage } from "@/hooks/useLocalStorage"
 import { useOpenSession } from "@/contexts/SessionContext"
-import { deviceScopedKey } from "@/lib/device"
+import { useDeviceScopedKey } from "@/contexts/DevicePaneContext"
 import { shallowEqual } from "@/lib/store"
 import { copyToClipboard } from "@/lib/utils"
 import type { WorkspacePanelProps } from "@/plugin-api"
@@ -51,8 +51,8 @@ export function BrowserPanel({ context, active, closePanel, onAnnotate }: Worksp
   onAnnotate?: (item: BrowserContext, image: ComposerAttachment) => string | null
 }) {
   const [frozen, setFrozen] = useState<FrozenFrame | null>(null)
-  const [picked, setSelected] = useLocalStorage(deviceScopedKey(SESSION_KEY), DEFAULT_BROWSER)
-  const [followAgent, setFollowAgent] = useLocalStorage(deviceScopedKey(FOLLOW_KEY), true)
+  const [picked, setSelected] = useLocalStorage(useDeviceScopedKey(SESSION_KEY), DEFAULT_BROWSER)
+  const [followAgent, setFollowAgent] = useLocalStorage(useDeviceScopedKey(FOLLOW_KEY), true)
   const [busy, setBusy] = useState(false)
   const [actionError, setActionError] = useState<string | null>(null)
   const [dismissed, setDismissed] = useState<string | null>(null)

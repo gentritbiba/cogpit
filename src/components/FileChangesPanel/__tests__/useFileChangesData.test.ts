@@ -10,7 +10,7 @@ const api = vi.hoisted(() => ({ fetch: vi.fn(), source: { dirName: "project", wa
 vi.mock("@/lib/auth", () => ({ authFetch: api.fetch }))
 vi.mock("@/contexts/SessionContext", async () => (await import("@/__tests__/sessionContextMock")).withSessionHooks({ useSessionContext: () => ({ sessionSource: api.source }) }))
 vi.mock("@/hooks/useCapability", () => ({ useCapability: () => true }))
-vi.mock("@/lib/device", () => ({ deviceScopedKey: (key: string) => key }))
+vi.mock("@/lib/device", async (importOriginal) => ({ ...await importOriginal<typeof import("@/lib/device")>(), deviceScopedKey: (key: string) => key }))
 import { useFileChangesData } from "../useFileChangesData"
 
 afterEach(() => { api.fetch.mockReset(); api.source.loadId = 1 })

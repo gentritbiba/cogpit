@@ -118,6 +118,10 @@ export function useMe(expectedEdition: CogpitEdition | null): MeState {
   const [fetchKey, setFetchKey] = useState(0)
   const activeController = useRef<AbortController | null>(null)
   const preserveIdentityOnNextFetch = useRef(false)
+  // What the last request settled, for the same edition and fetch. DeviceRoot
+  // keeps a machine's pane alive in the background and re-runs this effect
+  // when it comes back, which republishes this instead of starting unresolved.
+  const settled = useRef<{ expectedEdition: CogpitEdition; fetchKey: number; me: MeResponse | null; hubUser: AccountPublic | null } | null>(null)
 
   useEffect(() => {
     activeController.current?.abort()
@@ -129,10 +133,21 @@ export function useMe(expectedEdition: CogpitEdition | null): MeState {
     }
     const preserveIdentity = preserveIdentityOnNextFetch.current
     preserveIdentityOnNextFetch.current = false
-    setMe(null)
-    setMeState((current) => preserveIdentity
-      ? { ...current, capabilities: NO_CAPABILITIES, checked: false }
-      : UNRESOLVED_ME)
+    const shownAgain = settled.current?.expectedEdition === expectedEdition && settled.current.fetchKey === fetchKey
+    if (shownAgain) {
+      setMe(settled.current!.me, settled.current!.hubUser)
+    } else {
+      settled.current = null
+      setMe(null)
+      setMeState((current) => preserveIdentity
+        ? { ...current, capabilities: NO_CAPABILITIES, checked: false }
+        : UNRESOLVED_ME)
+    }
+    const settle = (resolved: MeResponse | null, hubUser: AccountPublic | null) => {
+      settled.current = resolved ? { expectedEdition, fetchKey, me: resolved, hubUser } : null
+      const next = applyMe(resolved, hubUser)
+      setMeState((current) => JSON.stringify(current) === JSON.stringify(next) ? current : next)
+    }
     const controller = new AbortController()
     activeController.current = controller
     const remote = isRemoteDeviceActive()
@@ -160,12 +175,12 @@ export function useMe(expectedEdition: CogpitEdition | null): MeState {
           return
         }
         if (!origin || edition === null) {
-          setMeState(applyMe(null, null))
+          settle(null, null)
           return
         }
 
         if (!remote) {
-          setMeState(applyMe(origin, origin.user))
+          settle(origin, origin.user)
           return
         }
 
@@ -174,22 +189,22 @@ export function useMe(expectedEdition: CogpitEdition | null): MeState {
           ? targetResponse
           : edition === "personal" ? PERSONAL_ME : null
         if (!target) {
-          setMeState(applyMe(null, null))
+          settle(null, null)
           return
         }
 
-        setMeState(applyMe({
+        settle({
           authenticated: target.authenticated,
           edition: target.edition,
           user: target.user,
           capabilities: intersectCapabilities(origin.capabilities, target.capabilities),
           ...(target.enforcesSessionAccess && { enforcesSessionAccess: true }),
           ...(target.gate && { gate: target.gate }),
-        }, origin.user))
+        }, origin.user)
       })
       .catch(() => {
         if (controller.signal.aborted) return
-        setMeState(applyMe(null, null))
+        settle(null, null)
       })
     return () => {
       controller.abort()

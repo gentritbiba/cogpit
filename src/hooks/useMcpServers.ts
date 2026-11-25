@@ -122,13 +122,16 @@ export function useMcpServers(
     const controller = new AbortController()
     refreshRequestRef.current?.abort()
 
-    // Reset state immediately to prevent stale data from old project showing
-    setServers([])
-    setConfigs({})
-    setSelectedServers([])
-    setLoading(true)
-    setLoaded(false)
-    fetchedCwdRef.current = cwd
+    // Reset state immediately to prevent stale data from old project showing.
+    // The same project read again (a machine's pane shown again) refreshes in place.
+    if (fetchedCwdRef.current !== cwd) {
+      setServers([])
+      setConfigs({})
+      setSelectedServers([])
+      setLoading(true)
+      setLoaded(false)
+      fetchedCwdRef.current = cwd
+    }
 
     void fetchServerResponse(
       `/api/mcp-servers?cwd=${encodeURIComponent(cwd)}`,

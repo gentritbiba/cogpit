@@ -1,5 +1,6 @@
 import { act, render, screen, waitFor } from "@testing-library/react"
-import { StrictMode, useLayoutEffect } from "react"
+import { Activity, StrictMode, useLayoutEffect } from "react"
+import { createPaneLifetime, PaneLifetimeProvider } from "@/contexts/DevicePaneContext"
 import { afterEach, describe, expect, it, vi } from "vitest"
 import type { PluginFrameProps } from "../PluginFrame"
 import { RuntimePluginPanel, type RuntimePluginPanelProps } from "../RuntimePluginPanel"
@@ -140,6 +141,85 @@ describe("installed runtime panel", () => {
     await expect(frame.current!.execute({ protocol: 1, type: "request", id: "r1", method: "lifecycle.ready", params: {} }, new AbortController().signal)).resolves.toBeNull()
     value.unmount()
     expect(value.client.revokeLease).toHaveBeenCalledTimes(2)
+  })
+})
+
+describe("installed runtime panel in a machine's pane", () => {
+  it("keeps its lease and frame while the pane is hidden, and lets them go with the pane", async () => {
+    const client = { lease: vi.fn<RuntimePanelClient["lease"]>(async () => ({ id: "lease-1", expiresAt: Date.now() + 30_000 })), payload: vi.fn(async () => new ArrayBuffer(2)),
+      renewLease: vi.fn(async () => ({ id: "lease-1", expiresAt: Date.now() + 30_000 })), revokeLease: vi.fn(async () => {}), call: vi.fn(async () => null) }
+    const props: RuntimePluginPanelProps = { client, plugin: panelPlugin, activation: "host-session-1", registryRevision: 1, project: panelProject,
+      context: panelWorkspace, active: true, closePanel: vi.fn() }
+    const lifetime = createPaneLifetime()
+    const pane = (mode: "visible" | "hidden") => (
+      <PaneLifetimeProvider value={lifetime}><Activity mode={mode}><RuntimePluginPanel {...props} /></Activity></PaneLifetimeProvider>
+    )
+    const view = render(pane("visible"))
+    await screen.findByTestId("plugin-frame")
+    view.rerender(pane("hidden"))
+    await act(async () => { await Promise.resolve() })
+    view.rerender(pane("visible"))
+    await act(async () => { await Promise.resolve() })
+    expect(client.lease).toHaveBeenCalledOnce()
+    expect(client.revokeLease).not.toHaveBeenCalled()
+
+    act(() => lifetime.end())
+    expect(client.revokeLease).toHaveBeenCalledOnce()
+    view.unmount()
+  })
+
+  it("acts for nobody while the pane is hidden, and again once it is shown", async () => {
+    const client = { lease: vi.fn<RuntimePanelClient["lease"]>(async () => ({ id: "lease-1", expiresAt: Date.now() + 30_000 })), payload: vi.fn(async () => new ArrayBuffer(2)),
+      renewLease: vi.fn(async () => ({ id: "lease-1", expiresAt: Date.now() + 30_000 })), revokeLease: vi.fn(async () => {}), call: vi.fn(async () => null) }
+    const props: RuntimePluginPanelProps = { client, plugin: panelPlugin, activation: "host-session-1", registryRevision: 1, project: panelProject,
+      context: panelWorkspace, active: true, closePanel: vi.fn() }
+    const lifetime = createPaneLifetime()
+    const pane = (mode: "visible" | "hidden") => (
+      <PaneLifetimeProvider value={lifetime}><Activity mode={mode}><RuntimePluginPanel {...props} /></Activity></PaneLifetimeProvider>
+    )
+    const view = render(pane("visible"))
+    await screen.findByTestId("plugin-frame")
+    const execute = frame.current!.execute
+    const ask = () => execute({ protocol: 1, type: "request", id: "r1", method: "ui.resize", params: { height: 10 } }, new AbortController().signal)
+
+    view.rerender(pane("hidden"))
+    await expect(ask()).rejects.toThrow("Plugin panel is hidden")
+
+    view.rerender(pane("visible"))
+    await expect(ask()).rejects.not.toThrow("Plugin panel is hidden")
+    view.unmount()
+    act(() => lifetime.end())
+  })
+})
+
+describe("installed runtime panel whose lease lapsed while its pane was hidden", () => {
+  afterEach(() => vi.useRealTimers())
+
+  it("starts over when the pane is shown again, without the old error", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] })
+    let leases = 0
+    const client = { lease: vi.fn<RuntimePanelClient["lease"]>(async () => ({ id: `lease-${++leases}`, expiresAt: Date.now() + 30_000 })), payload: vi.fn(async () => new ArrayBuffer(2)),
+      renewLease: vi.fn(async () => { throw new Error("host unreachable") }), revokeLease: vi.fn(async () => {}), call: vi.fn(async () => null) }
+    const props: RuntimePluginPanelProps = { client, plugin: panelPlugin, activation: "host-session-1", registryRevision: 1, project: panelProject,
+      context: panelWorkspace, active: true, closePanel: vi.fn() }
+    const lifetime = createPaneLifetime()
+    const pane = (mode: "visible" | "hidden") => (
+      <PaneLifetimeProvider value={lifetime}><Activity mode={mode}><RuntimePluginPanel {...props} /></Activity></PaneLifetimeProvider>
+    )
+    const view = render(pane("visible"))
+    await act(async () => { await vi.advanceTimersByTimeAsync(0) })
+    expect(screen.getByTestId("plugin-frame")).toBeInTheDocument()
+
+    view.rerender(pane("hidden"))
+    await act(async () => { await vi.advanceTimersByTimeAsync(9_000) })
+    expect(client.renewLease).toHaveBeenCalled()
+
+    view.rerender(pane("visible"))
+    await act(async () => { await vi.advanceTimersByTimeAsync(0) })
+    expect(client.lease).toHaveBeenCalledTimes(2)
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument()
+    view.unmount()
+    act(() => lifetime.end())
   })
 })
 

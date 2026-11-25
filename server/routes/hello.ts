@@ -7,6 +7,7 @@ import type { UseFn } from "../http"
 import type { SignInMode } from "../../shared/contracts/identity"
 import { getConfig } from "../config"
 import { editionModule } from "../edition"
+import { getHostTheme } from "../lib/appearance"
 
 export type HubMode = "electron" | "standalone" | "dev"
 
@@ -87,6 +88,8 @@ export function registerHelloRoutes(use: UseFn, opts: { mode: HubMode }) {
       // setup carve-out already implies to anyone who can reach the endpoint.
       setupRequired: running.setupRequired(),
       name: getDeviceName(),
+      // The machine's theme, so a hub can show it before opening the machine.
+      theme: getHostTheme(),
       instanceId: INSTANCE_ID,
       networkAccess: config?.networkAccess ?? false,
       configured: config !== null,

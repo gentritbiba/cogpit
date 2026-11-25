@@ -72,6 +72,20 @@ describe("capabilities", () => {
     expect(can("manageWidgets")).toBe(true)
   })
 
+  it("keeps each device's identity, so a machine shown again answers at once", () => {
+    setMe(MEMBER_ME)
+    window.history.replaceState(null, "", "/d/other-device/")
+    setMe({ ...MEMBER_ME, capabilities: { ...NO_CAPABILITIES, terminal: true } })
+
+    expect(can("terminal")).toBe(true)
+    expect(can("manageWidgets")).toBe(false)
+    expect(can("manageWidgets", "local")).toBe(true)
+
+    window.history.replaceState(null, "", "/")
+    expect(can("manageWidgets")).toBe(true)
+    expect(can("terminal")).toBe(false)
+  })
+
   it("names the gate /api/me reports, for the device it was read from", () => {
     expect(getAppGate()).toBeNull()
 

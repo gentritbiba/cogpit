@@ -6,7 +6,7 @@ import { Button } from "@/components/ui/button"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { useCogpitUpdate } from "@/hooks/useCogpitUpdate"
 import { useProviderUpdates } from "@/hooks/useProviderUpdates"
-import { can } from "@/lib/capabilities"
+import { useCan } from "@/hooks/useCapability"
 import type { ProviderUpdateInfo } from "@/lib/providerUpdates"
 import { cn } from "@/lib/utils"
 
@@ -47,6 +47,7 @@ interface UpdatesMenuProps {
  * offered their updates.
  */
 export function UpdatesMenu({ side = "left", className }: UpdatesMenuProps) {
+  const can = useCan()
   const { update: cogpit, restarting, install } = useCogpitUpdate()
   const { pending, updating, outcome, update, dismiss, clearOutcome } = useProviderUpdates()
   const [open, setOpen] = useState(false)

@@ -3,6 +3,7 @@ import { PullRequestChips } from "@/components/PullRequestChips"
 import { cn } from "@/lib/utils"
 import { formatFileSize, formatRelativeTime } from "@/lib/format"
 import { resolveTurnCount } from "@/lib/turnCountCache"
+import { useDeviceId } from "@/contexts/DevicePaneContext"
 import { getStatusColor } from "./sessionStatusPresentation"
 import { archivedReasonLabel } from "./sessionListView"
 import type { ActiveSessionInfo, RunningProcess } from "./types"
@@ -35,7 +36,8 @@ export function SessionPreview({
   const firstPrompt = s.firstUserMessage
   const lastPrompt = s.lastUserMessage && s.lastUserMessage !== firstPrompt ? s.lastUserMessage : undefined
   // Resolved against the client cache so a live session's count stays accurate.
-  const turnCount = resolveTurnCount(s.sessionId, s.turnCount)
+  const deviceId = useDeviceId()
+  const turnCount = resolveTurnCount(s.sessionId, s.turnCount, deviceId)
 
   return (
     <div className="flex w-72 flex-col gap-2 text-xs">

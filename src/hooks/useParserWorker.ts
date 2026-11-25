@@ -5,6 +5,7 @@ import { toSessionView, type SessionView } from "../../shared/session/sessionDig
 import type { Turn } from "../../shared/session/types"
 import { applySessionDelta } from "@/lib/sessionDelta"
 import { sessionCache } from "@/lib/sessionCache"
+import { usePaneLifetime } from "@/contexts/DevicePaneContext"
 import type { KeptVersion, WorkerRequest, WorkerResponse } from "@/workers/session-parser.worker"
 
 /** A worker that has not answered by then is treated as dead and replaced. */
@@ -29,6 +30,84 @@ type PendingRequest = {
 type WithoutId<T> = T extends unknown ? Omit<T, "id"> : never
 type RequestBody = WithoutId<WorkerRequest>
 
+interface WorkerHost {
+  send: (body: RequestBody) => Promise<Answer>
+  post: (message: WorkerRequest) => void
+  dispose: () => void
+  alive: boolean
+}
+
+/**
+ * A parser worker and its pending requests. One that crashes, or stops
+ * answering at its heap limit, is replaced by a fresh one; `onReplaced`
+ * forgets what the old one held.
+ */
+function startWorkerHost(onReplaced: () => void): WorkerHost {
+  const pending = new Map<number, PendingRequest>()
+  let nextId = 0
+  let worker: Worker
+
+  const settle = (id: number): PendingRequest | undefined => {
+    const request = pending.get(id)
+    if (!request) return undefined
+    pending.delete(id)
+    clearTimeout(request.timer)
+    return request
+  }
+
+  const rejectAll = (error: Error) => {
+    for (const id of [...pending.keys()]) settle(id)?.reject(error)
+  }
+
+  const replace = (error: Error) => {
+    worker.terminate()
+    rejectAll(error)
+    onReplaced()
+    if (host.alive) worker = spawn()
+  }
+
+  const spawn = (): Worker => {
+    const next = new Worker(
+      new URL("@/workers/session-parser.worker.ts", import.meta.url),
+      { type: "module" },
+    )
+    next.onmessage = (e: MessageEvent<WorkerResponse>) => {
+      const msg = e.data
+      const request = settle(msg.id)
+      if (!request) return
+      if (msg.type === "error") request.reject(new Error(msg.error))
+      else request.resolve(msg)
+    }
+    next.onerror = (err) => replace(new Error(`Worker error: ${err.message}`))
+    next.onmessageerror = () => replace(new Error("Worker sent a message that could not be read"))
+    return next
+  }
+
+  const host: WorkerHost = {
+    alive: true,
+    send: (body) => new Promise((resolve, reject) => {
+      const id = nextId++
+      const timer = setTimeout(() => replace(new Error("Worker did not answer")), WORKER_REQUEST_TIMEOUT_MS)
+      pending.set(id, { resolve, reject, timer })
+      try {
+        worker.postMessage({ ...body, id } as WorkerRequest)
+      } catch (err) {
+        settle(id)
+        reject(err instanceof Error ? err : new Error(String(err)))
+      }
+    }),
+    post: (message) => worker.postMessage(message),
+    dispose: () => {
+      if (!host.alive) return
+      host.alive = false
+      worker.terminate()
+      rejectAll(new Error("Worker terminated"))
+    },
+  }
+  worker = spawn()
+  return host
+}
+
 export function useParserWorker() {
   const sendRef = useRef<((body: RequestBody) => Promise<Answer>) | null>(null)
   // The version the worker keeps each view under, keyed by the view's turns,
@@ -40,71 +119,33 @@ export function useParserWorker() {
   const streamingRef = useRef<number | null>(null)
   const releaseRef = useRef<((handle: number) => void) | null>(null)
 
+  // The worker outlives a hidden pane: it holds the sessions the pane's views
+  // name, so a machine shown again appends to them instead of reloading.
+  const lifetime = usePaneLifetime()
+  const hostRef = useRef<WorkerHost | null>(null)
+
   useEffect(() => {
-    const pending = new Map<number, PendingRequest>()
-    let nextId = 0
-    let worker: Worker
-    let disposed = false
-
-    const settle = (id: number): PendingRequest | undefined => {
-      const request = pending.get(id)
-      if (!request) return undefined
-      pending.delete(id)
-      clearTimeout(request.timer)
-      return request
-    }
-
-    const rejectAll = (error: Error) => {
-      for (const id of [...pending.keys()]) settle(id)?.reject(error)
-    }
-
-    // A worker can crash, or be stopped at its heap limit without any event,
-    // and every later request would then wait forever. Start a fresh one.
-    const replace = (error: Error) => {
-      worker.terminate()
-      rejectAll(error)
-      // The new worker numbers its sessions from scratch, so no view may name one.
+    let host = hostRef.current
+    if (!host?.alive) {
+      // A new worker numbers its sessions from scratch, so no view may name one.
       keptRef.current = new WeakMap()
       streamingRef.current = null
-      if (!disposed) worker = spawn()
+      host = startWorkerHost(() => {
+        keptRef.current = new WeakMap()
+        streamingRef.current = null
+      })
+      hostRef.current = host
+      if (lifetime) lifetime.onEnd(host.dispose)
     }
-
-    const spawn = (): Worker => {
-      const next = new Worker(
-        new URL("@/workers/session-parser.worker.ts", import.meta.url),
-        { type: "module" },
-      )
-      next.onmessage = (e: MessageEvent<WorkerResponse>) => {
-        const msg = e.data
-        const request = settle(msg.id)
-        if (!request) return
-        if (msg.type === "error") request.reject(new Error(msg.error))
-        else request.resolve(msg)
-      }
-      next.onerror = (err) => replace(new Error(`Worker error: ${err.message}`))
-      next.onmessageerror = () => replace(new Error("Worker sent a message that could not be read"))
-      return next
-    }
-
-    worker = spawn()
-    sendRef.current = (body) => new Promise((resolve, reject) => {
-      const id = nextId++
-      const timer = setTimeout(() => replace(new Error("Worker did not answer")), WORKER_REQUEST_TIMEOUT_MS)
-      pending.set(id, { resolve, reject, timer })
-      try {
-        worker.postMessage({ ...body, id } as WorkerRequest)
-      } catch (err) {
-        settle(id)
-        reject(err instanceof Error ? err : new Error(String(err)))
-      }
-    })
+    const current = host
+    sendRef.current = current.send
 
     // The worker keeps a session for as long as the renderer holds a view of it.
     const handleOf = (view: SessionView) => keptRef.current.get(view.turns)?.handle
     const releaseUnheld = (handle: number) => {
       if (handle === streamingRef.current) return
       for (const view of sessionCache.heldViews()) if (handleOf(view) === handle) return
-      worker.postMessage({ type: "release", handle } satisfies WorkerRequest)
+      current.post({ type: "release", handle })
     }
     releaseRef.current = releaseUnheld
     const stopReleasing = sessionCache.onRelease((view) => {
@@ -113,14 +154,12 @@ export function useParserWorker() {
     })
 
     return () => {
-      disposed = true
       stopReleasing()
       releaseRef.current = null
       sendRef.current = null
-      worker.terminate()
-      rejectAll(new Error("Worker terminated"))
+      if (!lifetime) current.dispose()
     }
-  }, [])
+  }, [lifetime])
 
   const request = useCallback(async (text: string, keep: boolean): Promise<SessionView> => {
     const send = sendRef.current

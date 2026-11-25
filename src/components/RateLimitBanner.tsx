@@ -6,7 +6,7 @@ import { Button } from "@/components/ui/button"
 import { descriptorForDirName } from "../../shared/session/agent-descriptors"
 import type { RateLimitBlock } from "../../shared/session/rateLimit"
 import { getResumeCommand, sessionIdFromFileName } from "@/lib/agents"
-import { isRemoteDeviceActive } from "@/lib/device"
+import { useIsRemoteDevice } from "@/contexts/DevicePaneContext"
 import { openProjectTerminal } from "@/lib/openTerminal"
 
 interface RateLimitBannerProps {
@@ -60,7 +60,8 @@ export function RateLimitBanner({ block, dirName, fileName, cwd, terminal, child
   const command = getResumeCommand(descriptor.kind, sessionIdFromFileName(fileName), cwd ?? undefined)
   const reset = resetText(block.resetsAt)
   const lowPriority = block.lowPriority && descriptor.capabilities.lowPriorityInTerminal
-  const canOpenTerminal = lowPriority && terminal && !isRemoteDeviceActive()
+  const remoteDevice = useIsRemoteDevice()
+  const canOpenTerminal = lowPriority && terminal && !remoteDevice
 
   return (
     <Alert role="status" className="rounded-none border-x-0 border-t-0 px-4 py-2">

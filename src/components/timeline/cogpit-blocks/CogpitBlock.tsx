@@ -4,6 +4,7 @@ import { Button } from "@/components/ui/button"
 import { useSessionChatContextOptional, useSessionContextOptional } from "@/contexts/SessionContext"
 import { useLocalStorage } from "@/hooks/useLocalStorage"
 import { deviceScopedKey } from "@/lib/device"
+import { useDeviceId } from "@/contexts/DevicePaneContext"
 import { cn } from "@/lib/utils"
 import { CogpitBlockScope, type CogpitBlockKind } from "./kinds"
 import {
@@ -129,9 +130,10 @@ function DecisionsView({ block, source, occurrence }: { block: DecisionsBlock; s
   const chat = useSessionChatContextOptional()
   const scope = useContext(CogpitBlockScope)
   const sessionId = session?.session?.sessionId ?? "none"
+  const deviceId = useDeviceId()
   // A later reply that repeats the same questions asks them again.
   const [stored, setStored] = useLocalStorage<DecisionsState>(
-    deviceScopedKey(`cogpit-decisions:${sessionId}:${blockKey(`${scope?.messageKey ?? ""}\n${occurrence}\n${source}`)}`),
+    deviceScopedKey(`cogpit-decisions:${sessionId}:${blockKey(`${scope?.messageKey ?? ""}\n${occurrence}\n${source}`)}`, deviceId),
     { answers: {}, sentAt: null },
   )
   const state: DecisionsState = stored ?? { answers: {}, sentAt: null }

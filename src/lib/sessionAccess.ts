@@ -44,8 +44,9 @@ const listeners = new Set<() => void>()
 const staleListListeners = new Set<() => void>()
 let lastTicket = 0
 
-function cacheKey(sessionId: string): string {
-  return `${deviceScopedKey("session-access")}::${sessionId}`
+/** Keyed by device (the active one unless named), since session ids repeat across machines only by accident. */
+function cacheKey(sessionId: string, deviceId?: string): string {
+  return `${deviceScopedKey("session-access", deviceId)}::${sessionId}`
 }
 
 function notify(targets: ReadonlySet<() => void>): void {
@@ -65,8 +66,8 @@ function isLookup(value: unknown): value is SessionAccessLookup {
   return LEVELS.includes((value as Partial<SessionAccessLookup> | null)?.level as SessionAccessLevel)
 }
 
-export function knownSessionAccess(sessionId: string): KnownSessionAccess | undefined {
-  return entries.get(cacheKey(sessionId))?.level
+export function knownSessionAccess(sessionId: string, deviceId?: string): KnownSessionAccess | undefined {
+  return entries.get(cacheKey(sessionId, deviceId))?.level
 }
 
 /** Whether this client ever knew the caller to have any access to the session. */

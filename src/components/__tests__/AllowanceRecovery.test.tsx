@@ -6,7 +6,7 @@ import { RECOVERY_MESSAGE, type RecoveryStatus } from "../../../shared/contracts
 const mocks = vi.hoisted(() => ({ fetch: vi.fn() }))
 vi.mock("@/lib/auth", () => ({ authFetch: (...args: unknown[]) => mocks.fetch(...args) }))
 vi.mock("@/lib/openTerminal", () => ({ openProjectTerminal: vi.fn() }))
-vi.mock("@/lib/device", () => ({ isRemoteDeviceActive: () => false }))
+vi.mock("@/lib/device", async (importOriginal) => ({ ...await importOriginal<typeof import("@/lib/device")>(), isRemoteDeviceActive: () => false }))
 const block = { limit: "five_hour", resetsAt: 1_800_000_060, lowPriority: false }
 const offered: RecoveryStatus = { offer: { id: "server-offer-1", block, dueAt: block.resetsAt * 1000 }, run: null, support: "personal", message: RECOVERY_MESSAGE }
 const scheduled: RecoveryStatus = { ...offered, offer: null, run: { id: "occurrence-1", block, state: "scheduled", dueAt: block.resetsAt * 1000 } }

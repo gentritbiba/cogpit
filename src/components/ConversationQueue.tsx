@@ -4,6 +4,7 @@ import type { CommandReceipt } from "../../shared/contracts/orchestration"
 import { presentTurnError } from "../../shared/session/agent-errors"
 import { conversationStateFor, EMPTY_CONVERSATION } from "@/lib/conversationState"
 import { deviceScopedKey } from "@/lib/device"
+import { useDeviceId } from "@/contexts/DevicePaneContext"
 import { useLocalStorage } from "@/hooks/useLocalStorage"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
@@ -16,10 +17,11 @@ const emptySnapshot = () => EMPTY_CONVERSATION
 
 /** Messages whose delivery failed or could not be confirmed. Waiting messages show in the timeline. */
 export function ConversationQueue({ sessionId, readOnly = false }: { sessionId: string | null; readOnly?: boolean }) {
+  const deviceId = useDeviceId()
   const owner = useMemo(() => sessionId ? conversationStateFor(sessionId) : null, [sessionId])
   const state = useSyncExternalStore(owner?.subscribe ?? noopSubscribe, owner?.snapshot ?? emptySnapshot)
   if (!sessionId || !owner) return null
-  const storageKey = deviceScopedKey(`dismissed-command-failures:${state.conversation?.id ?? sessionId}`)
+  const storageKey = deviceScopedKey(`dismissed-command-failures:${state.conversation?.id ?? sessionId}`, deviceId)
   return <DeliveryProblems key={storageKey} storageKey={storageKey} commands={state.commands} readOnly={readOnly} onAction={(body) => owner.action({ ...body, sessionId })} />
 }
 

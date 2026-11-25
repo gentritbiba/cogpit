@@ -20,7 +20,7 @@ import { useInboxSync } from "@/hooks/useInboxSync"
 import { useSessionArchiveToggle } from "@/hooks/useSessionArchive"
 import { useSessionNames } from "@/hooks/useSessionNames"
 import { useStopSession } from "@/hooks/useStopSession"
-import { can } from "@/lib/capabilities"
+import { useCan } from "@/hooks/useCapability"
 import { parseSubAgentPath } from "@/lib/format"
 import { agentKindForDirName, capabilitiesFor, getResumeCommand } from "@/lib/agents"
 import { cn } from "@/lib/utils"
@@ -88,6 +88,7 @@ export const FloatingChrome = memo(function FloatingChrome({
   promptSlotRef,
   showSession = true,
 }: FloatingChromeProps) {
+  const can = useCan()
   const { sessionSource, isLive, permissions, actions } = useSessionControls()
   const openId = useOpenSession((open) => open?.sessionId ?? null)
   const sessionId = showSession ? openId : null

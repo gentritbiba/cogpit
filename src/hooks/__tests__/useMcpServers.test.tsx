@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from "vitest"
-import { renderHook, act, waitFor } from "@testing-library/react"
+import { render, renderHook, act, waitFor } from "@testing-library/react"
+import { Activity } from "react"
 import { useMcpServers } from "../useMcpServers"
 
 // Mock authFetch
@@ -541,4 +542,29 @@ describe("useMcpServers", () => {
     })
   })
 
+})
+
+describe("useMcpServers in a machine's pane shown again", () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+    configStore.clear()
+  })
+
+  it("keeps the servers on screen while it reads them again", async () => {
+    mockServerResponse([{ name: "clickup", status: "connected" }])
+    let latest!: ReturnType<typeof useMcpServers>
+    function Probe() {
+      latest = useMcpServers("/project", "-project", undefined)
+      return null
+    }
+    const { rerender } = render(<Activity mode="visible"><Probe /></Activity>)
+    await waitFor(() => expect(latest.loaded).toBe(true))
+    expect(latest.servers).toHaveLength(1)
+
+    mockFetch.mockReturnValueOnce(new Promise(() => {}))
+    rerender(<Activity mode="hidden"><Probe /></Activity>)
+    rerender(<Activity mode="visible"><Probe /></Activity>)
+    expect(latest.servers).toHaveLength(1)
+    expect(latest.loaded).toBe(true)
+  })
 })

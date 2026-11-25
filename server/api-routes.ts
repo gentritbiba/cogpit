@@ -41,6 +41,7 @@ import { registerVoiceRoutes } from "./routes/voice"
 import { registerClickUpRoutes } from "./routes/clickup"
 import { registerProjectIconRoutes } from "./routes/project-icon"
 import { registerHelloRoutes, type HubMode } from "./routes/hello"
+import { registerAppearanceRoutes } from "./routes/appearance"
 import { registerMcpRoutes } from "./routes/mcp"
 import { registerMemoryEmbeddingRoutes } from "./routes/memory-embeddings"
 import { registerMissionControlRoutes } from "./routes/mission-control"
@@ -119,6 +120,7 @@ export const API_ROUTE_REGISTRY = [
   apiRoute("hub", (use) => use("/hub", createHubProxyHandler())),
   apiRoute("performance", registerPerformanceRoutes),
   apiRoute("config", registerConfigRoutes),
+  apiRoute("appearance", registerAppearanceRoutes),
   apiRoute("telemetry", registerTelemetryRoutes),
   apiRoute("edition", registerEditionRoutes),
   apiRoute("projects", registerProjectRoutes),

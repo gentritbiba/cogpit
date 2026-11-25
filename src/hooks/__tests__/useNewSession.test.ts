@@ -53,6 +53,9 @@ const sessions: SessionController = {
   prefetchSession: vi.fn(),
   reloadCurrent: vi.fn(),
   leave: vi.fn(),
+  suspend: vi.fn(),
+  resume: vi.fn(),
+  showing: vi.fn(() => null),
 }
 
 describe("useNewSession", () => {

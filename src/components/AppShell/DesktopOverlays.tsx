@@ -8,7 +8,7 @@ import { useAppContext } from "@/contexts/AppContext"
 import { useOpenSession, useSessionControls } from "@/contexts/SessionContext"
 import { useMainViews } from "@/edition/hooks"
 import { useDevices } from "@/hooks/useDevices"
-import { can } from "@/lib/capabilities"
+import { useCan } from "@/hooks/useCapability"
 import { LOCAL_DEVICE_ID, switchDevice } from "@/lib/device"
 import { dirNameToPath } from "@/lib/format"
 import { isEditableTarget, matchesKeybinding } from "@/lib/keybindings"
@@ -40,6 +40,7 @@ export function DesktopOverlays({
   project,
   chrome,
 }: DesktopOverlaysProps) {
+  const can = useCan()
   const { state, config, theme } = useAppContext()
   const { sessionSource } = useSessionControls()
   const sessionId = useOpenSession((open) => open?.sessionId ?? null)

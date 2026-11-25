@@ -12,6 +12,7 @@ import { useBrowserSafeMode } from "./browserSafeMode"
 import { ReviewSessionDialog } from "./ReviewSessionDialog"
 import { WorktreeSetupConfirmDialog, type WorktreeSetupProposal } from "./WorktreeSetupConfirmDialog"
 import type { ReviewStartRequest } from "@cogpit/plugin-contracts"
+import { usePaneLifetime } from "@/contexts/DevicePaneContext"
 
 export interface RuntimePluginPanelProps extends WorkspacePanelProps {
   client: RuntimePanelClient
@@ -101,8 +102,27 @@ function RuntimePluginPanelSession({ client, plugin, project, active, title, epo
     return () => controller.abort()
   }, [client, loaded, dirName, fileName])
   const currentHandle = sessionHandle && loaded && sessionHandle.leaseId === loaded.leaseId && sessionHandle.dirName === dirName && sessionHandle.fileName === fileName ? sessionHandle.handle : null
+  // The activation (and its lease, which names the frame) outlives a hidden
+  // pane: shown again with the same inputs, the panel keeps its frame. It goes
+  // when its inputs change, when the panel leaves the page, or with the pane.
+  const lifetime = usePaneLifetime()
+  const anchor = useRef<HTMLSpanElement>(null)
+  const kept = useRef<{ inputs: readonly unknown[]; runtime: RuntimePanelActivation; release: () => void; failed: boolean } | null>(null)
+  const inputs = [client, pluginId, digest, projectId, epoch, contextEpoch, canAppend, canAddContext, canStartReview, canOpenExternal, openExternal, canOpenSession, workspacePath, canUseDrafts, canConfirmSetup, lifetime]
   useLayoutEffect(() => {
-    const runtime = createRuntimePanelActivation({ client, pluginId, digest, projectId, workspacePath, contextEpoch, active: currentActive.current,
+    const element = anchor.current
+    const previous = kept.current
+    if (previous && !previous.failed && previous.inputs.length === inputs.length && previous.inputs.every((value, index) => Object.is(value, inputs[index]))) {
+      activation.current = previous.runtime
+      previous.runtime.setActive(currentActive.current)
+    } else {
+      // One that failed while its pane was hidden starts over, without its error.
+      if (previous?.failed) {
+        setError(null)
+        setLoaded(null)
+      }
+      previous?.release()
+      const runtime = createRuntimePanelActivation({ client, pluginId, digest, projectId, workspacePath, contextEpoch, active: currentActive.current,
       ...(canAppend ? { appendDraft: (text: string) => composePrompt.current?.(text) } : {}),
       ...(canOpenSession ? { openSession: (dirName: string, fileName: string) => openSession.current?.(dirName, fileName) } : {}),
       ...(canOpenExternal ? { openExternal } : {}),
@@ -110,13 +130,36 @@ function RuntimePluginPanelSession({ client, plugin, project, active, title, epo
       ...(canStartReview ? { startReview: (leaseId, request) => setReview({ leaseId, request }) } : {}),
       ...(canUseDrafts ? { drafts: () => currentDrafts.current } : {}),
       ...(canConfirmSetup ? { confirmWorktreeSetup: (leaseId: string, proposal: WorktreeSetupProposal) => setSetupProposal({ leaseId, proposal }) } : {}),
-      onLoaded: (payload, leaseId) => setLoaded({ payload, leaseId, runtime }), onError: (failure) => setError(failure.message) })
-    activation.current = runtime
-    return () => { runtime.dispose(); activation.current = null }
-  }, [client, pluginId, digest, projectId, epoch, contextEpoch, canAppend, canAddContext, canStartReview, canOpenExternal, openExternal, canOpenSession, workspacePath, canUseDrafts, canConfirmSetup])
-  if (error) return <p role="alert" className="p-4 text-sm text-destructive">{error}</p>
-  if (!loaded) return <p role="status" className="p-4 text-sm text-muted-foreground">Loading plugin…</p>
-  return <><PluginFrame payload={loaded.payload} digest={digest} activationKey={`${epoch}:${loaded.leaseId}`}
+      onLoaded: (payload, leaseId) => setLoaded({ payload, leaseId, runtime }), onError: (failure) => { next.failed = true; setError(failure.message) } })
+      const forget = lifetime?.onEnd(() => next.release())
+      const next = {
+        inputs, runtime, failed: false,
+        release: () => {
+          forget?.()
+          runtime.dispose()
+          if (kept.current === next) kept.current = null
+          if (activation.current === runtime) activation.current = null
+        },
+      }
+      kept.current = next
+      activation.current = runtime
+    }
+    const mine = kept.current!
+    return () => {
+      // Off screen, the plugin acts for nobody: what it asked for is cancelled
+      // and it may ask nothing until shown again; its lease keeps renewing.
+      mine.runtime.setActive(false)
+      mine.runtime.resetSession()
+      // A hidden Activity leaves the panel in the page; only one that has left
+      // it once the commit is done lets its activation go.
+      if (!lifetime || !element?.isConnected) return mine.release()
+      queueMicrotask(() => { if (!element.isConnected) mine.release() })
+    }
+  }, inputs) // eslint-disable-line react-hooks/exhaustive-deps -- inputs lists every value the activation reads
+  const marker = <span ref={anchor} hidden />
+  if (error) return <>{marker}<p role="alert" className="p-4 text-sm text-destructive">{error}</p></>
+  if (!loaded) return <>{marker}<p role="status" className="p-4 text-sm text-muted-foreground">Loading plugin…</p></>
+  return <>{marker}<PluginFrame payload={loaded.payload} digest={digest} activationKey={`${epoch}:${loaded.leaseId}`}
     context={pluginPanelContext(plugin.manifest, project, active, presentation, currentHandle)} active={active} draftsToken={draftsToken} title={title ?? plugin.manifest.name}
     execute={loaded.runtime.execute} onError={loaded.runtime.fail} />{dialog}
     {review && <ReviewSessionDialog pluginName={plugin.manifest.name} request={review.request} projectPath={workspacePath}

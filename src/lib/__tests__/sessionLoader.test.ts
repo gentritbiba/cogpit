@@ -459,6 +459,34 @@ describe("the view on screen (review #2)", () => {
     expect([...sessionCache.heldViews()]).not.toContain(onScreen)
   })
 
+  it("lets the view go while its shell is suspended, and holds it again on resume without reading it", async () => {
+    const { sessions, onScreen } = await openA()
+    const reads = mockAuthFetch.mock.calls.length
+
+    released = []
+    sessions.suspend()
+    expect(sessions.showing()).toBeNull()
+    expect(released).toEqual([onScreen])
+
+    sessions.resume()
+    expect(sessions.showing()).toEqual({ dirName: "-d", fileName: "a.jsonl" })
+    expect([...sessionCache.heldViews()]).toContain(onScreen)
+    expect(mockAuthFetch.mock.calls.length).toBe(reads)
+  })
+
+  it("forgets a suspended session once the user leaves it or another open starts", async () => {
+    const { sessions, click } = await openA()
+    sessions.suspend()
+    sessions.leave()
+    sessions.resume()
+    expect(sessions.showing()).toBeNull()
+
+    sessions.suspend()
+    void click("b.jsonl")
+    sessions.resume()
+    expect(sessions.showing()).toBeNull()
+  })
+
   it("keeps a large session on screen through a prefetch that goes over the byte bound (review 2 #2)", async () => {
     const { sessions } = await openA()
     const entry = sessionCache.get("-d", "a.jsonl")!

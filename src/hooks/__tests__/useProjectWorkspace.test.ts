@@ -7,7 +7,8 @@ vi.mock("@/lib/auth", () => ({
   jsonFetch: vi.fn(),
 }))
 
-vi.mock("@/lib/device", () => ({
+vi.mock("@/lib/device", async (importOriginal) => ({
+  ...await importOriginal<typeof import("@/lib/device")>(),
   isRemoteDeviceActive: vi.fn(() => false),
 }))
 

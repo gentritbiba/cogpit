@@ -1,6 +1,6 @@
 import { beforeEach, afterEach, describe, expect, it, vi } from "vitest"
 import { render, screen, act, waitFor } from "@testing-library/react"
-import { DeviceRoot } from "@/components/DeviceRoot"
+import { DeviceRoot, nextPanes } from "@/components/DeviceRoot"
 import {
   __resetDeviceRevisionsForTest,
   __resetIdentityForTest,
@@ -8,8 +8,11 @@ import {
   recordDeviceConnectionRevision,
   setActiveIdentity,
 } from "@/lib/device"
+import { __resetDeviceThemesForTest, rememberDeviceTheme, savedDeviceTheme } from "@/lib/deviceThemes"
 
+const DEFAULT_DEVICES = vi.hoisted(() => [{ id: "dev_1", name: "Studio", host: "10.0.0.5", port: 19384, auth: "password", addedAt: 1, runtime: { authState: "ok" } as { authState: string; lastHello?: unknown } }])
 const mocks = vi.hoisted(() => ({
+  devices: DEFAULT_DEVICES as unknown[],
   getActiveDeviceId: vi.fn(() => "dev_1"),
   switchDevice: vi.fn(),
   testDevice: vi.fn(),
@@ -53,9 +56,11 @@ vi.mock("@/lib/keybindings", () => ({
   matchDeviceSwitchIndex: mocks.matchDeviceSwitchIndex,
   matchDeviceCycle: mocks.matchDeviceCycle,
 }))
-vi.mock("@/hooks/useDevices", () => ({
+vi.mock("@/hooks/useDevices", async (importOriginal) => ({
+  ...await importOriginal<typeof import("@/hooks/useDevices")>(),
   useDevices: () => ({
-    devices: [{ id: "dev_1", name: "Studio", host: "10.0.0.5", port: 19384, auth: "password", addedAt: 1, runtime: { authState: "ok" } }],
+    devices: mocks.devices,
+    loading: false,
     testDevice: mocks.testDevice,
   }),
 }))
@@ -80,7 +85,7 @@ describe("DeviceRoot offline banner", () => {
   it("shows the retrying banner when the active device is unreachable", () => {
     render(<DeviceRoot />)
     fireUnreachable()
-    expect(screen.getByText(/Studio/)).toBeInTheDocument()
+    expect(screen.getByText(/Can’t reach Studio/)).toBeInTheDocument()
     expect(screen.getByText(/retrying/i)).toBeInTheDocument()
   })
 
@@ -302,5 +307,123 @@ describe("DeviceRoot identity-keyed remount", () => {
     // A rename response repeats the same server revision and must stay warm.
     act(() => { recordDeviceConnectionRevision("dev_1", 5) })
     expect(mocks.onAppMount).toHaveBeenCalledTimes(2)
+  })
+})
+
+describe("DeviceRoot keeps machines alive", () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+    localStorage.clear()
+    __resetDeviceRevisionsForTest()
+    __resetIdentityForTest()
+    mocks.getActiveDeviceId.mockReturnValue("local")
+  })
+  afterEach(() => {
+    window.history.replaceState(null, "", "/")
+  })
+
+  function showDevice(id: string) {
+    mocks.getActiveDeviceId.mockReturnValue(id)
+    act(() => { window.dispatchEvent(new Event("cogpit-device-changed")) })
+  }
+
+  function frameOf(deviceId: string): HTMLElement {
+    const pane = document.querySelector(`[data-device-pane="${deviceId}"]`)
+    if (!(pane?.firstElementChild instanceof HTMLElement)) throw new Error(`no pane for ${deviceId}`)
+    return pane.firstElementChild
+  }
+
+  it("hides a machine left for another instead of unmounting it, and shows it again as it was", () => {
+    render(<DeviceRoot />)
+    expect(mocks.onAppMount).toHaveBeenCalledTimes(1)
+
+    showDevice("dev_1")
+    expect(mocks.onAppMount).toHaveBeenCalledTimes(2)
+    expect(frameOf("local").style.display).toBe("none")
+    expect(frameOf("dev_1").style.display).toBe("")
+
+    showDevice("local")
+    expect(mocks.onAppMount).toHaveBeenCalledTimes(2)
+    expect(frameOf("local").style.display).toBe("")
+    expect(frameOf("dev_1").style.display).toBe("none")
+  })
+
+  it("dresses each pane, and the page, in its own machine's theme", () => {
+    localStorage.setItem("cogpit-device-themes", JSON.stringify({ local: { theme: "light" }, dev_1: { theme: "oled" } }))
+    __resetDeviceThemesForTest()
+    render(<DeviceRoot />)
+    showDevice("dev_1")
+    expect(document.querySelector('[data-device-pane="local"]')).toHaveClass("theme-scope")
+    expect(document.querySelector('[data-device-pane="local"]')).not.toHaveClass("dark")
+    expect(document.querySelector('[data-device-pane="dev_1"]')).toHaveClass("theme-scope", "dark", "theme-oled")
+    expect(document.documentElement).toHaveClass("dark", "theme-oled")
+    showDevice("local")
+    expect(document.documentElement).not.toHaveClass("dark")
+  })
+})
+
+describe("DeviceRoot and the themes the hub heard", () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+    localStorage.clear()
+    __resetDeviceThemesForTest()
+    mocks.getActiveDeviceId.mockReturnValue("local")
+  })
+
+  it("takes a machine's reported theme only for a machine this browser has not met", () => {
+    mocks.devices = [{ id: "dev_1", name: "Studio", host: "10.0.0.5", port: 19384, auth: "password", addedAt: 1, runtime: { authState: "ok", lastHello: { theme: "light" } } }]
+    const { rerender } = render(<DeviceRoot />)
+    expect(savedDeviceTheme("dev_1")).toBe("light")
+
+    // A pick made since; a later registry read still carries the old hello.
+    rememberDeviceTheme("dev_1", "oled", "host")
+    mocks.devices = [...mocks.devices]
+    rerender(<DeviceRoot />)
+    expect(savedDeviceTheme("dev_1")).toBe("oled")
+    mocks.devices = DEFAULT_DEVICES
+  })
+})
+
+describe("nextPanes", () => {
+  const options = (activeDeviceId: string, extra: Partial<Parameters<typeof nextPanes>[1]> = {}) => ({
+    activeDeviceId,
+    identityKey: null,
+    retries: {},
+    listedIds: ["a", "b", "c", "d", "e", "f"],
+    ...extra,
+  })
+
+  it("adds the machine shown, keeps the order, and marks it most recently used", () => {
+    let panes = nextPanes([], options("local"))
+    panes = nextPanes(panes, options("a"))
+    panes = nextPanes(panes, options("local"))
+    expect(panes.map((pane) => pane.deviceId)).toEqual(["local", "a"])
+    expect(panes[0].lastUsed).toBeGreaterThan(panes[1].lastUsed)
+  })
+
+  it("lets the least recently used machine go past five", () => {
+    let panes = nextPanes([], options("local"))
+    for (const id of ["a", "b", "c", "d"]) panes = nextPanes(panes, options(id))
+    panes = nextPanes(panes, options("local"))
+    panes = nextPanes(panes, options("e"))
+    expect(panes.map((pane) => pane.deviceId)).toEqual(["local", "b", "c", "d", "e"])
+  })
+
+  it("remounts the machine shown after a retry, and drops a background one whose key went stale", () => {
+    let panes = nextPanes([], options("local"))
+    panes = nextPanes(panes, options("a"))
+    const before = panes.find((pane) => pane.deviceId === "a")!.key
+    panes = nextPanes(panes, options("a", { retries: { a: 1 } }))
+    expect(panes.find((pane) => pane.deviceId === "a")!.key).not.toBe(before)
+    panes = nextPanes(panes, options("a", { identityKey: "u_1", retries: { a: 1 } }))
+    expect(panes.map((pane) => pane.deviceId)).toEqual(["a"])
+  })
+
+  it("drops a machine the registry no longer lists, but not while it loads", () => {
+    let panes = nextPanes([], options("a"))
+    panes = nextPanes(panes, options("local", { listedIds: null }))
+    expect(panes.map((pane) => pane.deviceId)).toEqual(["a", "local"])
+    panes = nextPanes(panes, options("local", { listedIds: ["b"] }))
+    expect(panes.map((pane) => pane.deviceId)).toEqual(["local"])
   })
 })

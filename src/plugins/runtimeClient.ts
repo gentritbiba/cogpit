@@ -6,7 +6,7 @@ import { pluginConnectionSnapshotSchema, pluginResourceOptionsSchema, type Plugi
 import type { PluginInstallPreview, PluginScope } from "../../shared/contracts/plugins"
 import type { PublishViewRequest, UnpublishViewRequest, ViewPublication } from "../../shared/views/publish"
 import { authFetch } from "@/lib/auth"
-import { getActiveDeviceScope, getActiveIdentity, withBase } from "@/lib/device"
+import { deviceScope, getActiveDeviceId, getActiveDeviceScope, getActiveIdentity, withBase } from "@/lib/device"
 import { version } from "../../package.json"
 import { getPluginBrowserSupport } from "./browserSupport"
 import { browserSafeMode } from "./browserSafeMode"
@@ -82,6 +82,7 @@ async function readResponse(response: Response): Promise<unknown> {
 }
 
 export class RuntimePluginClient {
+  readonly deviceId = getActiveDeviceId()
   readonly scope = getActiveDeviceScope()
   readonly identity = getActiveIdentity()
   readonly base = new URL(withBase("/api/plugins/"), window.location.origin)
@@ -115,11 +116,16 @@ export class RuntimePluginClient {
     const current = this.controller.signal
     const owner = signal ?? current
     owner.throwIfAborted()
-    if (!this.running || this.scope !== getActiveDeviceScope() || this.identity !== getActiveIdentity()) throw new Error("The connected host or signed-in user changed")
+    if (!this.running || this.scope !== deviceScope(this.deviceId) || this.identity !== getActiveIdentity()) throw new Error("The connected host or signed-in user changed")
   }
+  /**
+   * A client belongs to its machine's pane, which may wait in the background
+   * while another machine is on screen: only its own machine's connection or
+   * the signed-in account changing ends it.
+   */
   private hostChanged = (): void => {
-    if (this.scope !== getActiveDeviceScope() || this.identity !== getActiveIdentity()) this.stop()
-    else this.syncIntegrations()
+    if (this.scope !== deviceScope(this.deviceId) || this.identity !== getActiveIdentity()) return this.stop()
+    this.syncIntegrations()
   }
   private syncIntegrations(): void {
     const status = this.state.status
@@ -127,7 +133,7 @@ export class RuntimePluginClient {
     this.integrations.sync({ plugins: usable ? status.store.plugins : [], privilegedPluginIds: usable ? status.store.privilegedPluginIds ?? [] : [], projects: status?.projects ?? [], platform: status?.runtime.platform ?? "", safeMode: browserSafeMode() })
   }
   start(): void {
-    if (this.running) return
+    if (this.running) return this.resume()
     const support = getPluginBrowserSupport()
     if (!support.supported) { this.publish({ status: null, error: support.error, activation: "" }); return }
     this.running = true
@@ -136,9 +142,25 @@ export class RuntimePluginClient {
     void this.refresh()
     this.timer = setInterval(() => { void this.refresh() }, 5000)
   }
+  /**
+   * Stop polling while the client's pane waits in the background. Everything
+   * else carries on: what it shows, its host session (and so its activation,
+   * which the plugin panels key their frames on) and requests, so a panel's
+   * lease renewals still reach the host. start() resumes the polling.
+   */
+  suspend(): void {
+    clearInterval(this.timer)
+    this.timer = undefined
+  }
+  private resume(): void {
+    if (this.timer !== undefined) return
+    void this.refresh()
+    this.timer = setInterval(() => { void this.refresh() }, 5000)
+  }
   stop(): void {
     this.running = false
     clearInterval(this.timer)
+    this.timer = undefined
     this.lifetimeController?.abort()
     const session = this.session
     this.session = null

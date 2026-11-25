@@ -159,6 +159,26 @@ describe("loadModelCatalog", () => {
   })
 })
 
+describe("a machine switched back to", () => {
+  it("shows the models it listed last time while they are read again", async () => {
+    const studio = [{ value: "", label: "Default" }, { value: "claude-opus-5-5", label: "Opus 5.5" }]
+    window.history.replaceState(null, "", "/d/dev_studio/")
+    mockedAuthFetch.mockResolvedValue(jsonResponse({ claude: studio }))
+    await loadModelCatalog()
+    expect(getModelOptions("claude")).toEqual(studio)
+
+    window.history.replaceState(null, "", "/")
+    mockedAuthFetch.mockResolvedValue(jsonResponse({ claude: [{ value: "", label: "Default" }] }))
+    await loadModelCatalog()
+
+    window.history.replaceState(null, "", "/d/dev_studio/")
+    mockedAuthFetch.mockReturnValue(new Promise(() => {}))
+    void loadModelCatalog()
+    expect(getModelOptions("claude")).toEqual(studio)
+    window.history.replaceState(null, "", "/")
+  })
+})
+
 describe("refreshModelCatalogOnFocus", () => {
   it("reloads a stale catalog when the window regains focus", async () => {
     mockedAuthFetch.mockResolvedValue(jsonResponse({ codex: null }))

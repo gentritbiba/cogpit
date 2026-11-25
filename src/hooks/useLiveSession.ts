@@ -99,18 +99,48 @@ export function useLiveSession(
   const watchOffset = source?.watchOffset ?? 0
   const loadId = source?.loadId ?? 0
 
+  // The load the stream last served and the end of the lines in its newest
+  // view. A machine's pane shown again reconnects from there: replaying from
+  // the load's offset would append lines the session already holds. `view` is
+  // set when that newest view never reached the screen (it landed, or waited
+  // for its frame, as the pane was hidden); the worker already holds it, so
+  // the pane puts it on screen and appends to it. `run` says which effect run
+  // wrote it, so a late answer to an earlier run cannot overwrite a later one.
+  const streamedRef = useRef<{ load: string; end: number; view?: SessionView; run: number } | null>(null)
+  const runsRef = useRef(0)
+  // The last batch given to the worker, and once it settles what it became.
+  // The worker holds that version, so a pane shown again goes on from it:
+  // waiting for it while it is out, or taking it if it landed off screen. It
+  // stays until a later batch replaces it, whichever run's screen it reaches.
+  const outstandingRef = useRef<{
+    load: string
+    run: number
+    done: Promise<{ view: SessionView; end: number } | null>
+    outcome?: { view: SessionView; end: number } | null
+  } | null>(null)
+
   // The stream restarts on every load from disk (a switch, a reload after undo),
   // never while it streams.
   useEffect(() => {
-    sessionRef.current = loadedSessionRef.current()
+    const run = ++runsRef.current
+    const load = JSON.stringify([dirName, fileName, loadId, watchOffset])
+    const previous = streamedRef.current
+    const shownAgain = previous?.load === load
+    const unshownView = shownAgain ? previous.view : undefined
+    sessionRef.current = unshownView ?? loadedSessionRef.current()
     // A prediction belongs to the turn that produced it — never to whatever
     // session is loaded next. A block or a failed turn belongs to the session
-    // that hit it; the watcher replays a standing block on connect.
-    setPromptSuggestion(null)
-    setRateLimit(null)
-    setTurnError(null)
-    setSignInEndsAt(null)
+    // that hit it; the watcher replays a standing block on connect. The same
+    // load shown again keeps them while it reconnects.
+    if (!shownAgain) {
+      setPromptSuggestion(null)
+      setRateLimit(null)
+      setTurnError(null)
+      setSignInEndsAt(null)
+      setIsLive(false)
+    }
     if (!dirName || !fileName) {
+      streamedRef.current = null
       setIsLive(false)
       setSseState("disconnected")
       return
@@ -119,10 +149,22 @@ export function useLiveSession(
     setSseState("connecting")
 
     // Every (re)connect resumes after the last line received, so nothing is replayed.
-    let appliedEnd = watchOffset
+    let appliedEnd = shownAgain ? previous.end : watchOffset
+    let shownEnd = appliedEnd
+    let offScreen = unshownView
+    const outstanding = shownAgain && outstandingRef.current?.load === load ? outstandingRef.current : null
+    // A batch that landed while no run could show it: the worker holds it.
+    const landedOffScreen = outstanding?.outcome
+    if (landedOffScreen && landedOffScreen.end > appliedEnd) {
+      offScreen = landedOffScreen.view
+      sessionRef.current = offScreen
+      appliedEnd = landedOffScreen.end
+      shownEnd = landedOffScreen.end
+    }
+    streamedRef.current = { load, end: shownEnd, view: offScreen, run }
+    const joining = outstanding && outstanding.outcome === undefined && outstanding.run !== run ? outstanding.done : null
     const url = `/api/watch/${encodeURIComponent(dirName)}/${encodeURIComponent(fileName)}?projection=${RESULT_PROJECTION}&stream=${WATCH_STREAM_VERSION}`
-    const stream = openSessionStream(url, { connectUrl: () => `${url}&offset=${appliedEnd}` })
-    const es = stream.source
+    let stream: ReturnType<typeof openSessionStream> | null = null
     let staleTimer: ReturnType<typeof setTimeout> | null = null
 
     const resetStaleTimer = (ms = 30_000) => {
@@ -157,6 +199,7 @@ export function useLiveSession(
       rafId = null
       if (sessionRef.current) {
         onUpdateRef.current(sessionRef.current, loadId)
+        streamedRef.current = { load, end: shownEnd, run }
       }
     }
 
@@ -165,6 +208,8 @@ export function useLiveSession(
       pendingUpdate = true
       rafId = requestAnimationFrame(flushUpdate)
     }
+    // The newest view never reached the screen before the pane was hidden.
+    if (offScreen) scheduleUpdate()
 
     // ── Streaming overlay flushing ──────────────────────────────────────
     // Overlay deltas arrive at up to ~13 Hz; mutate the ref and publish to
@@ -237,21 +282,37 @@ export function useLiveSession(
         ? workerAppendRef.current(base, toFlush)
         : workerParseRef.current(toFlush)
       let failed = false
+      let settleOutstanding!: (outcome: { view: SessionView; end: number } | null) => void
+      const done = new Promise<{ view: SessionView; end: number } | null>((resolve) => { settleOutstanding = resolve })
+      const entry: NonNullable<typeof outstandingRef.current> = { load, run, done }
+      outstandingRef.current = entry
+      const settle = (outcome: { view: SessionView; end: number } | null) => {
+        if (entry.outcome === undefined) entry.outcome = outcome
+        settleOutstanding(outcome)
+      }
 
       parsePromise
         .then((parsedResult) => {
           const result = scopeParsedSession(parsedResult, splitInstanceDirName(dirName).instanceId)
+          settle({ view: result, end: flushedEnd })
           // Cached even after the stream closed: the worker already holds this
           // version, and a switch back resumes from the entry.
           sessionCache.update(dirName, fileName, loadId, {
             parsed: result,
             source: { watchOffset: flushedEnd },
           })
-          if (closed) return
+          if (closed) {
+            // Landed after the pane went to the background: the worker holds
+            // this version now, so the pane shows it when it comes back.
+            if (streamedRef.current?.run === run) streamedRef.current = { load, end: flushedEnd, view: result, run }
+            return
+          }
           sessionRef.current = result
+          shownEnd = flushedEnd
           landingRef.current = [...landingRef.current, { digest: result.digest, lines: flushedLines }]
           scheduleUpdate()
         }, (err) => {
+          settle(null)
           console.error("[useLiveSession] worker parse failed:", err)
           if (closed) return
           // Keep the lines: the next batch retries them, or the resync
@@ -265,6 +326,7 @@ export function useLiveSession(
           console.error("[useLiveSession] live update failed:", err)
         })
         .finally(() => {
+          settle(null)
           workerBusy = false
           // Drain anything that accumulated while the worker was busy — this
           // is where the O(1) burst compression happens.
@@ -272,14 +334,14 @@ export function useLiveSession(
         })
     }
 
-    es.onopen = () => {
+    const onOpen = () => {
       if (sseStateRef.current !== "connected") {
         sseStateRef.current = "connected"
         setSseState("connected")
       }
     }
 
-    es.onmessage = (event) => {
+    const receive = (event: MessageEvent) => {
       try {
         if (sseStateRef.current !== "connected") {
           sseStateRef.current = "connected"
@@ -372,8 +434,7 @@ export function useLiveSession(
         console.error("[useLiveSession] Error processing SSE message:", err)
       }
     }
-
-    es.onerror = () => {
+    const onError = () => {
       setIsLive(false)
       setIsCompacting(false)
       sseStateRef.current = "disconnected"
@@ -383,14 +444,42 @@ export function useLiveSession(
       clearOverlay()
     }
 
+    const connect = () => {
+      stream = openSessionStream(url, { connectUrl: () => `${url}&offset=${appliedEnd}` })
+      stream.source.onopen = onOpen
+      stream.source.onmessage = receive
+      stream.source.onerror = onError
+    }
+    if (joining) {
+      // Shown again while a batch from before is with the worker: the worker
+      // will hold that batch's version, so connect only once it lands, from
+      // its end, and no line it covers can arrive again.
+      void joining.then((outcome) => {
+        if (closed) return
+        if (outcome && outcome.end > appliedEnd) {
+          sessionRef.current = outcome.view
+          appliedEnd = outcome.end
+          shownEnd = outcome.end
+          scheduleUpdate()
+        }
+        connect()
+      })
+    } else {
+      connect()
+    }
+
     return () => {
       // Drop any in-flight worker result so a stale parse from this source
       // can't stomp sessionRef.current after the next source is mounted.
       closed = true
-      stream.close()
-      setIsLive(false)
+      stream?.close()
+      // A view still waiting for its frame never reached the screen.
+      if (pendingUpdate && sessionRef.current && streamedRef.current?.run === run) {
+        streamedRef.current = { load, end: shownEnd, view: sessionRef.current, run }
+      }
+      // No state reset here: the next load resets it, and a pane hidden in the
+      // background shows what it had until it reconnects.
       sseStateRef.current = "disconnected"
-      setSseState("disconnected")
       if (staleTimer) clearTimeout(staleTimer)
       if (rafId !== null) cancelAnimationFrame(rafId)
       if (overlayRafId !== null) cancelAnimationFrame(overlayRafId)

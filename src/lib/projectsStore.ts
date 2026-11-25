@@ -8,7 +8,8 @@
 import { useCallback, useEffect, useSyncExternalStore } from "react"
 import type { ProjectInfo } from "@/components/Dashboard/types"
 import { authFetch } from "@/lib/auth"
-import { getActiveDeviceScope, getActiveIdentity } from "@/lib/device"
+import { deviceScope, getActiveDeviceId, getActiveIdentity } from "@/lib/device"
+import { useDeviceId } from "@/contexts/DevicePaneContext"
 import { readCachedList, sessionListCacheKeys, writeCachedList } from "@/lib/sessionListCache"
 import { subscribeSessionListEvents } from "@/lib/sessionListEvents"
 import { shareList } from "@/lib/structuralShare"
@@ -137,11 +138,18 @@ class ProjectsStore {
   }
 }
 
-let store: ProjectsStore | null = null
+/** Kept per device, so switching back to a machine shows its projects at once. */
+const stores = new Map<string, ProjectsStore>()
+const MAX_STORES = 8
 
-function currentStore(): ProjectsStore {
-  const scope = JSON.stringify([getActiveDeviceScope(), getActiveIdentity()])
-  if (store?.scope !== scope) store = new ProjectsStore(scope)
+function storeFor(deviceId: string): ProjectsStore {
+  const scope = JSON.stringify([deviceScope(deviceId), getActiveIdentity()])
+  let store = stores.get(scope)
+  if (!store) {
+    store = new ProjectsStore(scope)
+    stores.set(scope, store)
+    if (stores.size > MAX_STORES) stores.delete(stores.keys().next().value!)
+  }
   return store
 }
 
@@ -150,7 +158,7 @@ function currentStore(): ProjectsStore {
  * whenever a surface showing it opens (`enabled` turns on) and followed while open.
  */
 export function useProjects(enabled = true): ProjectsSnapshot & { refresh: () => Promise<void> } {
-  const projects = currentStore()
+  const projects = storeFor(useDeviceId())
   const snapshot = useSyncExternalStore(
     enabled ? projects.subscribe : noSubscription,
     projects.getSnapshot,
@@ -167,9 +175,9 @@ export function useProjects(enabled = true): ProjectsSnapshot & { refresh: () =>
 
 /** The projects for a one-off lookup, revalidated so a folder opened since is in it. */
 export function loadProjects(): Promise<ProjectInfo[]> {
-  return currentStore().revalidate()
+  return storeFor(getActiveDeviceId()).revalidate()
 }
 
 export function __resetProjectsStoreForTest(): void {
-  store = null
+  stores.clear()
 }

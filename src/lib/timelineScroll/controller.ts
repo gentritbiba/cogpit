@@ -201,8 +201,16 @@ export class TimelineScrollController implements TimelineHandle, BlockWindowHost
   }
 
   setList = (el: HTMLElement | null): void => {
+    const previous = this.list
     this.list = el
-    if (!el) this.detachList()
+    if (el) return
+    if (!previous?.isConnected) return this.detachList()
+    // A hidden Activity (a machine's pane in the background) detaches refs but
+    // keeps the DOM, and with it the rows and the scroll position: only a list
+    // that has left the document once the commit is done takes the plan along.
+    queueMicrotask(() => {
+      if (this.list === null && !previous.isConnected) this.detachList()
+    })
   }
 
   setTopPad = (el: HTMLElement | null): void => {

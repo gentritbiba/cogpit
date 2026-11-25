@@ -17,7 +17,7 @@ const mocks = vi.hoisted(() => ({
 vi.mock("@/contexts/AppContext", () => ({
   useAppContext: () => ({ config: { networkUrl: mocks.networkUrl } }),
 }))
-vi.mock("@/hooks/useCapability", () => ({ useCapability: () => mocks.canViewUsage }))
+vi.mock("@/hooks/useCapability", async (importOriginal) => ({ ...await importOriginal<typeof import("@/hooks/useCapability")>(), useCapability: () => mocks.canViewUsage }))
 vi.mock("@/lib/utils", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@/lib/utils")>()),
   copyToClipboard: mocks.copyToClipboard,

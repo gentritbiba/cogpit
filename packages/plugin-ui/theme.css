@@ -1,5 +1,9 @@
-/* `.color-scheme-inverse` puts its content on the opposite theme, so `dark:` follows it there. */
-@custom-variant dark (&:is(.dark *:not(.color-scheme-inverse, .color-scheme-inverse *), :root:not(.dark) .color-scheme-inverse, :root:not(.dark) .color-scheme-inverse *));
+/*
+ * `.color-scheme-inverse` puts its content on the opposite theme, so `dark:` follows it there.
+ * A `.theme-scope` element wears its own theme (its classes, as on <html>) whatever the page
+ * wears, so its content answers to it instead: Cogpit shows each machine in that machine's theme.
+ */
+@custom-variant dark (&:is(.dark *:not(.theme-scope *, .color-scheme-inverse, .color-scheme-inverse *), :root:not(.dark) :is(.color-scheme-inverse, .color-scheme-inverse *):not(.theme-scope *), :is(.theme-scope.dark, .theme-scope .dark) *:not(.color-scheme-inverse, .color-scheme-inverse *), .theme-scope:not(.dark) :is(.color-scheme-inverse, .color-scheme-inverse *)));
 
 @theme inline {
   --font-sans: "Geist Variable", ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
@@ -55,7 +59,9 @@
 }
 
 :root,
-.dark .color-scheme-inverse {
+:where(.theme-scope:not(.dark)),
+.dark .color-scheme-inverse:not(.theme-scope *),
+.theme-scope.dark .color-scheme-inverse {
   color-scheme: light;
   --motion-duration-instant: 80ms;
   --motion-duration-fast: 120ms;
@@ -121,7 +127,8 @@
 }
 
 .dark,
-:root:not(.dark) .color-scheme-inverse {
+:root:not(.dark) .color-scheme-inverse:not(.theme-scope *),
+.theme-scope:not(.dark) .color-scheme-inverse {
   color-scheme: dark;
   --selection: rgba(255, 255, 255, 0.2);
   --terminal-magenta: #e879f9;

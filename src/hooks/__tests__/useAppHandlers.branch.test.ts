@@ -39,6 +39,9 @@ const sessions: SessionController = {
   prefetchSession: vi.fn(),
   reloadCurrent: vi.fn(),
   leave: vi.fn(),
+  suspend: vi.fn(),
+  resume: vi.fn(),
+  showing: vi.fn(() => null),
 }
 
 function handlerDeps(dispatch: (action: SessionAction) => void): Parameters<typeof useAppHandlers>[0] {
