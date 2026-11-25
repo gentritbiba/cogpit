@@ -8,20 +8,22 @@ Mission Control is the first screen: start a task in any project folder, answer 
 
 ## Agent support
 
-Start sessions with Claude Code, OpenAI Codex, or GitHub Copilot CLI. Model options come from the installed CLIs. Cogpit shows reasoning effort, image input, and speed controls when the selected provider and model support them.
+Start sessions with Claude Code, OpenAI Codex, GitHub Copilot CLI, or Google Antigravity CLI. Model options come from the installed CLIs. Cogpit shows reasoning effort, image input, and speed controls when the selected provider and model support them.
 
-| Control | Claude Code | OpenAI Codex | GitHub Copilot CLI |
-| --- | --- | --- | --- |
-| Start and resume sessions | Yes | Yes | Yes |
-| Model selection | Yes | Yes | Yes |
-| Approvals and questions | Yes | Yes | Yes |
-| Branch and rewind | Cogpit history controls | Cogpit history controls | Native fork and rewind |
-| Redo | Yes | Yes | No |
-| Goals | Native goal lifecycle | Goals with optional token budgets | No |
-| Guest session sharing | Yes | No | No |
-| MCP server selector | Yes | No | No |
+| Control | Claude Code | OpenAI Codex | GitHub Copilot CLI | Antigravity CLI |
+| --- | --- | --- | --- | --- |
+| Start and resume sessions | Yes | Yes | Yes | Sessions started in Cogpit |
+| Model selection | Yes | Yes | Yes | Yes, with thinking level |
+| Approvals and questions | Yes | Yes | Yes | Yes |
+| Branch and rewind | Cogpit history controls | Cogpit history controls | Native fork and rewind | No |
+| Redo | Yes | Yes | No | No |
+| Goals | Native goal lifecycle | Goals with optional token budgets | No | No |
+| Guest session sharing | Yes | No | No | No |
+| MCP server selector | Yes | No | No | No |
 
 Codex uses a persistent app-server connection for native threads, turns, steering, interruption, goals, and approvals. Older installations can use a legacy CLI fallback. If a requested Codex model is unavailable, Cogpit reports the fallback and retries with the provider default.
+
+Antigravity runs Google's `agy` CLI (1.5 or newer) as an Agent Client Protocol server, `agy acp`. Install it with `curl -fsSL https://antigravity.google/cli/install.sh | bash` (on Windows, `irm https://antigravity.google/cli/install.ps1 | iex`), then sign in once with `agy acp --login`: it prints a Google link and asks for the code that page shows. Cogpit keeps its own transcript of each Antigravity session in `~/.gemini/antigravity-cli/cogpit-sessions`, named by the agent's conversation id, so `agy --conversation <id>` opens the same conversation in a terminal. Conversations started in the `agy` terminal app are not listed. The access chip maps onto the agent's modes: **Ask**, **Plan** and **Accept Edits** select the agent's own mode, and **Full access** keeps its default mode while Cogpit allows each request. A multiple-choice question the agent asks always reaches you, whatever the access level. Models and thinking levels come from your Google account once a session has started.
 
 Copilot discovery reads events from `~/.copilot/session-state`. It does not import VS Code Copilot Chat history. Copilot timelines include recorded nested agent activity, file changes, pull request links, and available usage data. Cogpit does not expose Copilot goals, workflows, or MCP editing. You can browse its instructions, settings, and skills in the configuration editor.
 

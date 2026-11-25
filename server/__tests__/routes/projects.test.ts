@@ -11,6 +11,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 const mocks = vi.hoisted(() => {
   const perKind = () => ({
     acp: vi.fn(),
+    antigravity: vi.fn(),
     claude: vi.fn(),
     codex: vi.fn(),
     copilot: vi.fn(),
@@ -81,6 +82,7 @@ vi.mock("../../agents", async () => {
   const { createStoreRegistry } = await vi.importActual<typeof import("../../agents")>("../../agents")
   const roots: Record<string, string> = {
     acp: "/tmp/acp-sessions",
+    antigravity: "/tmp/antigravity-sessions",
     claude: "/tmp/test-projects",
     codex: "/tmp/codex-sessions",
     copilot: "/tmp/copilot-sessions",
@@ -97,7 +99,7 @@ vi.mock("../../agents", async () => {
     listSubagentFiles: mocks.listSubagentFiles[kind],
     sessionAddress: mocks.sessionAddress[kind],
   })
-  const kinds = ["acp", "codex", "copilot", "claude"]
+  const kinds = ["acp", "codex", "copilot", "antigravity", "claude"]
   const registry = createStoreRegistry(
     Object.fromEntries(kinds.map((kind) => [kind, storeFor(kind)])) as unknown as Parameters<typeof createStoreRegistry>[0],
   )
@@ -193,7 +195,7 @@ describe("project routes", () => {
     __resetSearchMemoForTest()
     mockedGetSessionStatus.mockResolvedValue({ status: "idle" as const })
     mocks.peekSessionPullRequests.mockResolvedValue(null)
-    for (const kind of ["acp", "claude", "codex", "copilot"]) {
+    for (const kind of ["acp", "antigravity", "claude", "codex", "copilot"]) {
       mocks.listProjects[kind].mockResolvedValue([])
       mocks.listProjectSessionFiles[kind].mockResolvedValue([])
       mocks.listTopLevelSessions[kind].mockResolvedValue([])

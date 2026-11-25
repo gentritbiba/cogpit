@@ -29,6 +29,11 @@ describe("detectInstallMethod", () => {
     expect(detectInstallMethod("claude", ["/Users/x/.local/share/claude/bin/claude"])).toBe("native")
   })
 
+  it("recognises the Antigravity native installer", () => {
+    expect(detectInstallMethod("antigravity", ["/home/x/.local/bin/agy"])).toBe("native")
+    expect(detectInstallMethod("antigravity", ["/home/x/.local/share/mise/installs/antigravity-cli/latest/agy"])).toBe("unknown")
+  })
+
   it("has no native path for codex", () => {
     expect(detectInstallMethod("codex", ["/Users/x/.local/bin/codex"])).toBe("unknown")
   })
@@ -89,6 +94,13 @@ describe("buildUpdateCommand", () => {
     expect(formatCommand(buildUpdateCommand("copilot", "winget")!)).toBe(
       "winget upgrade --id GitHub.Copilot --exact --accept-source-agreements --accept-package-agreements",
     )
+    expect(formatCommand(buildUpdateCommand("antigravity", "native")!)).toBe("agy update")
+    expect(formatCommand(buildUpdateCommand("antigravity", "homebrew")!)).toBe("brew upgrade --cask antigravity-cli")
+  })
+
+  it("offers no package-manager update for a CLI that is not an npm package", () => {
+    expect(buildUpdateCommand("antigravity", "npm")).toBeNull()
+    expect(buildUpdateCommand("antigravity", "bun")).toBeNull()
   })
 
   it("keeps install scripts enabled for the npm global path", () => {

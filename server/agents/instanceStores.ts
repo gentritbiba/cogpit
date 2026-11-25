@@ -1,5 +1,5 @@
 import { orchestrationStore } from "../orchestration/storage"
-import { createAcpStore } from "./acpStore"
+import { createAcpStore, createAntigravityStore } from "./acpStore"
 import { join } from "node:path"
 import { descriptorFor } from "../../shared/session/agent-descriptors"
 import { instanceDirName, instanceSessionId, splitInstanceDirName, splitInstanceSessionId } from "../../shared/session/instances"
@@ -9,7 +9,7 @@ import { createCodexStore } from "./codexStore"
 import { createCopilotStore } from "./copilotStore"
 import type { AgentStore, SessionIdentity, SessionMeta } from "./types"
 
-const factories = { acp: createAcpStore, claude: (home: string) => createClaudeStore(join(home, "projects")), codex: createCodexStore, copilot: createCopilotStore }
+const factories = { acp: createAcpStore, antigravity: createAntigravityStore, claude: (home: string) => createClaudeStore(join(home, "projects")), codex: createCodexStore, copilot: createCopilotStore }
 const cache = new Map<string, AgentStore>()
 export function createInstanceStore(instance: ProviderInstance): AgentStore {
   const store = factories[instance.agent](instance.homeDir)

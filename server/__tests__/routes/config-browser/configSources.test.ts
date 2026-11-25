@@ -19,6 +19,7 @@ describe("config layouts", () => {
     expect(skillDirs.some((dir) => dir.endsWith(join(".claude", "skills")))).toBe(true)
     expect(skillDirs.some((dir) => dir.endsWith(join(".codex", "skills")))).toBe(true)
     expect(skillDirs.some((dir) => dir.endsWith(join(".copilot", "skills")))).toBe(true)
+    expect(skillDirs.some((dir) => dir.endsWith(join(".gemini", "config", "skills")))).toBe(true)
     expect(skillDirs.some((dir) => dir.endsWith(join(".agents", "skills")))).toBe(true)
     // The shared directory is a source of truth, not something a CLI loads.
     expect(layout.skills.find((source) => source.dir.includes(".agents"))?.cli).toEqual([])
@@ -35,6 +36,8 @@ describe("config layouts", () => {
       ["AGENTS.md", ["claude"]],
       ["AGENTS.md", ["codex"]],
       ["AGENTS.md", ["copilot"]],
+      ["GEMINI.md", ["antigravity"]],
+      ["AGENTS.md", ["antigravity"]],
     ])
     // Claude reads AGENTS.md only in a project with no CLAUDE.md of either kind.
     expect(project.instructions[2].supersededBy).toEqual([

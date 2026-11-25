@@ -7,14 +7,14 @@
 // the server, Electron and the standalone cogpit-memory package alike.
 
 /** The agent CLIs Cogpit can drive. */
-export type AgentKind = "claude" | "codex" | "copilot" | "acp"
+export type AgentKind = "claude" | "codex" | "copilot" | "acp" | "antigravity"
 
 /**
  * Every agent kind, in transcript-detection order. Codex and Copilot carry
  * positive discriminators in their records; Claude is the terminal fallback and
  * must stay last.
  */
-export const AGENT_KINDS: readonly AgentKind[] = ["acp", "codex", "copilot", "claude"]
+export const AGENT_KINDS: readonly AgentKind[] = ["acp", "codex", "copilot", "antigravity", "claude"]
 
 // ── Session status ──────────────────────────────────────────────────────────
 

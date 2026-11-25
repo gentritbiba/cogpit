@@ -10,7 +10,7 @@ Open the desktop app, or run `npx cogpit@latest` and use the page it opens. You 
 
 ## 2. Check your agent
 
-Cogpit drives a coding agent: Claude Code, OpenAI Codex or GitHub Copilot CLI. The first step says whether one is ready. If it is not, choose **Check agent setup**. It shows which agents are installed, how to install one, and a **Sign in** button for an agent that needs it.
+Cogpit drives a coding agent: Claude Code, OpenAI Codex, GitHub Copilot CLI or Google Antigravity CLI. The first step says whether one is ready. If it is not, choose **Check agent setup**. It shows which agents are installed, how to install one, and a **Sign in** button for an agent that needs it.
 
 ## 3. Open your project folder
 

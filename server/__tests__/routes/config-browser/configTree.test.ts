@@ -203,7 +203,7 @@ describe("buildProjectSection", () => {
     expect(byName.get("CLAUDE.md")).toMatchObject({ fileType: "instructions", cli: ["claude"] })
     expect(byName.get("AGENTS.md")).toMatchObject({
       fileType: "instructions",
-      cli: ["codex", "copilot"],
+      cli: ["codex", "copilot", "antigravity"],
     })
     expect(byName.get("settings.local.json")).toMatchObject({ fileType: "settings", cli: ["claude"] })
     expect(byName.get("config.toml")).toMatchObject({ fileType: "settings", cli: ["codex"] })
@@ -215,11 +215,11 @@ describe("buildProjectSection", () => {
     const agentsFile = async () =>
       (await buildProjectSection(cwd)).items.find((item) => item.name === "AGENTS.md")
 
-    expect((await agentsFile())?.cli).toEqual(["claude", "codex", "copilot"])
+    expect((await agentsFile())?.cli).toEqual(["claude", "codex", "copilot", "antigravity"])
 
     await mkdirp(join(cwd, ".claude"))
     await writeFile(join(cwd, ".claude", "CLAUDE.md"), "claude")
-    expect((await agentsFile())?.cli).toEqual(["codex", "copilot"])
+    expect((await agentsFile())?.cli).toEqual(["codex", "copilot", "antigravity"])
   })
 
   it("merges a skill both CLIs link at the shared source into one entry", async () => {

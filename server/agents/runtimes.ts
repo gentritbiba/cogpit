@@ -1,4 +1,5 @@
 import { acpRuntime } from "./acpRuntime"
+import { antigravityRuntime } from "./antigravityRuntime"
 import {
   AGENT_KINDS,
   descriptorForDirName,
@@ -50,6 +51,7 @@ const RUNTIMES: Readonly<Record<AgentKind, AgentRuntime>> = Object.freeze({
   codex: codexRuntime,
   copilot: copilotRuntime,
   acp: acpRuntime,
+  antigravity: antigravityRuntime,
 })
 
 export function runtimeFor(kind: AgentKind, instanceId = "default"): AgentRuntime {

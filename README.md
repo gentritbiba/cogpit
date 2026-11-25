@@ -3,7 +3,7 @@
 <p align="center"><strong>Your coding agents, in one workspace.</strong></p>
 
 <p align="center">
-  An open-source GUI for Claude Code, OpenAI Codex, and GitHub Copilot CLI.<br />
+  An open-source GUI for Claude Code, OpenAI Codex, GitHub Copilot CLI, and Google Antigravity CLI.<br />
   Run sessions, review code changes, and use the browser alongside your agents.<br />
   Cogpit has no AI models of its own, so you need one of those CLIs installed and signed in.
 </p>
@@ -37,7 +37,7 @@ It runs on your machine and uses your existing CLI logins. Cogpit is free, MIT-l
 
 ## Get started
 
-Install and sign in to at least one supported CLI: [Claude Code](https://code.claude.com/docs/en/quickstart), [OpenAI Codex](https://developers.openai.com/codex/cli), or [GitHub Copilot CLI](https://docs.github.com/en/copilot/how-tos/copilot-cli/set-up-copilot-cli/install-copilot-cli). Cogpit uses that CLI's authentication and access to models.
+Install and sign in to at least one supported CLI: [Claude Code](https://code.claude.com/docs/en/quickstart), [OpenAI Codex](https://developers.openai.com/codex/cli), [GitHub Copilot CLI](https://docs.github.com/en/copilot/how-tos/copilot-cli/set-up-copilot-cli/install-copilot-cli), or [Google Antigravity CLI](https://antigravity.google/docs/cli/install). Cogpit uses that CLI's authentication and access to models.
 
 ### Download the desktop app
 
@@ -76,7 +76,7 @@ npx cogpit@latest preview <session-id>
 
 See [launcher options](packages/cogpit-cli/README.md) or the [self-hosting guide](docs/self-hosting.md) for a headless server and remote access.
 
-## Claude Code, Codex, and Copilot support
+## Claude Code, Codex, Copilot, and Antigravity support
 
 Cogpit connects to the installed agent CLIs. The controls in a session reflect what that CLI supports.
 
@@ -85,6 +85,7 @@ Cogpit connects to the installed agent CLIs. The controls in a session reflect w
 | Claude Code | Start and resume chats, choose models, answer approvals, inspect subagents, set goals, undo and redo edits, and share a live session with a guest. |
 | OpenAI Codex | Start and resume threads, choose models and reasoning effort, steer active turns, answer native approvals, inspect subagents, and track goals with optional token budgets. |
 | GitHub Copilot CLI | Discover existing sessions, start and resume chats, choose models, answer approvals, and use native fork and rewind, including optional file restoration. |
+| Google Antigravity CLI | Start and resume chats with Gemini and the other models your Google account offers, choose models and thinking levels, answer approvals and the agent's questions, and reopen a Cogpit session in the `agy` terminal app. |
 
 [Read the agent-specific details](docs/usage.md#agent-support) for limits on sharing, history controls, and configuration.
 

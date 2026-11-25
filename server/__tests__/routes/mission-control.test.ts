@@ -66,6 +66,7 @@ describe("GET /api/mission-control", () => {
       codex: listing([{ sessionId, fileName: `${sessionId}.jsonl`, filePath: `/tmp/codex/${sessionId}.jsonl`, mtimeMs: 1 }]),
       copilot: listing([]),
       acp: listing([]),
+      antigravity: listing([]),
     } as unknown as Parameters<typeof createStoreRegistry>[0])
     mocks.allTopLevelSessions.mockImplementation(registry.allTopLevelSessions)
 

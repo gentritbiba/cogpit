@@ -283,6 +283,12 @@ export interface AgentCli {
    */
   readonly requiresConfiguration?: boolean
   readonly homeIsDiscoverable: boolean
+  /**
+   * Variables a provider-account instance sets for this CLI, in its sessions
+   * and its sign-in alike, so the sign-in stays in the instance's own home
+   * instead of a store every profile on the machine shares.
+   */
+  readonly instanceEnv?: Readonly<Record<string, string>>
   readonly process: AgentProcessMatch
   /** Null for an agent Cogpit is told how to launch rather than one a person installs. */
   readonly install: AgentInstallGuide | null
@@ -1104,6 +1110,82 @@ const acp: AgentDescriptor = {
   capabilities: { ...copilot.capabilities, undo: false, redo: false, nativeRewind: false, nativeFork: false, midTurnSteering: false, activeNotifications: false, externalProcesses: false, autoPermissionMode: "never", toolPermissionRules: false, namedSessions: false },
 }
 
+/**
+ * Where, inside the Antigravity CLI's home, Cogpit keeps its own transcript of
+ * each session. The CLI's conversations are protobuf databases, so Cogpit
+ * records what it drives instead of reading them back.
+ */
+export const ANTIGRAVITY_TRANSCRIPTS_DIR = "antigravity-cli/cogpit-sessions"
+
+/**
+ * Google's Antigravity CLI. Cogpit drives `agy acp` over the Agent Client
+ * Protocol and names each transcript by the agent's conversation id, so
+ * `agy --conversation` reopens it in a terminal.
+ */
+const antigravity: AgentDescriptor = {
+  ...acp, kind: "antigravity", displayName: "Antigravity", binName: "agy",
+  dirName: base64DirNameCodec("agy__"),
+  resume: {
+    command: (sessionId, cwd) => {
+      // An account instance's sign-in lives in its own home, which a plain terminal does not use.
+      if (splitInstanceSessionId(sessionId).instanceId !== "default") return "Resume this session in Cogpit"
+      return cwd ? `cd ${shellQuote(cwd)} && agy --conversation ${sessionId}` : `agy --conversation ${sessionId}`
+    },
+    args: (sessionId) => ["--conversation", sessionId],
+  },
+  launchArgs: {
+    permissions: (permissions) => {
+      switch (permissions?.mode) {
+        case "bypassPermissions": return ["--dangerously-skip-permissions"]
+        case "acceptEdits": return ["--mode", "accept-edits"]
+        case "plan": return ["--mode", "plan"]
+        default: return []
+      }
+    },
+    model: (model) => flag("--model", model),
+    effort: (effort) => flag("--effort", effort),
+    fastTier: () => [],
+  },
+  cli: {
+    ...acp.cli,
+    homebrew: { name: "antigravity-cli", cask: true },
+    wingetId: "Google.AntigravityCLI",
+    selfUpdate: { args: ["update"], matches: (path) => path.endsWith("/.local/bin/agy") || path.endsWith("/.local/bin/agy.exe") },
+    requiresConfiguration: false,
+    homeDirName: ".gemini",
+    // The CLI only moves with HOME; this places an account instance's transcripts.
+    homeEnvVar: "COGPIT_ANTIGRAVITY_HOME",
+    installMarker: "antigravity-cli/conversations",
+    // A Google sign-in goes to the OS keyring, one entry for every profile,
+    // unless the CLI believes it runs over SSH; then it uses a file in its home.
+    instanceEnv: { SSH_CONNECTION: "127.0.0.1 0 127.0.0.1 0" },
+    process: { by: "executable", sessionIdFromCommand: (command) => commandCapture(command, new RegExp(`(?:--conversation|--resume|-r)(?:=|\\s+)(${ARGV_SESSION_ID})`)) },
+    install: {
+      page: "https://antigravity.google/docs/cli/install",
+      command: (platform) => platform === "win32"
+        ? "irm https://antigravity.google/cli/install.ps1 | iex"
+        : "curl -fsSL https://antigravity.google/cli/install.sh | bash",
+    },
+    // `agy acp --login` prints a Google sign-in link and reads the code back.
+    // There is no offline status command: only a session start proves a sign-in.
+    signIn: { args: ["acp", "--login"], envVars: [], statusArgs: null, readStatus: () => "unknown" },
+  },
+  config: {
+    ...acp.config,
+    rootDirName: ".gemini",
+    instructions: [
+      { in: "root", path: "GEMINI.md", scopes: ["global"] },
+      { in: "root", path: "AGENTS.md", scopes: ["global"] },
+      { in: "scope", path: "GEMINI.md", scopes: ["project"] },
+      { in: "scope", path: "AGENTS.md", scopes: ["project"] },
+    ],
+    skillsDir: "config/skills",
+  },
+  contextWindow: { defaultLimit: 1_000_000, limits: [], compactBuffer: 0, extendedContext: null },
+  // Thinking levels come from the live catalog, for the model the agent reported them for.
+  capabilities: { ...acp.capabilities, imageInput: true, reasoningEffort: true },
+}
+
 // ── Registry ────────────────────────────────────────────────────────────────
 
 const DESCRIPTORS: Readonly<Record<AgentKind, AgentDescriptor>> = Object.freeze({
@@ -1111,6 +1193,7 @@ const DESCRIPTORS: Readonly<Record<AgentKind, AgentDescriptor>> = Object.freeze(
   codex,
   copilot,
   acp,
+  antigravity,
 })
 
 export function descriptorFor(kind: AgentKind): AgentDescriptor {

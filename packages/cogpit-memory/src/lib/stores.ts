@@ -21,12 +21,13 @@ import { readFileSync, readdirSync, realpathSync, statSync, type Dirent } from "
 import { isAbsolute, join, relative, resolve, sep } from "node:path"
 import {
   AGENT_KINDS,
+  ANTIGRAVITY_TRANSCRIPTS_DIR,
   descriptorFor,
   type AgentDescriptor,
   type AgentKind,
   descriptorForDirName,
 } from "./agent-descriptors"
-import { dirs } from "./dirs"
+import { agentHomeDir, dirs } from "./dirs"
 import { instanceSessionId, splitInstanceSessionId } from "./instances"
 import { isListableTranscript, uncompressedTranscriptName } from "./transcriptFile"
 
@@ -325,12 +326,18 @@ const WALKERS: Record<AgentKind, Walker> = {
     identify: claudeIdentify,
     find: (root, id) => WALKERS.claude.find(root, id),
   },
+  antigravity: {
+    root: () => join(agentHomeDir("antigravity"), ANTIGRAVITY_TRANSCRIPTS_DIR),
+    list: walkClaude,
+    identify: claudeIdentify,
+    find: (root, id) => WALKERS.claude.find(root, id),
+  },
 }
 
 function makeStore(kind: AgentKind, home?: string, configuredId?: string): AgentSessionStore {
   const walker = WALKERS[kind]
   const instanceId = configuredId ?? (process.env.COGPIT_WORKER_AGENT === kind ? process.env.COGPIT_AGENT_INSTANCE_ID : undefined) ?? "default"
-  const root = home ? () => join(home, kind === "codex" ? "sessions" : kind === "copilot" ? "session-state" : "projects") : walker.root
+  const root = home ? () => join(home, kind === "codex" ? "sessions" : kind === "copilot" ? "session-state" : kind === "antigravity" ? ANTIGRAVITY_TRANSCRIPTS_DIR : "projects") : walker.root
   const identify = (filePath: string, directory = root()): SessionFileIdentity => {
     const identity = walker.identify(filePath, directory)
     return { ...identity, sessionId: instanceSessionId(instanceId, identity.sessionId), parentSessionId: identity.parentSessionId ? instanceSessionId(instanceId, identity.parentSessionId) : null }
@@ -352,6 +359,7 @@ const STORES: Record<AgentKind, AgentSessionStore> = {
   codex: makeStore("codex"),
   copilot: makeStore("copilot"),
   acp: makeStore("acp"),
+  antigravity: makeStore("antigravity"),
 }
 
 export function storeFor(kind: AgentKind): AgentSessionStore {

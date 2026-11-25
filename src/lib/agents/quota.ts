@@ -238,6 +238,7 @@ export interface QuotaSource {
 
 const QUOTA_SOURCES: Record<AgentKind, QuotaSource> = {
   acp: { endpoint: "/api/acp/runtime", read: () => ({}) },
+  antigravity: { endpoint: "/api/agy/runtime", read: () => ({}) },
   claude: {
     endpoint: "/api/claude/runtime",
     read: mapClaudeRuntimeResponse,
