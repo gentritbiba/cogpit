@@ -94,6 +94,65 @@ describe("useDeviceSwipe", () => {
     expect(onMove.mock.calls.at(-1)![0]).toBeLessThan(-8)
   })
 
+  it("paints the last movement before letting go", () => {
+    const onMove = vi.fn()
+    const onRelease = vi.fn()
+    const { getByTestId } = render(<Surface onMove={onMove} onRelease={onRelease} />)
+    wheel(getByTestId("text"), [20, 19, 18, 17, 16, 15])
+    expect(onRelease).toHaveBeenCalledOnce()
+    expect(onMove.mock.calls.at(-1)![0]).toBe(onRelease.mock.calls[0][0])
+  })
+
+  it("keeps a steady drag under the fingers", () => {
+    const onRelease = vi.fn()
+    const { getByTestId } = render(<Surface onMove={vi.fn()} onRelease={onRelease} />)
+    wheel(getByTestId("text"), [12, ...fingers(40, 10)])
+    expect(onRelease).not.toHaveBeenCalled()
+    vi.advanceTimersByTime(70)
+    expect(onRelease.mock.calls[0][0]).toBe(-412)
+  })
+
+  it("reads momentum merged into one event by a busy page as momentum, not as a new swipe", () => {
+    const onStart = vi.fn()
+    const { getByTestId } = render(<Surface onStart={onStart} onMove={vi.fn()} onRelease={vi.fn()} />)
+    const text = getByTestId("text")
+    wheel(text, fingers(10, 27))
+    const tail = momentum(27, 30)
+    wheel(text, tail.slice(0, 4))
+    // Two frames' momentum in one event, then a page busy long enough to merge a dozen more.
+    text.dispatchEvent(new WheelEvent("wheel", { deltaX: tail[4] + tail[5], bubbles: true }))
+    vi.setSystemTime(Date.now() + 16)
+    wheel(text, tail.slice(6, 8))
+    vi.setSystemTime(Date.now() + 100)
+    text.dispatchEvent(new WheelEvent("wheel", { deltaX: tail.slice(8, 20).reduce((sum, d) => sum + d, 0), bubbles: true }))
+    vi.advanceTimersByTime(8)
+    wheel(text, tail.slice(20))
+    expect(onStart).toHaveBeenCalledOnce()
+  })
+
+  it("keeps a swipe whose events a busy page delayed", () => {
+    const onRelease = vi.fn()
+    const { getByTestId } = render(<Surface onMove={vi.fn()} onRelease={onRelease} />)
+    const text = getByTestId("text")
+    wheel(text, fingers(6))
+    // The page was busy: the next event arrives late, before the release timer could run.
+    vi.setSystemTime(Date.now() + 100)
+    wheel(text, fingers(6))
+    vi.advanceTimersByTime(70)
+    expect(onRelease).toHaveBeenCalledOnce()
+    expect(onRelease.mock.calls[0][0]).toBe(-144)
+  })
+
+  it("takes fingers that keep pace after a release for a new swipe", () => {
+    const onStart = vi.fn()
+    const { getByTestId } = render(<Surface onStart={onStart} onMove={vi.fn()} onRelease={vi.fn()} />)
+    const text = getByTestId("text")
+    wheel(text, fingers(10, 24))
+    wheel(text, momentum(24, 4))
+    wheel(text, fingers(6, 20))
+    expect(onStart).toHaveBeenCalledTimes(2)
+  })
+
   it("starts the next swipe after a pause, wherever the last one was", () => {
     const onStart = vi.fn()
     const onRelease = vi.fn()

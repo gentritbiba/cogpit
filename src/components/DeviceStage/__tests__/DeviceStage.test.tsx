@@ -1,3 +1,4 @@
+import { useEffect, useState } from "react"
 import { act, cleanup, render, screen, waitFor } from "@testing-library/react"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { DeviceStage } from "../DeviceStage"
@@ -8,6 +9,16 @@ const machines = [{ id: "local", name: "This machine" }, { id: "dev_1", name: "S
 
 function PaneContent() {
   return <p>{`content of ${useDeviceId()}`}</p>
+}
+
+/** A machine whose UI keeps changing, as one still loading does. */
+function Busy() {
+  const [tick, setTick] = useState(0)
+  useEffect(() => {
+    const timer = setInterval(() => setTick((value) => value + 1), 40)
+    return () => clearInterval(timer)
+  }, [])
+  return <p>{`content of ${useDeviceId()} ${tick}`}</p>
 }
 
 function renderStage(panes = [{ key: "local", deviceId: "local" }], active = "local") {
@@ -124,6 +135,60 @@ describe("DeviceStage", () => {
     expect(push).not.toHaveBeenCalled()
     for (const pane of document.querySelectorAll<HTMLElement>("[data-device-pane]")) expect(pane.style.transform).toBe("")
     expect(track().style.transform).toBe("")
+  })
+
+  it("lets Back undo a switch while its slide still plays", async () => {
+    reduceMotion(false)
+    const played = playAnimations()
+    const { rerender } = renderStage(bothPanes)
+    const stage = (active: string) => (
+      <DeviceStage panes={bothPanes} activeDeviceId={active} machines={machines} swipeEnabled renderPane={() => <PaneContent />} />
+    )
+    act(() => switchDevice("dev_1"))
+    await waitFor(() => expect(window.location.pathname).toBe("/d/dev_1/"))
+    rerender(stage("dev_1"))
+    const push = vi.spyOn(window.history, "pushState")
+    // Back, before the slide is over.
+    expect(played[0].finished).toBe(false)
+    rerender(stage("local"))
+    await new Promise((resolve) => setTimeout(resolve, 600))
+    expect(push).not.toHaveBeenCalled()
+    expect(track().style.transform).toBe("")
+    expect(frameShown("dev_1")).toBe(false)
+  })
+
+  it("keeps a slide's destination when the machines change order under it", async () => {
+    reduceMotion(false)
+    playAnimations()
+    const three = [...machines, { id: "dev_2", name: "Garage" }]
+    const panes = [...bothPanes, { key: "dev_2", deviceId: "dev_2" }]
+    const stage = (order: typeof three, active: string) => (
+      <DeviceStage panes={panes} activeDeviceId={active} machines={order} swipeEnabled renderPane={() => <PaneContent />} />
+    )
+    const { rerender } = render(stage(three, "local"))
+    act(() => switchDevice("dev_1"))
+    await waitFor(() => expect(window.location.pathname).toBe("/d/dev_1/"))
+    const push = vi.spyOn(window.history, "pushState")
+    rerender(stage([three[0], three[2], three[1]], "dev_1"))
+    await new Promise((resolve) => setTimeout(resolve, 600))
+    expect(push).not.toHaveBeenCalled()
+    expect(window.location.pathname).toBe("/d/dev_1/")
+    expect(track().style.transform).toBe("")
+  })
+
+  it("takes down a first-open poster when navigation leaves its machine", async () => {
+    reduceMotion(false)
+    playAnimations()
+    const { rerender } = renderStage()
+    act(() => switchDevice("dev_1"))
+    await waitFor(() => expect(window.location.pathname).toBe("/d/dev_1/"))
+    rerender(<DeviceStage panes={bothPanes} activeDeviceId="dev_1" machines={machines} swipeEnabled renderPane={() => <Busy />} />)
+    await new Promise((resolve) => setTimeout(resolve, 600))
+    expect(track().style.transform).toBe("")
+    expect(screen.getByText("Studio", { selector: "span.text-sm" })).toBeInTheDocument()
+    // Back to this machine while the new one is still drawing itself behind its poster.
+    rerender(<DeviceStage panes={bothPanes} activeDeviceId="local" machines={machines} swipeEnabled renderPane={() => <Busy />} />)
+    expect(screen.queryByText("Studio", { selector: "span.text-sm" })).toBeNull()
   })
 
   it("drags the machines with the fingers, then lands on the next one", async () => {

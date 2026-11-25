@@ -31,8 +31,9 @@ export interface StageParts {
 }
 
 interface Settle {
-  /** Slot it comes to rest on. */
+  /** Slot it comes to rest on, and the machine there when it began. */
   target: number
+  destination: string | null
   /** px from the target when it began, and how fast that changed (px/ms). */
   distance: number
   velocity: number
@@ -58,8 +59,8 @@ interface Motion {
   settle: Settle | null
   /** The slide ended, waiting for React to show the machine it switched to. */
   arrived: boolean
-  /** The machine this move switched to, before React caught up. */
-  committed: string | null
+  /** Machines this move switched to that React has not shown yet, oldest first. */
+  pending: string[]
   commitTimer: ReturnType<typeof setTimeout> | null
 }
 
@@ -106,7 +107,7 @@ export class StageMotion {
 
   /** The machine on screen, counting a switch React has not caught up with. */
   current(): string {
-    return this.motion?.committed ?? this.parts.active()
+    return this.motion?.pending.at(-1) ?? this.parts.active()
   }
 
   /** A machine's element came or went: a move in progress places it. */
@@ -164,27 +165,37 @@ export class StageMotion {
     this.settle(this.slotOf(target), 0, COMMIT_AFTER_START_MS)
   }
 
-  /** React now shows `id`. */
+  /** React now shows `id`: a switch this move made, or one Back, Forward or a link made. */
   activeChanged(id: string): void {
     const motion = this.motion
-    if (!motion) return
-    if (id === motion.committed) {
-      motion.committed = null
+    if (!motion) {
+      // A poster waiting on a machine first opened must not cover the one navigated to.
+      const poster = this.parts.posterFor()
+      if (poster && poster !== id) this.parts.showPoster(null, false)
+      return
+    }
+    const caughtUp = motion.pending.indexOf(id)
+    if (caughtUp >= 0) {
+      motion.pending.splice(0, caughtUp + 1)
+      if (motion.pending.length) return
       if (motion.arrived) this.rest()
       // React hid the machine we left; it stays drawn while it slides out.
       else this.draw(motion.range)
       return
     }
-    if (!motion.committed && id === motion.originId) return
     // Back or Forward got to the slide's destination first: let the slide finish without committing again.
-    if (motion.settle && this.idAt(motion.settle.target) === id) {
+    if (motion.settle?.destination === id) {
       this.cancelCommit(motion)
-      motion.committed = null
-      if (motion.arrived) this.rest()
+      motion.pending = []
       return
     }
-    // Something else switched machines: drop the move where React is.
+    // Navigation went elsewhere, back to where the move began included: drop the move where React is.
     this.rest()
+  }
+
+  /** The machines changed order: land any slide on the machine it was going to, then lay out afresh. */
+  orderChanged(): void {
+    if (this.motion) this.finish()
   }
 
   dispose(): void {
@@ -225,7 +236,7 @@ export class StageMotion {
       const origin = this.slotOf(id)
       motion = {
         origin, originId: id, pos: origin, swipeFrom: origin, standIn: null, range: [origin, origin],
-        drawn: new Map(), uncovered: new Set(), settle: null, arrived: false, committed: null, commitTimer: null,
+        drawn: new Map(), uncovered: new Set(), settle: null, arrived: false, pending: [], commitTimer: null,
       }
       this.motion = motion
       this.draw(motion.range)
@@ -255,8 +266,7 @@ export class StageMotion {
     const settle = motion.settle
     if (settle) {
       this.stopSettle(motion)
-      const target = this.idAt(settle.target)
-      if (target && target !== this.current()) this.commit(target)
+      this.commitIfNeeded(settle.destination)
     }
     motion.standIn = null
     motion.origin = this.slotOf(this.current())
@@ -284,18 +294,18 @@ export class StageMotion {
     const { duration, distances } = this.parts.reducedMotion()
       ? { duration: 0, distances: [0] }
       : springFrames((from - target) * width, velocity * width)
-    const settle: Settle = { target, distance: (from - target) * width, velocity: velocity * width, animations: [] }
+    const destination = this.idAt(target)
+    const settle: Settle = { target, destination, distance: (from - target) * width, velocity: velocity * width, animations: [] }
     motion.settle = settle
     motion.pos = target
     this.paint()
-    const destination = this.idAt(target)
     const track = this.parts.track()
     if (duration === 0 || !track || typeof track.animate !== "function") return this.arrive(settle)
 
     if (destination && destination !== this.current()) {
       motion.commitTimer = setTimeout(() => {
         motion.commitTimer = null
-        this.commit(destination)
+        this.commitIfNeeded(destination)
       }, commitAfter)
     }
     const base = (motion.origin - target) * width
@@ -316,17 +326,21 @@ export class StageMotion {
     if (!motion || motion.settle !== settle) return
     motion.settle = null
     motion.arrived = true
-    const destination = this.idAt(settle.target)
-    if (destination && destination !== this.current()) this.commit(destination)
+    this.commitIfNeeded(settle.destination)
     // The machine switched to may still be on its way through React; rest once it shows.
     if (this.parts.active() === this.current()) this.rest()
+  }
+
+  /** Switch to `id` unless the view is on it already, or it has left the switcher. */
+  private commitIfNeeded(id: string | null): void {
+    if (id && id !== this.current() && this.parts.order().includes(id)) this.commit(id)
   }
 
   private commit(id: string): void {
     const motion = this.motion
     if (!motion) return
     this.cancelCommit(motion)
-    motion.committed = id
+    motion.pending.push(id)
     // The poster stays over a machine opened for the first time until it has drawn itself.
     if (!this.parts.mounted(id)) this.parts.showPoster(id, true)
     this.parts.commit(id)

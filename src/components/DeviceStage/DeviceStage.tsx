@@ -183,6 +183,10 @@ export function DeviceStage({ panes, activeDeviceId, machines, swipeEnabled, ren
   // React shows another machine: one a move switched to, or one Back, Forward or a link chose.
   useLayoutEffect(() => motion.activeChanged(activeDeviceId), [motion, activeDeviceId])
 
+  // Slots follow the switcher's order, so a move in progress lands before the order changes under it.
+  const order = machines.map((machine) => machine.id).join("\n")
+  useLayoutEffect(() => motion.orderChanged(), [motion, order])
+
   // A machine opened for the first time: lift its poster once its UI has drawn itself.
   const posterId = poster?.connecting ? poster.id : null
   useLayoutEffect(() => {

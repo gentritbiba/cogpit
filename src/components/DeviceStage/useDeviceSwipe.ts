@@ -21,13 +21,18 @@ const SIDEWAYS_RATIO = 1.5
  */
 const RELEASE_AFTER_MS = 70
 /**
- * The trackpad's momentum after the fingers lift shrinks every event; this
- * many shrinking events in a row, losing at least MOMENTUM_DECAY overall,
- * mean the fingers are off. Fingers that slow down look the same, and are
- * about to stop anyway; if they speed up again, that is a new swipe.
+ * The trackpad's momentum after the fingers lift slows down every event;
+ * this many slowdowns, losing at least MOMENTUM_DECAY overall, mean the
+ * fingers are off. Fingers that slow down look the same, and are about to
+ * stop anyway; if they keep going, that is a new swipe.
  */
 const MOMENTUM_EVENTS = 4
 const MOMENTUM_DECAY = 0.95
+/** Momentum never pauses this long: whatever comes after is fingers. */
+const MOMENTUM_GAP_MS = 300
+/** Movement this fast or more for this many events while momentum should be slowing is fingers again. */
+const STEADY_EVENTS = 4
+const STEADY_SIZE = 8
 /** Velocity is measured over the latest movement this long. */
 const VELOCITY_WINDOW_MS = 50
 /** Where a release is headed: on at its velocity for this long. */
@@ -66,8 +71,10 @@ type Phase = "idle" | "deciding" | "swiping" | "coasting" | "ignored"
  * nothing scrolls sideways moves the machine on screen with the fingers, and
  * the release decides where it lands. The browser does not say when fingers
  * leave a trackpad, so a release is the fingers going still or the momentum
- * that follows a lift. Momentum only ever slows down: anything that speeds up
- * again is fingers back on the trackpad, and starts the next swipe at once.
+ * that follows a lift. Momentum only ever slows down: speeding up, keeping
+ * pace or turning around is fingers back on the trackpad, and starts the
+ * next swipe at once. Speeds are per millisecond, because a busy page gets
+ * several events merged into one larger one.
  */
 export function useDeviceSwipe(enabled: boolean, handlers: SwipeHandlers): void {
   const latest = useRef(handlers)
@@ -76,13 +83,17 @@ export function useDeviceSwipe(enabled: boolean, handlers: SwipeHandlers): void 
   useEffect(() => {
     if (!enabled) return
     let phase: Phase = "idle"
+    /** Coasting on momentum, rather than after fingers that went still. */
+    let momentum = false
     let startTarget: Element | null = null
     let moved: [number, number] = [0, 0]
-    let lastTime = 0
-    let lastSize = 0
+    let lastTime = -Infinity
+    let lastRate = 0
     let lastX = 0
-    let shrinking = 0
-    let shrinkFrom = 0
+    let slowing = 0
+    let slowingFrom = 0
+    let rising = 0
+    let steady = 0
     let samples: { time: number; x: number }[] = []
     let releaseTimer: ReturnType<typeof setTimeout> | null = null
 
@@ -93,23 +104,46 @@ export function useDeviceSwipe(enabled: boolean, handlers: SwipeHandlers): void 
       return samples.slice(1).reduce((sum, sample) => sum + sample.x, 0) / span
     }
 
-    const release = (moving: boolean) => {
+    const release = (onMomentum: boolean) => {
       if (releaseTimer) clearTimeout(releaseTimer)
       releaseTimer = null
       phase = "coasting"
+      momentum = onMomentum
+      rising = 0
+      steady = 0
       // Fingers that went still are not moving; momentum carries the speed they lifted at.
-      const speed = moving ? velocity() : 0
+      const speed = onMomentum ? velocity() : 0
       latest.current.onRelease(moved[0], speed, moved[0] + speed * PROJECTION_MS)
     }
 
     const begin = (event: WheelEvent) => {
-      // A paused swipe whose release timer ran late still lets go first.
-      if (phase === "swiping") release(false)
       phase = "deciding"
       startTarget = event.target instanceof Element ? event.target : null
       moved = [0, 0]
-      shrinking = 0
+      slowing = 0
       samples = []
+    }
+
+    /** Whether this event starts a new gesture rather than continuing the last. */
+    const starts = (x: number, size: number, rate: number, gap: number) => {
+      switch (phase) {
+        case "idle":
+          return true
+        // A swipe ends by its release timer, which a busy page can delay; a late event still belongs to it.
+        case "swiping":
+          return false
+        case "deciding":
+        case "ignored":
+          return gap > RELEASE_AFTER_MS
+        case "coasting": {
+          if (!momentum) return true
+          rising = rate > lastRate * 1.1 ? rising + 1 : 0
+          steady = size >= STEADY_SIZE && rate >= lastRate * 0.98 ? steady + 1 : 0
+          const turned = x !== 0 && lastX !== 0 && Math.sign(x) !== Math.sign(lastX)
+          return gap > MOMENTUM_GAP_MS || turned || rising >= 2 || steady >= STEADY_EVENTS
+            || (gap > RELEASE_AFTER_MS && rate > lastRate)
+        }
+      }
     }
 
     const onWheel = (event: WheelEvent) => {
@@ -119,14 +153,15 @@ export function useDeviceSwipe(enabled: boolean, handlers: SwipeHandlers): void 
       const [x, y] = movement(event)
       const size = Math.abs(x) + Math.abs(y)
       const gap = event.timeStamp - lastTime
-      const fresh = phase === "idle" || gap > RELEASE_AFTER_MS
-        // Momentum never speeds up or turns around: that is fingers again.
-        || (phase === "coasting" && (size > lastSize + 1 || (x !== 0 && Math.sign(x) === -Math.sign(lastX))))
+      const rate = size / Math.max(gap, 4)
+      if (starts(x, size, rate, gap)) begin(event)
+      // Slowdowns count, holding pace keeps the count, speeding up resets it.
+      else if (rate < lastRate) {
+        if (slowing === 0) slowingFrom = lastRate
+        slowing++
+      } else if (rate > lastRate) slowing = 0
       lastTime = event.timeStamp
-      if (fresh) begin(event)
-      else shrinking = size < lastSize || (size === lastSize && shrinking > 0) ? shrinking + 1 : 0
-      if (shrinking === 1) shrinkFrom = lastSize
-      lastSize = size
+      lastRate = rate
       lastX = x
       if (phase === "coasting" || phase === "ignored") return
 
@@ -145,8 +180,8 @@ export function useDeviceSwipe(enabled: boolean, handlers: SwipeHandlers): void 
         latest.current.onStart()
       }
 
-      if (shrinking >= MOMENTUM_EVENTS && size <= shrinkFrom * MOMENTUM_DECAY) return release(true)
       latest.current.onMove(moved[0])
+      if (slowing >= MOMENTUM_EVENTS && rate <= slowingFrom * MOMENTUM_DECAY) return release(true)
       if (releaseTimer) clearTimeout(releaseTimer)
       releaseTimer = setTimeout(() => release(false), RELEASE_AFTER_MS)
     }
