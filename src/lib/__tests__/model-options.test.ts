@@ -85,6 +85,19 @@ describe("model options store", () => {
     expect(supportsImageInput("copilot", copilot, "vision-reasoning-model")).toBe(true)
   })
 
+  it("offers Antigravity thinking levels only for the model the agent reported them for", () => {
+    expect(getEffortOptions("antigravity", getModelOptions("antigravity"), "")).toEqual([])
+    setDynamicModelOptions("antigravity", [
+      { value: "", label: "Provider default", supportsEffort: false },
+      { value: "gemini-3.8-flash", label: "Gemini 3.8 Flash", supportsEffort: true, supportedReasoningEfforts: [{ value: "low", label: "Low" }, { value: "high", label: "High" }] },
+      { value: "gemini-pro-agent", label: "Gemini 3.1 Pro", supportsEffort: false },
+    ])
+    const antigravity = getModelOptions("antigravity")
+    expect(getEffortOptions("antigravity", antigravity, "gemini-3.8-flash").map((effort) => effort.value)).toEqual(["low", "high"])
+    expect(getEffortOptions("antigravity", antigravity, "gemini-pro-agent")).toEqual([])
+    expect(getEffortOptions("antigravity", antigravity, "")).toEqual([])
+  })
+
   it("swaps in a dynamic catalog per provider and notifies subscribers", () => {
     const listener = vi.fn()
     const unsubscribe = subscribeModelOptions(listener)

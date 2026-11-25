@@ -39,6 +39,12 @@ app.onRequest("session/prompt", async ({ params, client }) => {
   const update = (value) => client.notify("session/update", { sessionId, update: value })
   const reply = (value) => update({ sessionUpdate: "agent_message_chunk", content: { type: "text", text: value } })
   if (text === "wait") return new Promise((resolve) => cancellations.set(sessionId, resolve))
+  if (text === "hold") {
+    // Ends the turn only once its permission request is answered, as ACP agents may.
+    const response = await client.request("session/request_permission", { sessionId, toolCall: { toolCallId: "call-3", title: "Run run_command?", kind: "execute", rawInput: { CommandLine: "sleep 60" } }, options: [{ optionId: "allow-3", name: "Allow once", kind: "allow_once" }, { optionId: "deny-3", name: "Deny", kind: "reject_once" }] })
+    return { stopReason: response.outcome.outcome === "cancelled" ? "cancelled" : "end_turn" }
+  }
+  if (text === "unfinished") await update({ sessionUpdate: "tool_call", toolCallId: "call-4", title: "Running run_command", status: "pending" })
   if (text === "command") {
     await update({ sessionUpdate: "tool_call", toolCallId: "call-1", title: "Running run_command", status: "pending" })
     await update({ sessionUpdate: "tool_call_update", toolCallId: "call-1", status: "in_progress", rawInput: { CommandLine: "ls -a", Cwd: "/work" } })

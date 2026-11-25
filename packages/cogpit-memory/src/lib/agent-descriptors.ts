@@ -1178,7 +1178,8 @@ const antigravity: AgentDescriptor = {
     skillsDir: "config/skills",
   },
   contextWindow: { defaultLimit: 1_000_000, limits: [], compactBuffer: 0, extendedContext: null },
-  capabilities: { ...acp.capabilities, imageInput: true },
+  // Thinking levels come from the live catalog, for the model the agent reported them for.
+  capabilities: { ...acp.capabilities, imageInput: true, reasoningEffort: true },
 }
 
 // ── Registry ────────────────────────────────────────────────────────────────

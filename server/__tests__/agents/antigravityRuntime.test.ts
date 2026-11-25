@@ -136,6 +136,24 @@ describe("Antigravity runtime", () => {
     expect(blocks.find((block) => block.type === "tool_result")).toMatchObject({ tool_use_id: "call-1", content: "a\nb", is_error: false })
   })
 
+  it("answers a pending request as cancelled when the turn is interrupted, so the agent can end it", async () => {
+    const agent = runtime()
+    const started = await start(agent, "hold", { permissions: { mode: "default" } })
+    await until(() => agent.listPendingApprovals(started.sessionId).length === 1)
+    expect(await agent.interrupt(started.sessionId)).toBe(true)
+    expect(agent.listPendingApprovals(started.sessionId)).toEqual([])
+    expect(agent.activity(started.sessionId)).toMatchObject({ live: true, running: false })
+    expect(await readFile(started.filePath, "utf8")).toContain('"result":"cancelled"')
+  })
+
+  it("records a call whose input never arrived once its turn ends", async () => {
+    const agent = runtime()
+    const started = await start(agent, "unfinished")
+    await finished(agent, started.sessionId)
+    const text = await readFile(started.filePath, "utf8")
+    expect(text).toContain('"type":"tool_use","id":"call-4","name":"run_command","input":{}')
+  })
+
   it("resumes a session the agent no longer holds", async () => {
     const first = runtime()
     const started = await start(first)
@@ -190,5 +208,6 @@ describe("Antigravity descriptor", () => {
     expect(descriptor.cli.process.sessionIdFromCommand("agy --conversation 6f9619ff-8b86-d011-b42d-00cf4fc964ff")).toBe("6f9619ff-8b86-d011-b42d-00cf4fc964ff")
     expect(descriptor.cli.install?.command("linux")).toBe("curl -fsSL https://antigravity.google/cli/install.sh | bash")
     expect(descriptor.cli.signIn?.args).toEqual(["acp", "--login"])
+    expect(descriptor.capabilities.reasoningEffort).toBe(true)
   })
 })

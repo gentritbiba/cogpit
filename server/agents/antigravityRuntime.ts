@@ -107,6 +107,7 @@ export const antigravityProfile: AcpProfile = {
     return "ask"
   },
   toolUse: antigravityToolUse,
+  deferToolCalls: true,
   toolResult: antigravityToolResult,
   explainError: (cause) => isSignInError(cause) ? new AgentRuntimeError(401, "NOT_SIGNED_IN", `${agentSignedOutTitle("antigravity")} Run: agy acp --login`) : null,
 }

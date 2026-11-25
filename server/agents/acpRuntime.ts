@@ -45,6 +45,8 @@ export interface AcpProfile {
   turnSettings(request: SendRequest): AcpTurnSetting[]
   routePermission?(request: acp.RequestPermissionRequest, mode: string | undefined): AcpPermissionRoute
   toolUse?(toolCall: AcpToolCallState): AcpToolUse
+  /** The agent announces a call before filling in its input, so it is recorded once the input arrives. */
+  deferToolCalls?: boolean
   /** The result text of a finished call, when the agent puts it somewhere other than its content. */
   toolResult?(toolCall: AcpToolCallState): string | undefined
   /** Turns an ACP error into the message the person should see, or null to keep it. */
@@ -63,7 +65,7 @@ export interface AcpToolCallState {
   written?: boolean
 }
 
-interface LiveSession { nativeId: string; cwd: string; filePath: string; running: boolean; terminalWritten?: boolean; loading?: boolean; preparing?: AbortController; completion?: Promise<TurnResult>; configOptions?: acp.SessionConfigOption[]; mode?: string; tools: Map<string, AcpToolCallState> }
+interface LiveSession { nativeId: string; cwd: string; filePath: string; running: boolean; terminalWritten?: boolean; loading?: boolean; preparing?: AbortController; completion?: Promise<TurnResult>; configOptions?: acp.SessionConfigOption[]; mode?: string; cancelling?: boolean; tools: Map<string, AcpToolCallState> }
 interface Permission { approval: PendingApproval; options: acp.PermissionOption[]; resolve: (value: acp.RequestPermissionResponse) => void; timer: ReturnType<typeof setTimeout> }
 interface Question { question: PendingQuestion; options: acp.PermissionOption[]; resolve: (value: acp.RequestPermissionResponse) => void; timer: ReturnType<typeof setTimeout> }
 
@@ -105,6 +107,7 @@ export function createAcpRuntime(profile: AcpProfile): AgentRuntime {
   function finishPrompt(sessionId: string, session: LiveSession, result: string, isError: boolean, usage?: acp.Usage | null): void {
     if (sessions.get(sessionId) !== session || session.terminalWritten) return
     session.terminalWritten = true
+    for (const tool of session.tools.values()) writeTool(sessionId, session, tool)
     append(sessionId, { type: "assistant", message: { role: "assistant", content: [], stop_reason: "end_turn", ...usage ? { usage: claudeUsage(usage) } : {} } })
     append(sessionId, { type: "result", subtype: isError ? "error_during_execution" : "success", result })
   }
@@ -147,7 +150,7 @@ export function createAcpRuntime(profile: AcpProfile): AgentRuntime {
     session.tools.set(update.toolCallId, tool)
     if (update.sessionUpdate === "tool_call_update") publishAgentProgress(id, update.toolCallId, update.title ?? update.status ?? "Working")
     const done = update.status === "completed" || update.status === "failed"
-    if (done || tool.rawInput !== undefined) writeTool(id, session, tool)
+    if (done || !profile.deferToolCalls || tool.rawInput !== undefined) writeTool(id, session, tool)
     if (done) {
       session.tools.delete(update.toolCallId)
       append(id, { type: "user", message: { role: "user", content: [{ type: "tool_result", tool_use_id: update.toolCallId, content: profile.toolResult?.(tool) ?? toolResultText(tool), is_error: update.status === "failed" }] } })
@@ -159,6 +162,7 @@ export function createAcpRuntime(profile: AcpProfile): AgentRuntime {
   }
   function onPermission(entry: [string, LiveSession], params: acp.RequestPermissionRequest, key: string, signal: AbortSignal): acp.RequestPermissionResponse | Promise<acp.RequestPermissionResponse> {
     const [sessionId, session] = entry
+    if (session.cancelling) return CANCELLED
     const route = profile.routePermission?.(params, session.mode) ?? "ask"
     if (typeof route === "object") {
       const option = params.options.find((value) => value.kind === route.optionKind)
@@ -332,8 +336,13 @@ export function createAcpRuntime(profile: AcpProfile): AgentRuntime {
       const session = sessions.get(id)
       session?.preparing?.abort()
       if (!session?.running || !connection) return false
-      await connection.agent.notify("session/cancel", { sessionId: session.nativeId })
-      if (session.completion) await bounded(session.completion, 15000)
+      // The agent may wait for its open requests to be answered before it ends the turn.
+      session.cancelling = true
+      try {
+        cancelPending(id)
+        await connection.agent.notify("session/cancel", { sessionId: session.nativeId })
+        if (session.completion) await bounded(session.completion, 15000)
+      } finally { session.cancelling = false }
       return true
     },
     async stop(id) { if (!sessions.has(id)) return false; await runtime.interrupt(id); sessions.delete(id); cancelPending(id); return true },

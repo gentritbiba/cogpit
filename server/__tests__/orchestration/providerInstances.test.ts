@@ -206,6 +206,9 @@ describe("provider instances and ACP", () => {
     expect(account.runtime.activity(started.sessionId).running).toBe(false)
     expect(account.runtime.listPendingApprovals(started.sessionId)).toEqual([])
     expect(await readFile(started.filePath, "utf8")).toContain("native-allow-42")
+    // A tool call the agent sends without input is recorded as soon as it is announced.
+    await (await account.runtime.send(started.sessionId, { message: "tool" })).completion
+    expect(await readFile(started.filePath, "utf8")).toContain('"type":"tool_use","id":"native-tool-7","name":"Fixture tool","input":{}')
     const waiting = await account.runtime.send(started.sessionId, { message: "wait" })
     await until(() => account.runtime.activity(started.sessionId).running)
     expect((await account.runtime.send(started.sessionId, { message: "busy" })).delivery).toBe("busy")
