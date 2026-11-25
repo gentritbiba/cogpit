@@ -4,6 +4,15 @@ import type { Machine } from "@/contexts/DevicePaneContext"
 import { LOCAL_DEVICE_ID } from "@/lib/device"
 import { cn } from "@/lib/utils"
 
+// Registered as a number, so a slide can animate it smoothly instead of flipping it.
+if (typeof CSS !== "undefined" && typeof CSS.registerProperty === "function") {
+  try {
+    CSS.registerProperty({ name: "--pager-to", syntax: "<number>", inherits: true, initialValue: "0" })
+  } catch {
+    // Registered already, by a hot reload.
+  }
+}
+
 interface DevicePagerProps {
   machines: readonly Machine[]
   /** The machine on screen when the move began. */
@@ -29,9 +38,9 @@ function MachineLabel({ machine, weight }: { machine: Machine | undefined; weigh
 
 /**
  * The page dots shown while moving between machines: one per machine, the
- * current one drawn long, with its name above them. While a swipe is under the
- * fingers the stage sets `--pager-to` (0 → 1) on this element, so the long dot
- * and the name slide across with the hand instead of jumping.
+ * current one drawn long, with its name above them. The stage sets
+ * `--pager-to` (0 → 1) on this element as the machines move, under the
+ * fingers and through a slide, so the long dot and the name travel with them.
  */
 export const DevicePager = forwardRef<HTMLDivElement, DevicePagerProps>(function DevicePager(
   { machines, from, to, visible },

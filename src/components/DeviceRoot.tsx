@@ -128,7 +128,7 @@ export function nextPanes(
  * The device id is derived from the URL ("/d/:id/..." → id, else "local"). We
  * re-derive on `cogpit-device-changed` (a committed switch) and on `popstate`
  * (back/forward across a device boundary). Explicit switches go through
- * DeviceStage, which slides the machines past before committing.
+ * DeviceStage, which starts the slide and commits while it plays.
  *
  * The key also carries the signed-in account (`cogpit-identity-changed`,
  * dispatched by setActiveIdentity when useMe settles /api/me): login, logout,
