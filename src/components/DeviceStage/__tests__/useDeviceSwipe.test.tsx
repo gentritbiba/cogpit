@@ -89,7 +89,7 @@ describe("useDeviceSwipe", () => {
     wheel(text, momentum(24, 6))
     expect(onRelease).toHaveBeenCalledOnce()
     // Speeding up is fingers, not momentum.
-    wheel(text, [6, 10, 14, 18])
+    wheel(text, [6, 10, 14, 18, 22, 26])
     expect(onStart).toHaveBeenCalledTimes(2)
     expect(onMove.mock.calls.at(-1)![0]).toBeLessThan(-8)
   })
