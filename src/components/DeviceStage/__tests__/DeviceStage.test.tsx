@@ -64,11 +64,11 @@ const pane = (id: string) => document.querySelector<HTMLElement>(`[data-device-p
 const frameShown = (id: string) => (pane(id).firstElementChild as HTMLElement).style.display !== "none"
 
 /** A trackpad swipe on the machine on screen: `deltas` one frame apart, then the fingers go still. */
-async function swipe(deltas: number[], frameMs = 8) {
+async function swipe(deltas: number[]) {
   const target = screen.getByText("content of local")
   for (const deltaX of deltas) {
     target.dispatchEvent(new WheelEvent("wheel", { deltaX, bubbles: true }))
-    await new Promise((resolve) => setTimeout(resolve, frameMs))
+    await new Promise((resolve) => setTimeout(resolve, 8))
   }
 }
 
@@ -205,13 +205,25 @@ describe("DeviceStage", () => {
     expect(played[0].finished).toBe(false)
   })
 
-  it("lands a short, quick flick on the next machine", async () => {
+  it("lands a short, quick flick on the next machine", () => {
     reduceMotion(false)
     playAnimations()
     vi.stubGlobal("innerWidth", 1024)
-    renderStage(bothPanes)
-    await swipe([20, 19, 18, 17, 16], 16)
-    await waitFor(() => expect(window.location.pathname).toBe("/d/dev_1/"))
+    vi.useFakeTimers()
+    try {
+      renderStage(bothPanes)
+      const target = screen.getByText("content of local")
+      for (const deltaX of [20, 19, 18, 17, 16]) {
+        act(() => {
+          target.dispatchEvent(new WheelEvent("wheel", { deltaX, bubbles: true }))
+          vi.advanceTimersByTime(16)
+        })
+      }
+      act(() => vi.advanceTimersByTime(200))
+      expect(window.location.pathname).toBe("/d/dev_1/")
+    } finally {
+      vi.useRealTimers()
+    }
   })
 
   it("switches one machine per swipe, however long its momentum runs", () => {
