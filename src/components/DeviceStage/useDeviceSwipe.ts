@@ -42,8 +42,11 @@ const SPENT_FRAME = 2
  * This many frames in a row above that floor are fingers on the trackpad.
  */
 const RENEWED_FRAMES = 3
-/** A gesture's first event after a pause counts this much at most: it may be momentum a busy page merged. */
-const FIRST_EVENT_MAX = 40
+/**
+ * After a long pause in momentum, an event moving more than this is momentum
+ * a busy page merged into one event; fingers starting out move less.
+ */
+const MERGED_MOMENTUM = 40
 /** Velocity is measured over the latest movement this long. */
 const VELOCITY_WINDOW_MS = 50
 /** Where a release is headed: on at its velocity for this long. */
@@ -145,9 +148,10 @@ export function useDeviceSwipe(enabled: boolean, handlers: SwipeHandlers): void 
      * Whether momentum this event continues is fingers instead. `frame` is its
      * movement per display frame, or null when it cannot be compared.
      */
-    const fingersAgain = (x: number, frame: number | null, gap: number) => {
+    const fingersAgain = (x: number, size: number, frame: number | null, gap: number) => {
       if (x !== 0 && lastX !== 0 && Math.sign(x) !== Math.sign(lastX)) return true
-      if (gap > MOMENTUM_GAP_MS || (gap > RELEASE_AFTER_MS && floor <= SPENT_FRAME)) return true
+      if (gap > MOMENTUM_GAP_MS) return size <= MERGED_MOMENTUM
+      if (gap > RELEASE_AFTER_MS && floor <= SPENT_FRAME) return true
       if (frame === null) return false
       if (frame < floor) {
         floor = frame
@@ -161,7 +165,7 @@ export function useDeviceSwipe(enabled: boolean, handlers: SwipeHandlers): void 
     }
 
     /** Whether this event starts a new gesture rather than continuing the last. */
-    const starts = (x: number, frame: number | null, gap: number) => {
+    const starts = (x: number, size: number, frame: number | null, gap: number) => {
       switch (phase) {
         case "idle":
           return true
@@ -172,7 +176,7 @@ export function useDeviceSwipe(enabled: boolean, handlers: SwipeHandlers): void 
         case "ignored":
           return gap > RELEASE_AFTER_MS
         case "coasting":
-          return !momentum || fingersAgain(x, frame, gap)
+          return !momentum || fingersAgain(x, size, frame, gap)
       }
     }
 
@@ -190,11 +194,9 @@ export function useDeviceSwipe(enabled: boolean, handlers: SwipeHandlers): void 
       // Whole frames of the usual (median) gap, so the jitter of single events is not read as a speed change.
       const usual = [...gaps].sort((a, b) => a - b)[gaps.length >> 1]
       const frame = comparable ? size / Math.max(1, Math.floor(gap / usual + 0.35)) : null
-      const afterMomentum = phase === "coasting" && momentum && frame === null
-      const fresh = starts(x, frame, gap)
+      const fresh = starts(x, size, frame, gap)
       lastX = x
       if (fresh) begin(event)
-      const scale = fresh && afterMomentum && size > FIRST_EVENT_MAX ? FIRST_EVENT_MAX / size : 1
       // The first event of a gesture counts as one frame.
       const thisFrame = frame ?? size
       if (!fresh) {
@@ -206,8 +208,8 @@ export function useDeviceSwipe(enabled: boolean, handlers: SwipeHandlers): void 
       lastFrame = thisFrame
       if (phase === "coasting" || phase === "ignored") return
 
-      moved = [moved[0] + x * scale, moved[1] + y * scale]
-      samples.push({ time: event.timeStamp, x: x * scale })
+      moved = [moved[0] + x, moved[1] + y]
+      samples.push({ time: event.timeStamp, x })
       while (samples.length > 2 && event.timeStamp - samples[0].time > VELOCITY_WINDOW_MS) samples.shift()
 
       if (phase === "deciding") {

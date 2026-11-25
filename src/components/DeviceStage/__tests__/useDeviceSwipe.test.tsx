@@ -130,6 +130,20 @@ describe("useDeviceSwipe", () => {
     expect(onStart).toHaveBeenCalledOnce()
   })
 
+  it("reads momentum a long-busy page merged into one big event as momentum", () => {
+    const onStart = vi.fn()
+    const { getByTestId } = render(<Surface onStart={onStart} onMove={vi.fn()} onRelease={vi.fn()} />)
+    const text = getByTestId("text")
+    wheel(text, fingers(10, 24))
+    const tail = momentum(24, 60).filter((delta) => delta > 0)
+    wheel(text, tail.slice(0, 6))
+    // A third of a second blocked: everything momentum moved meanwhile arrives as one event.
+    vi.setSystemTime(Date.now() + 340)
+    wheel(text, [tail.slice(6, 46).reduce((sum, d) => sum + d, 0)])
+    wheel(text, tail.slice(46))
+    expect(onStart).toHaveBeenCalledOnce()
+  })
+
   it("keeps a swipe whose events a busy page delayed", () => {
     const onRelease = vi.fn()
     const { getByTestId } = render(<Surface onMove={vi.fn()} onRelease={onRelease} />)
