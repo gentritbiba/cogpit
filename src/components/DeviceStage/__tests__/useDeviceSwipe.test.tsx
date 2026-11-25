@@ -143,14 +143,65 @@ describe("useDeviceSwipe", () => {
     expect(onRelease.mock.calls[0][0]).toBe(-144)
   })
 
-  it("takes fingers that keep pace after a release for a new swipe", () => {
+  it("takes fingers clearly faster than momentum's slowest frame for a new swipe", () => {
     const onStart = vi.fn()
     const { getByTestId } = render(<Surface onStart={onStart} onMove={vi.fn()} onRelease={vi.fn()} />)
     const text = getByTestId("text")
     wheel(text, fingers(10, 24))
     wheel(text, momentum(24, 4))
-    wheel(text, fingers(6, 20))
+    wheel(text, fingers(4, 24))
     expect(onStart).toHaveBeenCalledTimes(2)
+  })
+
+  it("takes momentum that stops shrinking for longer than rounding explains for fingers", () => {
+    const onStart = vi.fn()
+    const { getByTestId } = render(<Surface onStart={onStart} onMove={vi.fn()} onRelease={vi.fn()} />)
+    const text = getByTestId("text")
+    wheel(text, fingers(10, 24))
+    wheel(text, momentum(24, 4))
+    wheel(text, fingers(30, 17))
+    expect(onStart).toHaveBeenCalledTimes(2)
+  })
+
+  it("reads a slow, rounded momentum tail as one swipe from start to finish", () => {
+    const onStart = vi.fn()
+    const onRelease = vi.fn()
+    const { getByTestId } = render(<Surface onStart={onStart} onMove={vi.fn()} onRelease={onRelease} />)
+    const text = getByTestId("text")
+    wheel(text, fingers(10, 24))
+    const tail: number[] = []
+    for (let n = 1, d = 24; d > 0; n++) tail.push(d = Math.round(24 * 0.99 ** n))
+    wheel(text, tail)
+    vi.advanceTimersByTime(400)
+    expect(onStart).toHaveBeenCalledOnce()
+    expect(onRelease).toHaveBeenCalledOnce()
+  })
+
+  it("lets go of a short flick on momentum from its first frame, at the speed it was thrown", () => {
+    const onRelease = vi.fn()
+    const { getByTestId } = render(<Surface onMove={vi.fn()} onRelease={onRelease} />)
+    const text = getByTestId("text")
+    for (const deltaX of [20, 19, 18, 17, 16]) {
+      text.dispatchEvent(new WheelEvent("wheel", { deltaX, bubbles: true }))
+      vi.advanceTimersByTime(16)
+    }
+    expect(onRelease).toHaveBeenCalledOnce()
+    const [offset, velocity] = onRelease.mock.calls[0]
+    expect(offset).toBe(-90)
+    expect(velocity).toBeLessThan(-0.9)
+  })
+
+  it("starts a slow second swipe once momentum has died out", () => {
+    const onStart = vi.fn()
+    const onMove = vi.fn()
+    const { getByTestId } = render(<Surface onStart={onStart} onMove={onMove} onRelease={vi.fn()} />)
+    const text = getByTestId("text")
+    wheel(text, fingers(10, 24))
+    wheel(text, momentum(24, 60).filter((delta) => delta > 0))
+    vi.advanceTimersByTime(150)
+    wheel(text, fingers(100, 4))
+    expect(onStart).toHaveBeenCalledTimes(2)
+    expect(onMove.mock.calls.at(-1)![0]).toBeLessThan(-350)
   })
 
   it("starts the next swipe after a pause, wherever the last one was", () => {

@@ -21,18 +21,27 @@ const SIDEWAYS_RATIO = 1.5
  */
 const RELEASE_AFTER_MS = 70
 /**
- * The trackpad's momentum after the fingers lift slows down every event;
+ * The trackpad's momentum after the fingers lift slows down every frame;
  * this many slowdowns, losing at least MOMENTUM_DECAY overall, mean the
  * fingers are off. Fingers that slow down look the same, and are about to
  * stop anyway; if they keep going, that is a new swipe.
  */
 const MOMENTUM_EVENTS = 4
 const MOMENTUM_DECAY = 0.95
-/** Momentum never pauses this long: whatever comes after is fingers. */
+/**
+ * Events this far apart or closer are frames to compare; a longer gap is a
+ * pause, or a busy page that merged several frames into one event.
+ */
+const COMPARABLE_GAP_MS = 34
+/** Momentum never pauses this long: what comes after is fingers. */
 const MOMENTUM_GAP_MS = 300
-/** Movement this fast or more for this many events while momentum should be slowing is fingers again. */
-const STEADY_EVENTS = 4
-const STEADY_SIZE = 8
+/**
+ * Momentum never grows back past the least it has moved in a frame. Two
+ * frames in a row clearly above that floor are fingers on the trackpad again.
+ */
+const RENEWED_FRAMES = 2
+const RENEWED_MARGIN = 2
+const RENEWED_RATIO = 1.25
 /** Velocity is measured over the latest movement this long. */
 const VELOCITY_WINDOW_MS = 50
 /** Where a release is headed: on at its velocity for this long. */
@@ -71,10 +80,11 @@ type Phase = "idle" | "deciding" | "swiping" | "coasting" | "ignored"
  * nothing scrolls sideways moves the machine on screen with the fingers, and
  * the release decides where it lands. The browser does not say when fingers
  * leave a trackpad, so a release is the fingers going still or the momentum
- * that follows a lift. Momentum only ever slows down: speeding up, keeping
- * pace or turning around is fingers back on the trackpad, and starts the
- * next swipe at once. Speeds are per millisecond, because a busy page gets
- * several events merged into one larger one.
+ * that follows a lift. Momentum only ever slows down: growing past its
+ * slowest frame, holding still longer than rounding explains, or turning
+ * around is fingers back on the trackpad, and starts the next swipe at once.
+ * Movement is compared per display frame, because a busy page merges several
+ * frames into one larger event.
  */
 export function useDeviceSwipe(enabled: boolean, handlers: SwipeHandlers): void {
   const latest = useRef(handlers)
@@ -88,12 +98,16 @@ export function useDeviceSwipe(enabled: boolean, handlers: SwipeHandlers): void 
     let startTarget: Element | null = null
     let moved: [number, number] = [0, 0]
     let lastTime = -Infinity
-    let lastRate = 0
     let lastX = 0
+    /** Recent gaps between comparable events; the shortest is the display's frame. */
+    let gaps: number[] = []
+    let lastFrame = 0
     let slowing = 0
     let slowingFrom = 0
-    let rising = 0
-    let steady = 0
+    /** While coasting: the least momentum has moved in a frame, and the frames since that did not shrink it. */
+    let floor = 0
+    let renewed = 0
+    let stalled = 0
     let samples: { time: number; x: number }[] = []
     let releaseTimer: ReturnType<typeof setTimeout> | null = null
 
@@ -109,8 +123,9 @@ export function useDeviceSwipe(enabled: boolean, handlers: SwipeHandlers): void 
       releaseTimer = null
       phase = "coasting"
       momentum = onMomentum
-      rising = 0
-      steady = 0
+      floor = lastFrame
+      renewed = 0
+      stalled = 0
       // Fingers that went still are not moving; momentum carries the speed they lifted at.
       const speed = onMomentum ? velocity() : 0
       latest.current.onRelease(moved[0], speed, moved[0] + speed * PROJECTION_MS)
@@ -124,8 +139,27 @@ export function useDeviceSwipe(enabled: boolean, handlers: SwipeHandlers): void 
       samples = []
     }
 
+    /**
+     * Whether momentum this event continues is fingers instead. `frame` is its
+     * movement per display frame, or null when it cannot be compared.
+     */
+    const fingersAgain = (x: number, frame: number | null, gap: number) => {
+      if (x !== 0 && lastX !== 0 && Math.sign(x) !== Math.sign(lastX)) return true
+      if (frame === null) return gap > MOMENTUM_GAP_MS
+      if (frame < floor) {
+        floor = frame
+        renewed = 0
+        stalled = 0
+        return false
+      }
+      if (frame >= floor + RENEWED_MARGIN && frame >= floor * RENEWED_RATIO) return ++renewed >= RENEWED_FRAMES
+      renewed = 0
+      // Rounding can hold momentum at one size for about 1 / (size x 0.5%) frames, never longer.
+      return ++stalled > 200 / Math.max(floor, 1) + MOMENTUM_EVENTS
+    }
+
     /** Whether this event starts a new gesture rather than continuing the last. */
-    const starts = (x: number, size: number, rate: number, gap: number) => {
+    const starts = (x: number, frame: number | null, gap: number) => {
       switch (phase) {
         case "idle":
           return true
@@ -135,14 +169,8 @@ export function useDeviceSwipe(enabled: boolean, handlers: SwipeHandlers): void 
         case "deciding":
         case "ignored":
           return gap > RELEASE_AFTER_MS
-        case "coasting": {
-          if (!momentum) return true
-          rising = rate > lastRate * 1.1 ? rising + 1 : 0
-          steady = size >= STEADY_SIZE && rate >= lastRate * 0.98 ? steady + 1 : 0
-          const turned = x !== 0 && lastX !== 0 && Math.sign(x) !== Math.sign(lastX)
-          return gap > MOMENTUM_GAP_MS || turned || rising >= 2 || steady >= STEADY_EVENTS
-            || (gap > RELEASE_AFTER_MS && rate > lastRate)
-        }
+        case "coasting":
+          return !momentum || fingersAgain(x, frame, gap)
       }
     }
 
@@ -153,16 +181,30 @@ export function useDeviceSwipe(enabled: boolean, handlers: SwipeHandlers): void 
       const [x, y] = movement(event)
       const size = Math.abs(x) + Math.abs(y)
       const gap = event.timeStamp - lastTime
-      const rate = size / Math.max(gap, 4)
-      if (starts(x, size, rate, gap)) begin(event)
-      // Slowdowns count, holding pace keeps the count, speeding up resets it.
-      else if (rate < lastRate) {
-        if (slowing === 0) slowingFrom = lastRate
-        slowing++
-      } else if (rate > lastRate) slowing = 0
       lastTime = event.timeStamp
-      lastRate = rate
+      const comparable = gap <= COMPARABLE_GAP_MS
+      if (comparable) gaps = [...gaps.slice(-7), Math.max(gap, 1)]
+      // A frame's worth of movement: an event a busy page merged from two frames moved two frames' worth.
+      // Whole frames only, so the jitter of ordinary events does not read as speeding up or slowing down.
+      const frame = comparable ? size / Math.max(1, Math.floor(gap / Math.min(...gaps) + 0.35)) : null
+      // After a long pause, more of momentum's way may be frames a busy page merged: it starts the next gesture but moves nothing.
+      const merged = phase === "coasting" && momentum && frame === null && Math.sign(x) === Math.sign(lastX)
+      const fresh = starts(x, frame, gap)
       lastX = x
+      if (fresh) begin(event)
+      if (fresh && merged) {
+        lastFrame = size
+        return
+      }
+      // The first event of a gesture counts as one frame.
+      const thisFrame = frame ?? size
+      if (!fresh) {
+        if (thisFrame < lastFrame) {
+          if (slowing === 0) slowingFrom = lastFrame
+          slowing++
+        } else if (thisFrame > lastFrame) slowing = 0
+      }
+      lastFrame = thisFrame
       if (phase === "coasting" || phase === "ignored") return
 
       moved = [moved[0] + x, moved[1] + y]
@@ -181,7 +223,7 @@ export function useDeviceSwipe(enabled: boolean, handlers: SwipeHandlers): void 
       }
 
       latest.current.onMove(moved[0])
-      if (slowing >= MOMENTUM_EVENTS && rate <= slowingFrom * MOMENTUM_DECAY) return release(true)
+      if (slowing >= MOMENTUM_EVENTS && thisFrame <= slowingFrom * MOMENTUM_DECAY) return release(true)
       if (releaseTimer) clearTimeout(releaseTimer)
       releaseTimer = setTimeout(() => release(false), RELEASE_AFTER_MS)
     }

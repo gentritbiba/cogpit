@@ -64,11 +64,11 @@ const pane = (id: string) => document.querySelector<HTMLElement>(`[data-device-p
 const frameShown = (id: string) => (pane(id).firstElementChild as HTMLElement).style.display !== "none"
 
 /** A trackpad swipe on the machine on screen: `deltas` one frame apart, then the fingers go still. */
-async function swipe(deltas: number[]) {
+async function swipe(deltas: number[], frameMs = 8) {
   const target = screen.getByText("content of local")
   for (const deltaX of deltas) {
     target.dispatchEvent(new WheelEvent("wheel", { deltaX, bubbles: true }))
-    await new Promise((resolve) => setTimeout(resolve, 8))
+    await new Promise((resolve) => setTimeout(resolve, frameMs))
   }
 }
 
@@ -203,6 +203,15 @@ describe("DeviceStage", () => {
     expect(frameShown("dev_1")).toBe(true)
     await waitFor(() => expect(window.location.pathname).toBe("/d/dev_1/"))
     expect(played[0].finished).toBe(false)
+  })
+
+  it("lands a short, quick flick on the next machine", async () => {
+    reduceMotion(false)
+    playAnimations()
+    vi.stubGlobal("innerWidth", 1024)
+    renderStage(bothPanes)
+    await swipe([20, 19, 18, 17, 16], 16)
+    await waitFor(() => expect(window.location.pathname).toBe("/d/dev_1/"))
   })
 
   it("springs a short pull back without switching, and covers the next machine again", async () => {
