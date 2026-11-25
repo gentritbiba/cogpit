@@ -5,6 +5,10 @@ Historical reference only. Use [deployments.md](deployments.md) for current reso
 Earlier Cogpit history is also retained in the [global deployment log](/Users/gentritbiba/project-manager/deployments-logs.md).
 
 
+## v3.7.9 attempt and v3.8.0 release, 2026-11-25
+
+v3.7.9 (tag at `9fcba1d7`) never published: run [45663609878](https://github.com/gentritbiba/cogpit/actions/runs/45663609878) had every job green except `build (macOS)`, which was never acquired by a hosted macOS runner ("capacity constraints") and was cancelled after 15 min, so `publish` was skipped. v3.8.0 followed from master `5170f0d9` with the Claude Code Mode setting (#67), Antigravity (#65) and the snappy machine swipe (#66): GitHub release and AUR published, npm blocked by the expired `NPM_TOKEN` (E404 on PUT). MacBook: 3.7.9 local build installed 20:59 UTC, 3.8.0 local build staged 21:05 UTC.
+
 ## v3.6.1 release, MacBook local build and Omarchy install, 2026-11-06
 
 Stored view apps (host-built React views, `cogpit/ui` kit plus charts/math/3D modules, sidebar Views list and panel, session-owned access; core `219d684d`, team `fd7df44` via cogpit-team PR #5). The first tag run at `862c4c11` failed on every Windows job: `bun install`'s postinstall ran the new esbuild-based `build:view-kit`, which cannot list `node_modules` while Bun holds it on Windows. Fixed in `66d5060d` (`build:generated` outside postinstall); the tag moved there and run [42210560898](https://github.com/gentritbiba/cogpit/actions/runs/42210560898) went green; published 11:48:05Z. MacBook runs a 3.6.1 local build from the feature worktree. Omarchy: `sudo` needs a password over SSH, so 3.6.1 runs from a user-owned copy of the release pacman package (`~/.local/opt/cogpit-3.6.1`, sha512 matched `latest-linux.yml`) through a launcher override; restarted while two agent sessions were mid-turn (with the owner's go-ahead), one of which kept running. iPhone got a Debug build of ios `feat/view-apps` (unmerged).
