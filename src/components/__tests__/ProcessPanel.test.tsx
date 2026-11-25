@@ -2,8 +2,10 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { cleanup, fireEvent, render, screen } from "@testing-library/react"
 import { ProcessPanel } from "../ProcessPanel"
 import { startAgentSignIn } from "@/lib/agents/signIn"
+import { codeModeTerminalStatus, setCodeModeEnabled, showCodeModeTerminal, startCodeModeSession } from "@/lib/agents/codeMode"
 
 const mocks = vi.hoisted(() => ({
+  ptySessions: [] as Array<{ id: string; name: string; status: "running" | "exited"; cwd: string; metadata?: { type: "terminal"; sessionId?: string } }>,
   ptyStatus: "connected",
   spawnTerminal: vi.fn(() => "pty_1"),
   killSession: vi.fn(),
@@ -13,8 +15,9 @@ const mocks = vi.hoisted(() => ({
 
 vi.mock("@/contexts/PtyContext", () => ({
   usePty: () => ({
-    sessions: [],
+    sessions: mocks.ptySessions,
     status: mocks.ptyStatus,
+    listed: true,
     killSession: mocks.killSession,
     spawnTerminal: mocks.spawnTerminal,
   }),
@@ -280,6 +283,40 @@ describe("ProcessPanel", () => {
 
     unmount()
     expect(startAgentSignIn({ kind: "codex", instanceId: null })).toBe(false)
+  })
+
+  it("runs a Code Mode session in a new terminal tab and finds it again", () => {
+    setCodeModeEnabled("local", false)
+    const onProcessStarted = vi.fn()
+    // A fresh map stands in for the terminal list update that re-renders the memoised panel.
+    const panel = () => <ProcessPanel {...defaultProps} processes={new Map()} collapsed projectDir="/elsewhere" onProcessStarted={onProcessStarted} />
+    const { rerender, unmount } = render(panel())
+
+    expect(startCodeModeSession({ kind: "claude", sessionId: "s-1", resume: false, cwd: "/project", prompt: "hi" })).toBe(true)
+    // The server builds the command from what the panel names.
+    expect(mocks.spawnTerminal).toHaveBeenCalledWith({
+      name: "Claude Code · Code Mode",
+      cwd: "/project",
+      codeMode: { agent: "claude", sessionId: "s-1", resume: false, prompt: "hi" },
+    })
+    expect(onProcessStarted).toHaveBeenCalledWith({ id: "pty_1", name: "Claude Code · Code Mode", type: "terminal", status: "running", source: "/project", sessionId: "s-1" })
+    expect(codeModeTerminalStatus("s-1")).toBeNull()
+
+    mocks.ptySessions = [{ id: "pty_1", name: "Claude Code · Code Mode", status: "running", cwd: "/project", metadata: { type: "terminal", sessionId: "s-1" } }]
+    rerender(panel())
+    expect(codeModeTerminalStatus("s-1")).toBe("running")
+    onProcessStarted.mockClear()
+    expect(showCodeModeTerminal("s-1")).toBe(true)
+    expect(onProcessStarted).toHaveBeenCalledWith(expect.objectContaining({ id: "pty_1", sessionId: "s-1" }))
+
+    mocks.ptySessions = [{ ...mocks.ptySessions[0]!, status: "exited" }]
+    rerender(panel())
+    expect(codeModeTerminalStatus("s-1")).toBe("exited")
+    expect(showCodeModeTerminal("s-1")).toBe(false)
+
+    mocks.ptySessions = []
+    unmount()
+    expect(startCodeModeSession({ kind: "claude", sessionId: "s-2", resume: true, cwd: "/project" })).toBe(false)
   })
 
   it("offers no sign-in runner on a phone", () => {

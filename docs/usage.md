@@ -71,6 +71,8 @@ The [Browser panel](browser.md) shows the browser your agent is using. Select th
 
 On desktop, terminals and discovered project scripts share the bottom process panel. Select terminal output to add it to the chat composer.
 
+Claude Code's experimental Code Mode runs only in its own interactive terminal, and needs Opus 5.5, Sonnet 5.5 or a later model. Enable **Configuration → Start Claude Code sessions in Code Mode** and a new Claude session opens in the process panel instead: type and answer prompts there, and the chat shows the transcript as it is written. The first launch asks you to turn Code Mode on in that terminal. A Code Mode session's composer offers its terminal, or **Continue in terminal** once it has stopped; a phone says to continue from a computer. The setting is per machine. It applies to your default account's sessions, not to a provider-account instance, and is not offered where the server signs accounts in. Code Mode sessions cannot take attached images or start in a new worktree.
+
 The project file editor reads and writes files within the project, checks modification times to avoid overwriting concurrent edits, and previews supported content. Use `@` in the composer to mention a file.
 
 Enable **Configuration → Open files in Cogpit** to route file links, file-change cards, and open-in-editor actions to the built-in editor. On remote devices, it reads the file through the hub proxy.

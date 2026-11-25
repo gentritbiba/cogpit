@@ -42,6 +42,9 @@ describe("AgentDescriptor.launchArgs", () => {
   it("builds Claude's permission flags", () => {
     expect(claude.permissions({ mode: "bypassPermissions" }))
       .toEqual(["--dangerously-skip-permissions"])
+    // Full access keeps an outright denial; allowing is moot.
+    expect(claude.permissions({ mode: "bypassPermissions", allowedTools: ["Read"], disallowedTools: ["Write"] }))
+      .toEqual(["--dangerously-skip-permissions", "--disallowedTools", "Write"])
     expect(claude.permissions({ mode: "default" })).toEqual(["--permission-mode", "default"])
     expect(claude.permissions({ mode: "plan" })).toEqual(["--permission-mode", "plan"])
     expect(claude.permissions({

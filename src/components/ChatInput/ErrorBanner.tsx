@@ -1,5 +1,5 @@
 import { useState } from "react"
-import { Copy, Check, AlertCircle, ExternalLink } from "lucide-react"
+import { Copy, Check, AlertCircle, ExternalLink, SquareTerminal } from "lucide-react"
 import {
   Dialog,
   DialogContent,
@@ -18,11 +18,13 @@ import { RestoreConfigAction } from "./RestoreConfigAction"
  * CLI's captured stderr) in a copyable dialog so failures can actually be
  * diagnosed instead of just reading "Claude Code process exited with code 1".
  */
-export function ErrorBanner({ error, agentKind, instanceId = null }: {
+export function ErrorBanner({ error, agentKind, instanceId = null, onContinueInTerminal }: {
   error: string
   agentKind: AgentKind
   /** The account instance the session runs under; null for the default account, the only one whose config file a restore reaches. */
   instanceId?: string | null
+  /** Carries the session on in the terminal panel, for a failure whose fix is the agent's own terminal. */
+  onContinueInTerminal?: () => void
 }) {
   const [open, setOpen] = useState(false)
   const [copied, setCopied] = useState<"error" | "command" | null>(null)
@@ -73,6 +75,12 @@ export function ErrorBanner({ error, agentKind, instanceId = null }: {
         </Button>
       )}
       {invalidConfig?.backupPath && instanceId === null && <RestoreConfigAction path={invalidConfig.path} backupPath={invalidConfig.backupPath} />}
+      {onContinueInTerminal && (
+        <Button variant="outline" size="xs" className="ml-2" onClick={onContinueInTerminal}>
+          <SquareTerminal data-icon="inline-start" />
+          Continue in terminal
+        </Button>
+      )}
       {terminalCommand !== null && (
         <Button variant="outline" size="xs" className="ml-2" onClick={() => copy("command", terminalCommand)}>
           {copied === "command" ? <Check data-icon="inline-start" /> : <Copy data-icon="inline-start" />}

@@ -1,5 +1,6 @@
 import { useState, useRef, useEffect, useCallback } from "react"
 import { devicePrefix } from "@/lib/device"
+import type { CodeModeLaunch } from "@/lib/agents/codeMode"
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -14,6 +15,8 @@ export interface PtySessionInfo {
     type: "script" | "terminal"
     source?: string
     scriptName?: string
+    /** The Cogpit session a Code Mode terminal runs, stamped by the server that launched it. */
+    sessionId?: string
   }
 }
 
@@ -31,6 +34,8 @@ const MAX_RECONNECT_DELAY = 5000
 export function usePtySocket(enabled = true) {
   const [status, setStatus] = useState<PtyConnectionStatus>("disconnected")
   const [sessions, setSessions] = useState<PtySessionInfo[]>([])
+  /** The terminal list has come in on the current connection, so it is not one left from before. */
+  const [listed, setListed] = useState(false)
 
   const wsRef = useRef<WebSocket | null>(null)
   const subscribersRef = useRef<Map<string, SessionHandler>>(new Map())
@@ -46,6 +51,7 @@ export function usePtySocket(enabled = true) {
 
     if (type === "sessions") {
       setSessions((msg.sessions as PtySessionInfo[]) ?? [])
+      setListed(true)
       return
     }
 
@@ -75,6 +81,7 @@ export function usePtySocket(enabled = true) {
       if (wsRef.current && wsRef.current.readyState !== WebSocket.CLOSED) return
 
       setStatus("connecting")
+      setListed(false)
       const ws = new WebSocket(buildWsUrl())
       wsRef.current = ws
 
@@ -97,6 +104,7 @@ export function usePtySocket(enabled = true) {
       ws.onclose = () => {
         if (unmountedRef.current) return
         setStatus("disconnected")
+        setListed(false)
         wsRef.current = null
         const delay = reconnectDelayRef.current
         reconnectDelayRef.current = Math.min(delay * 2, MAX_RECONNECT_DELAY)
@@ -137,8 +145,16 @@ export function usePtySocket(enabled = true) {
     subscribersRef.current.delete(sessionId)
   }, [])
 
-  /** A shell, or an agent's sign-in, which the server builds from the agent and account it names. */
-  const spawnTerminal = useCallback((opts: { name?: string; cwd?: string; signIn?: { agent: string; instanceId: string | null } } = {}) => {
+  /**
+   * A shell, an agent's sign-in, or a session in an agent's Code Mode. The
+   * server builds the last two from the agent, account and session they name.
+   */
+  const spawnTerminal = useCallback((opts: {
+    name?: string
+    cwd?: string
+    signIn?: { agent: string; instanceId: string | null }
+    codeMode?: Omit<CodeModeLaunch, "kind" | "cwd"> & { agent: string }
+  } = {}) => {
     const id = `pty_${crypto.randomUUID().slice(0, 8)}`
     send({
       type: "spawn",
@@ -146,6 +162,8 @@ export function usePtySocket(enabled = true) {
       name: opts.name ?? "Terminal",
       cwd: opts.cwd,
       ...(opts.signIn ? { signIn: opts.signIn } : {}),
+      ...(opts.codeMode ? { codeMode: opts.codeMode } : {}),
+      // The server ties a Code Mode terminal to its session; a client cannot.
       metadata: { type: "terminal" },
     })
     return id
@@ -188,6 +206,7 @@ export function usePtySocket(enabled = true) {
 
   return {
     status,
+    listed,
     send,
     subscribe,
     unsubscribe,

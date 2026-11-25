@@ -361,6 +361,7 @@ export function registerConfigRoutes(use: UseFn) {
         terminalApp: config.terminalApp || null,
         editorApp: config.editorApp || null,
         useBuiltInEditor: config.useBuiltInEditor || false,
+        codeMode: config.codeMode === true,
         agentExecutable: config.agentExecutable ?? DEFAULT_EXECUTABLE_CHOICE,
         projectsRoot: getProjectsRoot(),
         freshInstall: installState().freshInstall,

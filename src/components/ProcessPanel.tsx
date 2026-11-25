@@ -19,7 +19,9 @@ import { cn } from "@/lib/utils"
 import type { ProcessEntry } from "@/hooks/useProcessPanel"
 import { usePty } from "@/contexts/PtyContext"
 import { registerSignInRunner } from "@/lib/agents/signIn"
-import { useIsRemoteDevice } from "@/contexts/DevicePaneContext"
+import { useDeviceId, useIsRemoteDevice } from "@/contexts/DevicePaneContext"
+import { registerCodeModeRunner } from "@/lib/agents/codeMode"
+import { descriptorFor } from "@/lib/agents"
 
 const TerminalOutput = lazy(() =>
   import("@/components/TerminalOutput").then((module) => ({ default: module.TerminalOutput })),
@@ -219,6 +221,36 @@ export const ProcessPanel = memo(function ProcessPanel({
       onProcessStarted({ id, name, type: "terminal", status: "running", ...(projectDir ? { source: projectDir } : {}) })
     })
   }, [canSignIn, onProcessStarted, projectDir, spawnTerminal])
+
+  // Code Mode sessions run here too, on whichever machine the panel is on. A
+  // phone has no runner; while the socket reconnects the runner is not ready.
+  const deviceId = useDeviceId()
+  // Ready once the current connection has listed its terminals, so a status is never read from a stale list.
+  const ready = pty.status === "connected" && pty.listed
+  const ptySessionsRef = useRef(pty.sessions)
+  ptySessionsRef.current = pty.sessions
+  useEffect(() => {
+    if (mobile || !onProcessStarted) return
+    return registerCodeModeRunner(deviceId, {
+      ready,
+      start: ({ kind, cwd, ...launch }) => {
+        const name = `${descriptorFor(kind).displayName} · Code Mode`
+        const id = spawnTerminal({ name, cwd, codeMode: { agent: kind, ...launch } })
+        onProcessStarted({ id, name, type: "terminal", status: "running", source: cwd, sessionId: launch.sessionId })
+      },
+      show: (sessionId) => {
+        const running = ptySessionsRef.current.find((session) => session.status === "running" && session.metadata?.sessionId === sessionId)
+        if (!running) return false
+        onProcessStarted({ id: running.id, name: running.name, type: "terminal", status: "running", source: running.cwd, sessionId })
+        return true
+      },
+      status: (sessionId) => {
+        const terminals = ptySessionsRef.current.filter((session) => session.metadata?.sessionId === sessionId)
+        if (terminals.some((session) => session.status === "running")) return "running"
+        return terminals.length > 0 ? "exited" : null
+      },
+    })
+  }, [deviceId, mobile, onProcessStarted, ready, spawnTerminal])
   const dragRef = useRef<{ startY: number; startH: number } | null>(null)
 
   // Sync PTY session status → ProcessPanel entries

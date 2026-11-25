@@ -10,6 +10,8 @@ export interface ProcessEntry {
   source?: string
   /** For task type: path to .output file (SSE via /api/task-output) */
   outputPath?: string
+  /** The session this terminal runs, whose view opens on it. */
+  sessionId?: string
 }
 
 interface PanelCache {
@@ -58,6 +60,8 @@ export function useProcessPanel(sessionId: string | null | undefined) {
       next.set(entry.id, entry)
       return next
     })
+    // A session that is about to open shows its own terminal when it does.
+    if (entry.sessionId) cacheRef.current.set(entry.sessionId, { activeId: entry.id, collapsed: false })
     setActiveProcessId(entry.id)
     setCollapsed(false)
   }, [])

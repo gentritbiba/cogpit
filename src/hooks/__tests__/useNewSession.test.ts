@@ -8,7 +8,8 @@ import type { ListedAccess } from "../../../shared/contracts/sessionAccess"
 import { __resetCapabilitiesForTest, setMe } from "@/lib/capabilities"
 
 // Mock authFetch
-vi.mock("@/lib/auth", () => ({
+vi.mock("@/lib/auth", async (importOriginal) => ({
+  AuthRequiredError: (await importOriginal<typeof import("@/lib/auth")>()).AuthRequiredError,
   authFetch: vi.fn(),
 }))
 
@@ -20,6 +21,10 @@ import { authFetch } from "@/lib/auth"
 import type { LoadedSession, SessionAddress, SessionController } from "@/lib/sessionLoader"
 import { __resetSessionAccessForTest, knownSessionAccess } from "@/lib/sessionAccess"
 import { rename as renameSession } from "@/hooks/useSessionNames"
+import { registerCodeModeRunner, setCodeModeEnabled, type CodeModeRunner } from "@/lib/agents/codeMode"
+import { AuthRequiredError } from "@/lib/auth"
+import { createPaneLifetime, PaneLifetimeProvider } from "@/contexts/DevicePaneContext"
+import { createElement, type ReactNode } from "react"
 
 const mockedAuthFetch = vi.mocked(authFetch)
 
@@ -714,6 +719,327 @@ describe("useNewSession", () => {
       const { sessionId } = await recoverFrom([{ sessionId: "device-session" }])
 
       expect(sessionId).toBe("device-session")
+    })
+  })
+
+  describe("with Code Mode on", () => {
+    const runner = { ready: true, start: vi.fn(), show: vi.fn(), status: vi.fn<CodeModeRunner["status"]>() }
+    let unregister: () => void
+
+    beforeEach(() => {
+      setCodeModeEnabled("local", true)
+      runner.ready = true
+      runner.status.mockReturnValue("running")
+      unregister = registerCodeModeRunner("local", runner)
+    })
+
+    afterEach(() => {
+      unregister()
+      setCodeModeEnabled("local", false)
+      vi.useRealTimers()
+      window.history.replaceState(null, "", "/")
+    })
+
+    function found(dirName: string, fileName: string): Response {
+      return { ok: true, json: () => Promise.resolve({ dirName, fileName }) } as Response
+    }
+
+    it("starts the session in the terminal and opens it once the CLI has written it", async () => {
+      const { result } = renderHook(() => useNewSession({ ...defaultOpts, model: "claude-opus-5-5" }))
+      act(() => { result.current.handleNewSession("-tmp-my-project", "/tmp/my-project") })
+      mockedAuthFetch.mockImplementation(async (url) => found("-tmp-my-project", `${String(url).split("/").pop()}.jsonl`))
+
+      let sessionId: string | null = null
+      await act(async () => { sessionId = await result.current.createAndSend("fix the bug") })
+      expect(result.current.createError).toBeNull()
+
+      expect(runner.start).toHaveBeenCalledWith({
+        kind: "claude",
+        sessionId,
+        resume: false,
+        cwd: "/tmp/my-project",
+        prompt: "fix the bug",
+        model: "claude-opus-5-5",
+        effort: "high",
+        permissions: permissionsConfig,
+      })
+      // Nothing goes through the SDK: the only requests look the session up.
+      expect(mockedAuthFetch.mock.calls.map(([url]) => url)).toEqual([`/api/find-session/${sessionId}`])
+      expect(sessions.openSession).toHaveBeenCalledWith(
+        { dirName: "-tmp-my-project", fileName: `${sessionId}.jsonl` },
+        expect.objectContaining({ reason: "finalize" }),
+      )
+      expect(renameSession).toHaveBeenCalledWith(sessionId, "fix the bug")
+    })
+
+    it("finds the folder of a project opened without one", async () => {
+      const { result } = renderHook(() => useNewSession(defaultOpts))
+      act(() => { result.current.handleNewSession("-tmp-my-project") })
+      mockedAuthFetch.mockImplementation(async (url) => url === "/api/projects"
+        ? { ok: true, json: () => Promise.resolve([{ dirName: "-tmp-other", path: "/tmp/other" }, { dirName: "-tmp-my-project", path: "/tmp/my-project" }]) } as Response
+        : found("-tmp-my-project", "s.jsonl"))
+
+      await act(async () => { await result.current.createAndSend("hello") })
+
+      expect(runner.start).toHaveBeenCalledWith(expect.objectContaining({ cwd: "/tmp/my-project" }))
+    })
+
+    it("says so when the terminal ends before the CLI writes the session", async () => {
+      runner.status.mockReturnValue("exited")
+      const { result } = renderHook(() => useNewSession(defaultOpts))
+      act(() => { result.current.handleNewSession("-tmp-my-project", "/tmp/my-project") })
+      mockedAuthFetch.mockResolvedValue({ ok: false, status: 404, json: () => Promise.resolve({}) } as Response)
+
+      let sessionId: string | null = "unset"
+      await act(async () => { sessionId = await result.current.createAndSend("hello") })
+
+      expect(sessionId).toBeNull()
+      expect(result.current.createError).toBe("Claude Code ended before starting the session. Its output is in the terminal.")
+      expect(sessions.openSession).not.toHaveBeenCalled()
+    })
+
+    it("gives up when no terminal ever appears, as when the server refused the spawn", async () => {
+      vi.useFakeTimers()
+      runner.status.mockReturnValue(null)
+      const { result } = renderHook(() => useNewSession(defaultOpts))
+      act(() => { result.current.handleNewSession("-tmp-my-project", "/tmp/my-project") })
+      mockedAuthFetch.mockResolvedValue({ ok: false, status: 404, json: () => Promise.resolve({}) } as Response)
+
+      let sessionId: string | null = "unset"
+      await act(async () => {
+        const created = result.current.createAndSend("hello").then((id) => { sessionId = id })
+        await vi.advanceTimersByTimeAsync(16_000)
+        await created
+      })
+
+      expect(sessionId).toBeNull()
+      expect(result.current.createError).toBe("The terminal for Claude Code didn't start.")
+    })
+
+    it("waits while another machine is on screen and opens the session back on its own", async () => {
+      vi.useFakeTimers()
+      const { result } = renderHook(() => useNewSession(defaultOpts))
+      act(() => { result.current.handleNewSession("-tmp-my-project", "/tmp/my-project") })
+      let lookups = 0
+      mockedAuthFetch.mockImplementation(async (url) => {
+        lookups++
+        // The user switches machines while the first lookup is in flight.
+        if (lookups === 1) window.history.replaceState(null, "", "/d/box/")
+        return found("-tmp-my-project", `${String(url).split("/").pop()}.jsonl`)
+      })
+
+      let settled = false
+      await act(async () => {
+        const created = result.current.createAndSend("hello").then(() => { settled = true })
+        await vi.advanceTimersByTimeAsync(5_000)
+        expect(settled).toBe(false)
+        expect(lookups).toBe(1)
+
+        window.history.replaceState(null, "", "/")
+        await vi.advanceTimersByTimeAsync(1_000)
+        await created
+      })
+
+      expect(sessions.openSession).toHaveBeenCalledTimes(1)
+      expect(lookups).toBe(2)
+    })
+
+    it("keeps a provider-account instance's project on its normal sessions", async () => {
+      const { result } = renderHook(() => useNewSession(defaultOpts))
+      act(() => { result.current.handleNewSession("instance__work__-tmp-my-project", "/tmp/my-project") })
+      mockedAuthFetch.mockResolvedValueOnce({
+        ok: true,
+        json: () => Promise.resolve({ dirName: "instance__work__-tmp-my-project", fileName: "s.jsonl", sessionId: "i-1" }),
+      } as Response)
+
+      await act(async () => { await result.current.createAndSend("hello") })
+
+      expect(runner.start).not.toHaveBeenCalled()
+      expect(mockedAuthFetch.mock.calls[0][0]).toBe("/api/create-and-send")
+    })
+
+    it("asks to send again while the terminal is reconnecting, instead of starting a session without Code Mode", async () => {
+      runner.ready = false
+      const { result } = renderHook(() => useNewSession(defaultOpts))
+      act(() => { result.current.handleNewSession("-tmp-my-project", "/tmp/my-project") })
+
+      let sessionId: string | null = "unset"
+      await act(async () => { sessionId = await result.current.createAndSend("hello") })
+
+      expect(sessionId).toBeNull()
+      expect(result.current.createError).toBe("The terminal is reconnecting. Send it again in a moment.")
+      expect(runner.start).not.toHaveBeenCalled()
+      expect(mockedAuthFetch).not.toHaveBeenCalled()
+    })
+
+    it("stops when the login has expired, instead of polling a server that wants a sign-in", async () => {
+      const { result } = renderHook(() => useNewSession(defaultOpts))
+      act(() => { result.current.handleNewSession("-tmp-my-project", "/tmp/my-project") })
+      mockedAuthFetch.mockRejectedValue(new AuthRequiredError())
+
+      await act(async () => { await result.current.createAndSend("hello") })
+
+      expect(result.current.createError).toBe("This server didn't let Cogpit open the new session.")
+    })
+
+    it("refuses Worktree even when the prompt gives no worktree name", async () => {
+      const { result } = renderHook(() => useNewSession(defaultOpts))
+      act(() => {
+        result.current.handleNewSession("-tmp-my-project", "/tmp/my-project")
+        result.current.setWorktreeEnabled(true)
+      })
+
+      await act(async () => { await result.current.createAndSend("修复测试") })
+
+      expect(runner.start).not.toHaveBeenCalled()
+      expect(result.current.createError).toMatch(/can't start in a new worktree/)
+    })
+
+    it("lets a new draft end the wait of a start still pending, so it never opens over the draft", async () => {
+      vi.useFakeTimers()
+      const { result } = renderHook(() => useNewSession(defaultOpts))
+      act(() => { result.current.handleNewSession("-tmp-my-project", "/tmp/my-project") })
+      mockedAuthFetch.mockResolvedValue({ ok: false, status: 404, json: () => Promise.resolve({}) } as Response)
+
+      let sessionId: string | null = "unset"
+      await act(async () => {
+        const created = result.current.createAndSend("first").then((id) => { sessionId = id })
+        await vi.advanceTimersByTimeAsync(2_000)
+        result.current.handleNewSession("-tmp-other", "/tmp/other")
+        mockedAuthFetch.mockImplementation(async (url) => found("-tmp-my-project", `${String(url).split("/").pop()}.jsonl`))
+        await vi.advanceTimersByTimeAsync(3_000)
+        await created
+      })
+
+      expect(sessionId).toBeNull()
+      expect(sessions.openSession).not.toHaveBeenCalled()
+    })
+
+    it("abandons a pending start when its machine pane goes away for good", async () => {
+      vi.useFakeTimers()
+      const lifetime = createPaneLifetime()
+      const wrapper = ({ children }: { children: ReactNode }) => createElement(PaneLifetimeProvider, { value: lifetime }, children)
+      const { result } = renderHook(() => useNewSession(defaultOpts), { wrapper })
+      act(() => { result.current.handleNewSession("-tmp-my-project", "/tmp/my-project") })
+      mockedAuthFetch.mockResolvedValue({ ok: false, status: 404, json: () => Promise.resolve({}) } as Response)
+
+      let sessionId: string | null = "unset"
+      await act(async () => {
+        const created = result.current.createAndSend("hello").then((id) => { sessionId = id })
+        await vi.advanceTimersByTimeAsync(2_000)
+        lifetime.end()
+        await vi.advanceTimersByTimeAsync(2_000)
+        await created
+      })
+
+      expect(sessionId).toBeNull()
+      const lookups = mockedAuthFetch.mock.calls.length
+      await act(async () => { await vi.advanceTimersByTimeAsync(5_000) })
+      expect(mockedAuthFetch.mock.calls.length).toBe(lookups)
+    })
+
+    it("refuses a new worktree, whose setup the terminal launch would skip", async () => {
+      const { result } = renderHook(() => useNewSession(defaultOpts))
+      act(() => {
+        result.current.handleNewSession("-tmp-my-project", "/tmp/my-project")
+        result.current.setWorktreeEnabled(true)
+      })
+
+      await act(async () => { await result.current.createAndSend("hello") })
+
+      expect(result.current.createError).toBe("Code Mode sessions can't start in a new worktree yet. Turn off Worktree to start one.")
+      expect(runner.start).not.toHaveBeenCalled()
+    })
+
+    it("starts nothing when the user switched machines while the project folder was looked up", async () => {
+      const { result } = renderHook(() => useNewSession(defaultOpts))
+      act(() => { result.current.handleNewSession("-tmp-my-project") })
+      mockedAuthFetch.mockImplementation(async () => {
+        window.history.replaceState(null, "", "/d/box/")
+        return { ok: true, json: () => Promise.resolve([{ dirName: "-tmp-my-project", path: "/tmp/my-project" }]) } as Response
+      })
+
+      await act(async () => { await result.current.createAndSend("hello") })
+
+      expect(runner.start).not.toHaveBeenCalled()
+      expect(result.current.createError).toBe("You switched machines before the session started. Send it again.")
+    })
+
+    it("stops when the server will not let this caller see the new session", async () => {
+      const { result } = renderHook(() => useNewSession(defaultOpts))
+      act(() => { result.current.handleNewSession("-tmp-my-project", "/tmp/my-project") })
+      mockedAuthFetch.mockResolvedValue({ ok: false, status: 403, json: () => Promise.resolve({}) } as Response)
+
+      await act(async () => { await result.current.createAndSend("hello") })
+
+      expect(result.current.createError).toBe("This server didn't let Cogpit open the new session.")
+    })
+
+    it("bounds a lookup that never answers, so the deadline for a missing terminal still applies", async () => {
+      vi.useFakeTimers()
+      runner.status.mockReturnValue(null)
+      const { result } = renderHook(() => useNewSession(defaultOpts))
+      act(() => { result.current.handleNewSession("-tmp-my-project", "/tmp/my-project") })
+      mockedAuthFetch.mockImplementation((_url, init) => new Promise((_resolve, reject) => {
+        init?.signal?.addEventListener("abort", () => reject(new DOMException("Aborted", "AbortError")))
+      }))
+
+      await act(async () => {
+        const created = result.current.createAndSend("hello")
+        await vi.advanceTimersByTimeAsync(25_000)
+        await created
+      })
+
+      expect(result.current.createError).toBe("The terminal for Claude Code didn't start.")
+    })
+
+    it("waits through a reconnecting terminal panel instead of reading it as an exit", async () => {
+      vi.useFakeTimers()
+      const { result } = renderHook(() => useNewSession(defaultOpts))
+      act(() => { result.current.handleNewSession("-tmp-my-project", "/tmp/my-project") })
+      let lookups = 0
+      mockedAuthFetch.mockImplementation(async (url) => {
+        lookups++
+        // The panel's socket drops after the terminal was seen running.
+        if (lookups === 1) runner.ready = false
+        if (lookups < 4) return { ok: false, status: 404, json: () => Promise.resolve({}) } as Response
+        return found("-tmp-my-project", `${String(url).split("/").pop()}.jsonl`)
+      })
+
+      await act(async () => {
+        const created = result.current.createAndSend("hello")
+        await vi.advanceTimersByTimeAsync(3_000)
+        runner.ready = true
+        await vi.advanceTimersByTimeAsync(3_000)
+        await created
+      })
+
+      expect(result.current.createError).toBeNull()
+      expect(sessions.openSession).toHaveBeenCalledOnce()
+    })
+
+    it("refuses attached images, which the terminal cannot take", async () => {
+      const { result } = renderHook(() => useNewSession(defaultOpts))
+      act(() => { result.current.handleNewSession("-tmp-my-project", "/tmp/my-project") })
+
+      await act(async () => { await result.current.createAndSend("look", [{ data: "aGk=", mediaType: "image/png" }]) })
+
+      expect(runner.start).not.toHaveBeenCalled()
+      expect(result.current.createError).toMatch(/can't take attached images/)
+    })
+
+    it("starts an agent without Code Mode through its SDK as before", async () => {
+      const { result } = renderHook(() => useNewSession(defaultOpts))
+      act(() => { result.current.handleNewSession("codex__-tmp-my-project", "/tmp/my-project") })
+      mockedAuthFetch.mockResolvedValueOnce({
+        ok: true,
+        json: () => Promise.resolve({ dirName: "codex__-tmp-my-project", fileName: "s.jsonl", sessionId: "codex-1" }),
+      } as Response)
+
+      await act(async () => { await result.current.createAndSend("hello") })
+
+      expect(runner.start).not.toHaveBeenCalled()
+      expect(mockedAuthFetch.mock.calls[0][0]).toBe("/api/create-and-send")
     })
   })
 })

@@ -19,8 +19,15 @@ describe("storedSettings", () => {
       terminalApp: undefined,
       editorApp: "Zed",
       useBuiltInEditor: false,
+      codeMode: undefined,
       agentExecutable: undefined,
     })
+  })
+
+  it("stores Code Mode only when it is turned on", () => {
+    expect(storedSettings({ codeMode: true }).codeMode).toBe(true)
+    expect(storedSettings({ codeMode: "yes" }).codeMode).toBeUndefined()
+    expect(changedConfigKeys(SAVED, { ...SAVED, ...storedSettings({ ...SAVED, codeMode: true }) })).toEqual(["codeMode"])
   })
 })
 

@@ -230,6 +230,24 @@ export interface AgentSignIn {
   readStatus(report: AgentSignInReport): boolean | "unknown"
 }
 
+/**
+ * A mode the CLI turns on only in its own interactive terminal, refusing it to
+ * every programmatic launch Cogpit makes. Cogpit can still start a session in
+ * it, by running the CLI in the terminal panel instead of driving it.
+ */
+export interface AgentTerminalMode {
+  /** Environment that asks the CLI for the mode. */
+  readonly env: Readonly<Record<string, string>>
+  /** argv that starts a new session under an id Cogpit chose. */
+  newSession(sessionId: string): string[]
+  /** argv every launch carries: the settings Cogpit gives its own sessions. */
+  readonly settingsArgs: readonly string[]
+  /** argv that submits a first prompt, kept apart from the flags before it. */
+  prompt(text: string): string[]
+  /** What the mode needs that a person may not have, said where it is turned on. */
+  readonly requirement: string
+}
+
 /** How a CLI shows up in the machine's process listing. */
 export interface AgentProcessMatch {
   /**
@@ -293,6 +311,8 @@ export interface AgentCli {
   /** Null for an agent Cogpit is told how to launch rather than one a person installs. */
   readonly install: AgentInstallGuide | null
   readonly signIn: AgentSignIn | null
+  /** Code Mode, which runs only in the CLI's own terminal; null for a CLI without one. */
+  readonly codeMode: AgentTerminalMode | null
 }
 
 // ── Config-file layout ──────────────────────────────────────────────────────
@@ -647,13 +667,15 @@ const claude: AgentDescriptor = {
       // As flags, a missing mode starts the CLI asking first. A session the SDK
       // runtime starts without one runs in bypass instead (server/sdk-session.ts).
       if (!permissions?.mode) return ["--permission-mode", "default"]
-      if (permissions.mode === "bypassPermissions") return ["--dangerously-skip-permissions"]
+      // Full access still keeps the tools the user denied outright.
+      const denied = (permissions.disallowedTools ?? []).flatMap((tool) => ["--disallowedTools", tool])
+      if (permissions.mode === "bypassPermissions") return ["--dangerously-skip-permissions", ...denied]
       return [
         ...(CLAUDE_PERMISSION_MODES.has(permissions.mode)
           ? ["--permission-mode", permissions.mode]
           : []),
         ...(permissions.allowedTools ?? []).flatMap((tool) => ["--allowedTools", tool]),
-        ...(permissions.disallowedTools ?? []).flatMap((tool) => ["--disallowedTools", tool]),
+        ...denied,
       ]
     },
     model: (model) => flag("--model", model),
@@ -705,6 +727,14 @@ const claude: AgentDescriptor = {
           return "unknown"
         }
       },
+    },
+    codeMode: {
+      env: { CLAUDE_CODE_EXPERIMENTAL_CODE_MODE: "1" },
+      newSession: (sessionId) => ["--session-id", sessionId],
+      // The same layer server/sdk-session.ts gives the sessions it starts.
+      settingsArgs: ["--settings", JSON.stringify({ autoCompactEnabled: true })],
+      prompt: (text) => ["--", text],
+      requirement: "It needs Opus 5.5, Sonnet 5.5 or a later model.",
     },
   },
   config: {
@@ -895,6 +925,7 @@ const codex: AgentDescriptor = {
         return /not logged in/i.test(`${stdout}\n${stderr}`) ? false : "unknown"
       },
     },
+    codeMode: null,
   },
   config: {
     rootDirName: ".codex",
@@ -1037,6 +1068,7 @@ const copilot: AgentDescriptor = {
       statusArgs: null,
       readStatus: () => "unknown",
     },
+    codeMode: null,
   },
   config: {
     rootDirName: ".copilot",
@@ -1198,6 +1230,13 @@ const DESCRIPTORS: Readonly<Record<AgentKind, AgentDescriptor>> = Object.freeze(
 
 export function descriptorFor(kind: AgentKind): AgentDescriptor {
   return DESCRIPTORS[kind]
+}
+
+/** The command that continues a Code Mode session in a terminal; null for an agent without Code Mode. */
+export function codeModeResumeCommand(kind: AgentKind, sessionId: string): string | null {
+  const { cli, resume } = descriptorFor(kind)
+  if (!cli.codeMode) return null
+  return [...Object.entries(cli.codeMode.env).map(([key, value]) => `${key}=${value}`), resume.command(sessionId)].join(" ")
 }
 
 export function allDescriptors(): readonly AgentDescriptor[] {

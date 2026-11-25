@@ -77,4 +77,14 @@ describe("ErrorBanner for a session that can only go on in the agent's terminal"
 
     await waitFor(() => expect(writeText).toHaveBeenCalledWith(command))
   })
+
+  it("offers to continue in the terminal panel when the composer can start one there", () => {
+    const onContinueInTerminal = vi.fn()
+    render(<ErrorBanner error={error} agentKind="claude" onContinueInTerminal={onContinueInTerminal} />)
+
+    fireEvent.click(screen.getByRole("button", { name: "Continue in terminal" }))
+    expect(onContinueInTerminal).toHaveBeenCalledOnce()
+    // The copyable command stays for a terminal elsewhere.
+    expect(screen.getByRole("button", { name: "Copy command" })).toBeInTheDocument()
+  })
 })
