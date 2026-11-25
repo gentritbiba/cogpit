@@ -5,12 +5,15 @@ import type { SessionAction } from "@/hooks/useSessionState"
 import { nextLoadId, type SessionSource } from "@/lib/sessionSource"
 import type { LoadedSession, SessionController } from "@/lib/sessionLoader"
 import { EMPTY_SESSION_DIGEST, type SessionView } from "../../shared/session/sessionDigest"
-import { authFetch } from "@/lib/auth"
+import { AuthRequiredError, authFetch } from "@/lib/auth"
 import { slugifyWorktreeName } from "@/lib/utils"
-import { agentKindForDirName, descriptorFor } from "@/lib/agents"
+import { agentKindForDirName, descriptorFor, type AgentKind } from "@/lib/agents"
 import { fetchWithModelFallback } from "@/lib/agents/modelFallback"
 import { rename as renameSession } from "@/hooks/useSessionNames"
 import { rememberStartPrompt } from "@/lib/startPrompts"
+import { codeModeTerminalReady, codeModeTerminalStatus, startCodeModeSession, startsInCodeMode } from "@/lib/agents/codeMode"
+import { getActiveDeviceScope } from "@/lib/device"
+import { usePaneLifetime } from "@/contexts/DevicePaneContext"
 import {
   learnListedAccess,
   rememberCreatedSession,
@@ -147,6 +150,131 @@ async function recoverCodexSession(
   }
 }
 
+/** A project's folder, for a pending session that was opened without one. */
+async function projectFolder(dirName: string, signal: AbortSignal): Promise<string | null> {
+  const res = await authFetch("/api/projects", { signal })
+  if (!res.ok) return null
+  const projects = await res.json() as unknown
+  if (!Array.isArray(projects)) return null
+  const match = (projects as Array<{ dirName?: unknown; path?: unknown } | null>).find((project) => project?.dirName === dirName)
+  return typeof match?.path === "string" && match.path ? match.path : null
+}
+
+type TranscriptAddress = Pick<CreateSessionResponse, "dirName" | "fileName">
+
+const CODE_MODE_POLL_MS = 1000
+/** How long one lookup may take, so a stalled request cannot outlast the deadlines below. */
+const CODE_MODE_LOOKUP_MS = 5000
+/** How long a terminal that never appeared is waited for: a refused spawn adds none. */
+const CODE_MODE_SPAWN_MS = 15_000
+
+/** Where the session's transcript is, "missing" until the CLI writes one, or "refused" when this caller may not see it or must sign in again. */
+async function findSession(sessionId: string, signal: AbortSignal): Promise<{ address: TranscriptAddress } | "missing" | "refused"> {
+  const lookup = new AbortController()
+  const abort = () => lookup.abort()
+  signal.addEventListener("abort", abort, { once: true })
+  const timer = setTimeout(abort, CODE_MODE_LOOKUP_MS)
+  try {
+    const res = await authFetch(`/api/find-session/${encodeURIComponent(sessionId)}`, { signal: lookup.signal })
+    if (res.ok) return { address: await res.json() as TranscriptAddress }
+    return res.status === 401 || res.status === 403 ? "refused" : "missing"
+  } catch (error) {
+    return error instanceof AuthRequiredError ? "refused" : "missing"
+  } finally {
+    clearTimeout(timer)
+    signal.removeEventListener("abort", abort)
+  }
+}
+
+type CodeModeFailure = "no_terminal" | "ended" | "refused"
+
+/**
+ * Where a Code Mode session's transcript is, once the CLI has written one: it
+ * may first ask about the folder or the mode in the terminal, so a running
+ * terminal is waited for without a deadline. Requests follow the active
+ * machine connection (`scope`), so the wait pauses while another one is on
+ * screen, and a terminal list that is not ready decides nothing. Null when the
+ * wait is abandoned.
+ */
+async function waitForCodeModeTranscript(
+  sessionId: string,
+  scope: string,
+  signal: AbortSignal,
+): Promise<{ address: TranscriptAddress } | { failure: CodeModeFailure } | null> {
+  const spawnedAt = Date.now()
+  let started = false
+  while (!signal.aborted) {
+    if (getActiveDeviceScope() === scope) {
+      // Read before the lookup too, so a transcript written just before the exit is still found.
+      if (codeModeTerminalStatus(sessionId, scope) === "running") started = true
+      const lookup = await findSession(sessionId, signal)
+      if (lookup === "refused") return { failure: "refused" }
+      if (lookup !== "missing" && getActiveDeviceScope() === scope) return lookup
+      // Decide on the list as it is now, which the lookup may have outlasted.
+      const terminal = codeModeTerminalStatus(sessionId, scope)
+      if (terminal === "running") started = true
+      if (terminal === "exited" || (terminal === null && started)) return { failure: "ended" }
+      if (terminal === null && Date.now() - spawnedAt > CODE_MODE_SPAWN_MS) return { failure: "no_terminal" }
+    }
+    await new Promise((resolve) => setTimeout(resolve, CODE_MODE_POLL_MS))
+  }
+  return null
+}
+
+interface CodeModeStart {
+  kind: AgentKind
+  dirName: string
+  cwd: string | null
+  message: string
+  images?: Array<{ data: string; mediaType: string }>
+  worktree: boolean
+  model: string
+  effort: string
+  permissions: PermissionsConfig
+  signal: AbortSignal
+}
+
+/**
+ * Start a session in Code Mode in the terminal panel of the machine on screen
+ * when it was sent, and wait for its transcript. An error is for the user;
+ * null means the start was abandoned.
+ */
+async function startInCodeMode(start: CodeModeStart): Promise<CreateSessionResponse | { error: string } | null> {
+  const scope = getActiveDeviceScope()
+  const { displayName } = descriptorFor(start.kind)
+  const reconnecting = { error: "The terminal is reconnecting. Send it again in a moment." }
+  if (start.images?.length) {
+    return { error: "Code Mode sessions start in the terminal, which can't take attached images. Remove them, or paste them into the terminal once it starts." }
+  }
+  if (start.worktree) return { error: "Code Mode sessions can't start in a new worktree yet. Turn off Worktree to start one." }
+  if (!codeModeTerminalReady(scope)) return reconnecting
+  const cwd = start.cwd ?? await projectFolder(start.dirName, start.signal)
+  if (start.signal.aborted) return null
+  if (!cwd) return { error: "Couldn't find this project's folder to start Code Mode in." }
+  if (getActiveDeviceScope() !== scope) return { error: "You switched machines before the session started. Send it again." }
+  const sessionId = crypto.randomUUID()
+  const launched = startCodeModeSession({
+    kind: start.kind,
+    sessionId,
+    resume: false,
+    cwd,
+    prompt: start.message,
+    model: start.model || undefined,
+    effort: start.effort || undefined,
+    permissions: start.permissions,
+  }, scope)
+  if (!launched) return reconnecting
+  const wait = await waitForCodeModeTranscript(sessionId, scope, start.signal)
+  if (!wait) return null
+  if ("address" in wait) return { ...wait.address, sessionId, cwd }
+  const errors: Record<CodeModeFailure, string> = {
+    ended: `${displayName} ended before starting the session. Its output is in the terminal.`,
+    no_terminal: `The terminal for ${displayName} didn't start.`,
+    refused: "This server didn't let Cogpit open the new session.",
+  }
+  return { error: errors[wait.failure] }
+}
+
 export function useNewSession({
   permissionsConfig,
   dispatch,
@@ -166,6 +294,9 @@ export function useNewSession({
   const [createError, setCreateError] = useState<string | null>(null)
   const [worktreeEnabled, setWorktreeEnabled] = useState(false)
   const abortRef = useRef<AbortController | null>(null)
+  /** A Code Mode start still waiting for its transcript, which a new draft must not be opened over. */
+  const codeModeWaitRef = useRef<AbortController | null>(null)
+  const paneLifetime = usePaneLifetime()
   /** The dirName of the pending session (set before first message) */
   const pendingDirNameRef = useRef<string | null>(null)
   /** The exact cwd selected for the pending session, when known. */
@@ -174,6 +305,7 @@ export function useNewSession({
   /** Instantly show the empty chat view for a new session (no backend call). */
   const handleNewSession = useCallback(
     (dirName: string, cwd?: string) => {
+      codeModeWaitRef.current?.abort()
       pendingDirNameRef.current = dirName
       pendingCwdRef.current = cwd ?? null
       setCreateError(null)
@@ -235,6 +367,33 @@ export function useNewSession({
       try {
         const descriptor = descriptorFor(agentKind)
         const { capabilities } = descriptor
+        const worktreeName = capabilities.worktrees && worktreeEnabled ? slugifyWorktreeName(message) : undefined
+        if (startsInCodeMode(agentKind, dirName)) {
+          codeModeWaitRef.current = controller
+          // A machine pane torn down for good takes its pending start with it.
+          const forget = paneLifetime?.onEnd(() => controller.abort())
+          const started = await startInCodeMode({
+            kind: agentKind,
+            dirName,
+            cwd,
+            message,
+            images,
+            worktree: capabilities.worktrees && worktreeEnabled,
+            model,
+            effort,
+            permissions: permissionsConfig,
+            signal: controller.signal,
+          }).finally(() => {
+            forget?.()
+            if (codeModeWaitRef.current === controller) codeModeWaitRef.current = null
+          })
+          if (!started) return null
+          if ("error" in started) {
+            setCreateError(started.error)
+            return null
+          }
+          return await adoptCreatedSession(started)
+        }
         const requestBody = {
           dirName,
           // A lossy dirName cannot be decoded back to the cwd, so the server
@@ -248,7 +407,7 @@ export function useNewSession({
           fastMode: fastMode ? true : undefined,
           ultracode: capabilities.ultracode && ultracode ? true : undefined,
           name: capabilities.namedSessions ? (sessionName || undefined) : undefined,
-          worktreeName: capabilities.worktrees && worktreeEnabled ? slugifyWorktreeName(message) : undefined,
+          worktreeName,
           mcpConfig: capabilities.mcp ? (mcpConfig || undefined) : undefined,
         }
 
@@ -289,7 +448,7 @@ export function useNewSession({
         }
       }
     },
-    [permissionsConfig, model, effort, contextWindowTokens, fastMode, ultracode, mcpConfig, worktreeEnabled, dispatch, sessions, isMobile, onSessionFinalized, onCreateStarted, onModelRejected]
+    [permissionsConfig, model, effort, contextWindowTokens, fastMode, ultracode, mcpConfig, worktreeEnabled, paneLifetime, dispatch, sessions, isMobile, onSessionFinalized, onCreateStarted, onModelRejected]
   )
 
   const clearCreateError = useCallback(() => setCreateError(null), [])

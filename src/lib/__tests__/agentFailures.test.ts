@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest"
 import {
+  agentCodeModeOnlyMessage,
   agentConfigInvalidIn,
   agentConfigInvalidMessage,
   agentFailureTitle,
@@ -8,7 +9,9 @@ import {
   agentTerminalCommandIn,
   agentTerminalOnlyMessage,
   classifyAgentFailure,
+  isAgentCodeModeOnly,
 } from "../../../shared/session/agentFailures"
+import { codeModeResumeCommand } from "../../../shared/session/agent-descriptors"
 import { deriveSessionStatus } from "../../../shared/session/sessionStatus"
 import { parseSession } from "../../../shared/session/parser"
 
@@ -99,6 +102,17 @@ describe("what the user is told", () => {
     const message = agentTerminalOnlyMessage("Started in Code Mode.", "CLAUDE_CODE_EXPERIMENTAL_CODE_MODE=1 claude --resume s1", "Failed to resume session")
     expect(agentTerminalCommandIn(message)).toBe("CLAUDE_CODE_EXPERIMENTAL_CODE_MODE=1 claude --resume s1")
     expect(agentTerminalCommandIn("Failed to resume session\nResume it in the terminal: claude --resume s1")).toBeNull()
+  })
+
+  it("recognizes a refusal to continue a Code Mode session, and gives the command for its terminal", () => {
+    const command = codeModeResumeCommand("claude", "s1")!
+    expect(command).toBe("CLAUDE_CODE_EXPERIMENTAL_CODE_MODE=1 claude --resume s1")
+    expect(codeModeResumeCommand("codex", "s1")).toBeNull()
+
+    const refusal = agentCodeModeOnlyMessage("claude", command, "Failed to resume session")
+    expect(isAgentCodeModeOnly(refusal)).toBe(true)
+    expect(agentTerminalCommandIn(refusal)).toBe(command)
+    expect(isAgentCodeModeOnly(agentTerminalOnlyMessage("Started somewhere else.", command, "Failed"))).toBe(false)
   })
 
   it("reads a config failure without a backup, and nothing from other messages", () => {

@@ -7,6 +7,16 @@ import { WebSocket, WebSocketServer } from "ws"
 
 const mockSignInLaunch = vi.hoisted(() => vi.fn())
 vi.mock("../agents/signIn", () => ({ agentSignInLaunch: mockSignInLaunch }))
+const mockCodeModeLaunch = vi.hoisted(() => vi.fn())
+const edition = vi.hoisted(() => ({ ownsSignIn: false }))
+vi.mock("../edition", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../edition")>()),
+  editionOwnsSignIn: () => edition.ownsSignIn,
+}))
+vi.mock("../agents/codeMode", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../agents/codeMode")>()),
+  agentCodeModeLaunch: mockCodeModeLaunch,
+}))
 
 import { startCore, type CoreLease } from "../core/supervisor"
 import type { SocketAuthorizer } from "../pty-authorization"
@@ -38,6 +48,8 @@ beforeAll(async () => {
 afterEach(() => {
   vi.useRealTimers()
   mockSignInLaunch.mockReset()
+  mockCodeModeLaunch.mockReset()
+  edition.ownsSignIn = false
   authorizers.clear()
 })
 
@@ -188,6 +200,72 @@ describe("PtySocketRelay", () => {
       await panel.output("unknown-agent", "requested-terminal")
       expect(mockSignInLaunch).not.toHaveBeenCalled()
       panel.send({ type: "kill", id: "unknown-agent" })
+      panel.close()
+    })
+  })
+
+  describe("Code Mode terminals", () => {
+    const sessionId = "5b0c1d2e-3f40-4a5b-8c6d-7e8f9a0b1c2d"
+
+    it("runs the launch the server builds for the session, never the client's command", async () => {
+      mockCodeModeLaunch.mockReturnValue(isWindows
+        ? { command: process.env.COMSPEC ?? "cmd.exe", args: ["/d", "/s", "/c", "\"echo code^ mode %COGPIT_CODE_MODE_TEST%\""], verbatimArgs: true, env: { COGPIT_CODE_MODE_TEST: "on" } }
+        : { command: "/bin/sh", args: ["-c", "printf 'code mode %s\\n' \"$COGPIT_CODE_MODE_TEST\""], verbatimArgs: false, env: { COGPIT_CODE_MODE_TEST: "on" } })
+      const panel = await new Panel().open()
+      panel.send({ type: "spawn", id: "code-mode", ...printing("client-command"), codeMode: { agent: "claude", sessionId, prompt: "hi" } })
+
+      await panel.output("code-mode", "code mode on")
+      expect(mockCodeModeLaunch).toHaveBeenCalledWith(expect.objectContaining({ agent: "claude", sessionId, prompt: "hi", resume: false }))
+      panel.send({ type: "kill", id: "code-mode" })
+      panel.close()
+    })
+
+    it("ties the terminal to the session it launched, and lets no other terminal claim one", async () => {
+      mockCodeModeLaunch.mockReturnValue({ ...printing("code-mode-tagged"), verbatimArgs: false, env: {} })
+      const panel = await new Panel().open()
+      panel.send({ type: "spawn", id: "tagged", ...printing("client-command"), codeMode: { agent: "claude", sessionId }, metadata: { type: "terminal", sessionId: "someone-else" } })
+      panel.send({ type: "spawn", id: "claiming", ...printing("plain"), metadata: { type: "terminal", sessionId } })
+      await panel.output("tagged", "code-mode-tagged")
+      await panel.output("claiming", "plain")
+
+      const listed = await panel.sessions() as Array<{ id: string; metadata?: Record<string, unknown> }>
+      expect(listed.find((s) => s.id === "tagged")?.metadata).toEqual({ type: "terminal", sessionId })
+      expect(listed.find((s) => s.id === "claiming")?.metadata).toEqual({ type: "terminal" })
+      panel.send({ type: "kill", id: "tagged" })
+      panel.send({ type: "kill", id: "claiming" })
+      panel.close()
+    })
+
+    it("refuses a spawn naming both a sign-in and a Code Mode session", async () => {
+      const panel = await new Panel().open()
+      panel.send({ type: "spawn", id: "both", ...printing("client-command"), signIn: { agent: "rm -rf" }, codeMode: { agent: "claude", sessionId } })
+
+      expect(await panel.until((f) => f.type === "error" && f.id === "both")).toMatchObject({ message: expect.stringContaining("not both") })
+      expect((await panel.sessions()).map((s) => s.id)).not.toContain("both")
+      panel.close()
+    })
+
+    it("refuses Code Mode where the edition signs accounts in and owns who starts a session", async () => {
+      edition.ownsSignIn = true
+      const panel = await new Panel().open()
+      panel.send({ type: "spawn", id: "edition", ...printing("client-command"), codeMode: { agent: "claude", sessionId } })
+
+      expect(await panel.until((f) => f.type === "error" && f.id === "edition")).toMatchObject({ message: expect.stringContaining("signs in accounts") })
+      expect(mockCodeModeLaunch).not.toHaveBeenCalled()
+      panel.close()
+    })
+
+    it("reports a session it cannot start in Code Mode instead of starting anything", async () => {
+      const panel = await new Panel().open()
+      panel.send({ type: "spawn", id: "no-code-mode", ...printing("client-command"), codeMode: { agent: "codex", sessionId } })
+
+      expect(await panel.until((f) => f.type === "error")).toEqual({
+        type: "error",
+        id: "no-code-mode",
+        message: "Failed to spawn PTY: Error: This server cannot start that Code Mode session",
+      })
+      expect(mockCodeModeLaunch).not.toHaveBeenCalled()
+      expect((await panel.sessions()).map((s) => s.id)).not.toContain("no-code-mode")
       panel.close()
     })
   })

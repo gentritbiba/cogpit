@@ -1,8 +1,8 @@
 import { readFile, realpath, stat } from "node:fs/promises"
 import { homedir } from "node:os"
 import { basename, dirname, join, resolve } from "node:path"
-import { descriptorFor } from "../../shared/session/agent-descriptors"
-import { agentConfigInvalidMessage, agentTerminalOnlyMessage, type InvalidAgentConfig } from "../../shared/session/agentFailures"
+import { codeModeResumeCommand } from "../../shared/session/agent-descriptors"
+import { agentCodeModeOnlyMessage, agentConfigInvalidMessage, type InvalidAgentConfig } from "../../shared/session/agentFailures"
 import { writeOwnerOnlyText } from "../atomicJsonFile"
 
 /**
@@ -20,14 +20,12 @@ const reported = new Map<string, InvalidAgentConfig>()
  */
 const CODE_MODE_REFUSAL = /This session was started in Code Mode\b.*can't be resumed/
 const CODE_MODE_COMMAND = /Resume it in the terminal: (.+)$/m
-const CODE_MODE_TITLE = "This session was started in Code Mode, so it can only be continued in Claude Code in a terminal."
 
 function describeCodeModeRefusal(result: Record<string, unknown>, detail: string): string | null {
   if (!CODE_MODE_REFUSAL.test(detail)) return null
   const sessionId = typeof result.session_id === "string" ? result.session_id : ""
-  const command = CODE_MODE_COMMAND.exec(detail)?.[1].trim()
-    || `CLAUDE_CODE_EXPERIMENTAL_CODE_MODE=1 ${descriptorFor("claude").resume.command(sessionId)}`
-  return agentTerminalOnlyMessage(CODE_MODE_TITLE, command, detail)
+  const command = CODE_MODE_COMMAND.exec(detail)?.[1].trim() || codeModeResumeCommand("claude", sessionId)!
+  return agentCodeModeOnlyMessage("claude", command, detail)
 }
 
 /** The plain-words message for a failed start a person can fix, or null for any other result. */

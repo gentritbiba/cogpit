@@ -11,6 +11,7 @@ export interface ConfigSettingsPayload {
   terminalApp?: string
   editorApp?: string
   useBuiltInEditor?: boolean
+  codeMode?: boolean
   agentExecutable?: ExecutableChoice
 }
 

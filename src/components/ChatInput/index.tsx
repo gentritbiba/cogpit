@@ -19,6 +19,10 @@ import { registerComposer, emitComposerEvent, dispatchComposerKey, type Composer
 import { RuntimePluginActions } from "@/plugins/RuntimePluginActions"
 import { DictationBar, DictationButton, useComposerDictation } from "@/plugins/RuntimeDictation"
 import { ErrorBanner } from "./ErrorBanner"
+import { CodeModeComposer } from "./CodeModeComposer"
+import { codeModeAvailable, resumeInCodeMode, useCanRunCodeMode, useIsCodeModeSession } from "@/lib/agents/codeMode"
+import { useOptionalPty } from "@/contexts/PtyContext"
+import { isAgentCodeModeOnly } from "../../../shared/session/agentFailures"
 import { capabilitiesFor, DEFAULT_AGENT_KIND, descriptorFor, type AgentKind } from "@/lib/agents"
 import { isAgentInstalled, useAgentAvailability } from "@/lib/agents/availability"
 import { signInTargetFor, startAgentSignIn } from "@/lib/agents/signIn"
@@ -143,6 +147,19 @@ export const ChatInput = memo(forwardRef<ChatInputHandle, ChatInputProps>(functi
   const identity = JSON.stringify([sessionSource?.dirName ?? props.composerIdentity ?? props.agentKind ?? "", sessionId ?? "pending"])
   const composerKey = useDeviceScopedKey("composer-v1")
   const scope = JSON.stringify([composerKey, props.projectCwd ?? sessionCwd ?? "", identity])
+  const terminals = useOptionalPty()?.sessions
+  const inTerminal = Boolean(sessionId && terminals?.some((terminal) => terminal.status === "running" && terminal.metadata?.sessionId === sessionId))
+  const codeMode = useIsCodeModeSession(sessionId) || inTerminal
+  if (sessionId && codeMode && props.agentKind) {
+    return (
+      <CodeModeComposer
+        sessionId={sessionId}
+        agentKind={props.agentKind}
+        cwd={sessionCwd || props.projectCwd || null}
+        running={inTerminal}
+      />
+    )
+  }
   return <ScopedChatInput key={scope} {...props} scope={scope} ref={ref} />
 }))
 
@@ -170,6 +187,13 @@ const ScopedChatInput = forwardRef<ChatInputHandle, ChatInputProps & { scope: st
   } = useSessionControls()
   const { chat: { status, error, isConnected, sendMessage: onSend, interrupt: onInterrupt } } = useSessionChatContext()
   const canInterrupt = isConnected || isLive
+  // A session the agent continues only in its own terminal can be continued in the panel's.
+  const sessionCwd = useOpenSession((open) => open?.cwd)
+  const canRunCodeMode = useCanRunCodeMode()
+  const codeModeCwd = sessionCwd || projectCwd
+  const terminalAction = (message: string) => (canRunCodeMode && sessionId && codeModeCwd && isAgentCodeModeOnly(message) && codeModeAvailable(agentKind ?? DEFAULT_AGENT_KIND, sessionId)
+    ? () => resumeInCodeMode(agentKind ?? DEFAULT_AGENT_KIND, sessionId, codeModeCwd)
+    : undefined)
 
   const [text, setText] = useState(initial.text)
   const [isMultiline, setIsMultiline] = useState(false)
@@ -711,11 +735,11 @@ const ScopedChatInput = forwardRef<ChatInputHandle, ChatInputProps & { scope: st
             </div>
           </div>
         </div>
-        {status === "error" && error && <ErrorBanner key={error} error={error} agentKind={agentKind ?? DEFAULT_AGENT_KIND} instanceId={signInTarget.instanceId} />}
+        {status === "error" && error && <ErrorBanner key={error} error={error} agentKind={agentKind ?? DEFAULT_AGENT_KIND} instanceId={signInTarget.instanceId} onContinueInTerminal={terminalAction(error)} />}
         {/* Failures with no HTTP response behind them arrive over SSE instead.
             Mutually exclusive with the banner above: the server only publishes
             when nothing is waiting on a response. */}
-        {turnError && <ErrorBanner key={turnError} error={turnError} agentKind={agentKind ?? DEFAULT_AGENT_KIND} instanceId={signInTarget.instanceId} />}
+        {turnError && <ErrorBanner key={turnError} error={turnError} agentKind={agentKind ?? DEFAULT_AGENT_KIND} instanceId={signInTarget.instanceId} onContinueInTerminal={terminalAction(turnError)} />}
       </div>
     </div>
   )

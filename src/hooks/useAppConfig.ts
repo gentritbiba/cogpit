@@ -1,6 +1,8 @@
 import { useState, useEffect, useCallback, useRef } from "react"
 import { authFetch, hubFetch } from "@/lib/auth"
 import { setBuiltInEditorEnabled } from "@/lib/fileOpener"
+import { setCodeModeEnabled } from "@/lib/agents/codeMode"
+import { useDeviceId } from "@/contexts/DevicePaneContext"
 import type { AppConfig } from "@/contexts/AppContext"
 import { DEFAULT_AGENT_KIND, parseAgentKind, type AgentKind } from "@/lib/agents"
 
@@ -35,6 +37,8 @@ interface ConfigSnapshot {
   freshInstall: boolean
   /** Route "open in editor" affordances to Cogpit's own file workspace. */
   useBuiltInEditor: boolean
+  /** Start new sessions in Code Mode, in the terminal panel; null from a server that predates it. */
+  codeMode: boolean | null
 }
 
 /** Fetch the config endpoint and return its provider-aware snapshot or throw. */
@@ -46,6 +50,7 @@ async function fetchConfig(signal?: AbortSignal): Promise<ConfigSnapshot> {
     mode?: string
     freshInstall?: boolean
     useBuiltInEditor?: boolean
+    codeMode?: boolean
   } | null
   return {
     claudeDir: data?.claudeDir ?? null,
@@ -53,6 +58,7 @@ async function fetchConfig(signal?: AbortSignal): Promise<ConfigSnapshot> {
     // A server from before install tracking says nothing: an earlier install.
     freshInstall: data?.freshInstall === true,
     useBuiltInEditor: data?.useBuiltInEditor === true,
+    codeMode: typeof data?.codeMode === "boolean" ? data.codeMode : null,
   }
 }
 
@@ -68,6 +74,7 @@ export function useAppConfig(): AppConfig {
   // Bump to re-fetch config (e.g. after authentication)
   const [fetchKey, setFetchKey] = useState(0)
   const networkRequestRef = useRef<AbortController | null>(null)
+  const deviceId = useDeviceId()
 
   /** Publish a resolved snapshot to local state and the file-open router. */
   const applySnapshot = useCallback((snapshot: ConfigSnapshot) => {
@@ -75,7 +82,8 @@ export function useAppConfig(): AppConfig {
     setDefaultAgentKind(snapshot.defaultAgentKind)
     setFreshInstall(snapshot.freshInstall)
     setBuiltInEditorEnabled(snapshot.useBuiltInEditor)
-  }, [])
+    setCodeModeEnabled(deviceId, snapshot.codeMode)
+  }, [deviceId])
 
   const refreshNetwork = useCallback(async () => {
     networkRequestRef.current?.abort()

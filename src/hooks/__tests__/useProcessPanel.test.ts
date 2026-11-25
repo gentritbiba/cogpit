@@ -56,6 +56,17 @@ describe("useProcessPanel", () => {
     expect(result.current.collapsed).toBe(false)
   })
 
+  it("opens a session on the terminal started for it, once the session opens", () => {
+    const { result, rerender } = renderHook(({ id }) => useProcessPanel(id), { initialProps: { id: null as string | null } })
+    const terminal: ProcessEntry = { id: "pty_cm", name: "Claude Code · Code Mode", type: "terminal", status: "running", sessionId: "new-1" }
+
+    act(() => { result.current.addProcess(terminal) })
+    rerender({ id: "new-1" })
+
+    expect(result.current.activeProcessId).toBe("pty_cm")
+    expect(result.current.collapsed).toBe(false)
+  })
+
   it("removeProcess removes entry and switches active to remaining", () => {
     const { result } = renderHook(() => useProcessPanel("session-1"))
 

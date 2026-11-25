@@ -1,21 +1,9 @@
 import { descriptorFor, type AgentKind } from "../../shared/session/agent-descriptors"
 import type { ProviderInstance } from "../../shared/contracts/orchestration"
-import { resolveAgentCommand } from "../lib/binaryResolver"
 import type { TerminalCommand } from "../../shared/contracts/agentCheck"
-import { spawnedExecutableFor, type SpawnedExecutable } from "./executables"
+import type { SpawnedExecutable } from "./executables"
 import { instanceAuthEnvironment, providerInstance } from "./instanceConfigurations"
-import { AgentRuntimeError } from "./runtimeTypes"
-
-/** An agent's own sign-in, ready to run in a terminal on this server. */
-export interface SignInLaunch {
-  /** A Windows batch shim is already wrapped in `cmd.exe`, the way the runtimes launch it. */
-  command: string
-  args: string[]
-  /** `cmd.exe` must get its command line as one verbatim string, not re-quoted arguments. */
-  verbatimArgs: boolean
-  /** Layered over the server's environment: an account instance's home and config folders. */
-  env: Record<string, string>
-}
+import { accountBinary, agentTerminalLaunch, type AgentTerminalLaunch } from "./terminalLaunch"
 
 interface SignInTarget {
   binName: string
@@ -28,14 +16,9 @@ interface SignInTarget {
 function targetFor(kind: AgentKind, instance: ProviderInstance | null, found?: SpawnedExecutable): SignInTarget | null {
   const { binName, cli } = descriptorFor(kind)
   if (!cli.signIn) return null
-  if (instance && instance.agent !== kind) {
-    throw new AgentRuntimeError(409, "INSTANCE_MISMATCH", "This account belongs to a different agent")
-  }
   return {
     binName,
-    // The binary this agent's sessions run, which may be one no shell finds by
-    // name: Cogpit's bundled copy, or the executable an instance was given.
-    binary: instance?.executable ? { path: instance.executable, source: "custom" } : (found ?? spawnedExecutableFor(kind)),
+    binary: accountBinary(kind, instance, found),
     args: cli.signIn.args,
     env: instance ? instanceAuthEnvironment(instance) : {},
   }
@@ -46,16 +29,9 @@ function targetFor(kind: AgentKind, instance: ProviderInstance | null, found?: S
  * with the binary Cogpit spawns, and for a provider-account instance, that
  * instance's executable and home. Null for an agent with no sign-in of its own.
  */
-export function agentSignInLaunch(kind: AgentKind, instanceId?: string | null): SignInLaunch | null {
+export function agentSignInLaunch(kind: AgentKind, instanceId?: string | null): AgentTerminalLaunch | null {
   const target = targetFor(kind, instanceId ? providerInstance(instanceId) : null)
-  if (!target) return null
-  const resolved = resolveAgentCommand(target.binary?.path ?? target.binName, [...target.args], { env: { ...process.env, ...target.env } })
-  return {
-    command: resolved.command,
-    args: resolved.args,
-    verbatimArgs: resolved.spawnOptions.windowsVerbatimArguments === true,
-    env: target.env,
-  }
+  return target && agentTerminalLaunch(target.binary, target.binName, [...target.args], target.env)
 }
 
 /** A POSIX shell single-quoted word: an apostrophe closes, escapes and reopens. */

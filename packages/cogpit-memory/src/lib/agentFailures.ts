@@ -136,6 +136,21 @@ export function agentTerminalCommandIn(message: string): string | null {
   return line?.startsWith(TERMINAL_PREFIX) ? line.slice(TERMINAL_PREFIX.length) : null
 }
 
+function codeModeOnlyTitle(kind: AgentKind): string {
+  return `This session was started in Code Mode, so it can only be continued in ${descriptorFor(kind).displayName} in a terminal.`
+}
+
+/** A refusal to continue a session the agent started in Code Mode, which runs only in its own terminal. */
+export function agentCodeModeOnlyMessage(kind: AgentKind, command: string, detail: string): string {
+  return agentTerminalOnlyMessage(codeModeOnlyTitle(kind), command, detail)
+}
+
+/** Whether a message is the refusal from `agentCodeModeOnlyMessage`. */
+export function isAgentCodeModeOnly(message: string): boolean {
+  const title = message.split("\n")[0]
+  return AGENT_KINDS.some((kind) => title === codeModeOnlyTitle(kind))
+}
+
 /** One line for a status label, in the same plain words the card uses. */
 export function agentFailureTitle(kind: AgentKind, failure: AgentFailure): string {
   switch (failure.reason) {

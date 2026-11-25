@@ -53,6 +53,8 @@ import { ChatInput } from "../index"
 import { resetUnsentRecoveriesForTest } from "../unsentRecovery"
 import { _resetAgentAvailabilityForTests } from "@/lib/agents/availability"
 import { showSession } from "@/__tests__/sessionContextMock"
+import { setCodeModeEnabled, registerCodeModeRunner, rememberCodeModeSession } from "@/lib/agents/codeMode"
+import { agentCodeModeOnlyMessage } from "../../../../shared/session/agentFailures"
 
 const message = () => screen.getByRole("combobox", { name: "Message" })
 const send = (text: string) => {
@@ -144,5 +146,36 @@ describe("ChatInput agent setup", () => {
     mocks.fetchProviderUpdates.mockResolvedValue([makeProviderUpdateInfo(), makeProviderUpdateInfo({ provider: "codex", installed: false, binaryPath: null, status: "not-installed" })])
     render(<ChatInput agentKind="codex" />)
     await waitFor(() => expect(screen.getByRole("status")).toHaveTextContent("Codex isn't installed on this computer."))
+  })
+
+  describe("a session in Code Mode", () => {
+    const runner = { ready: true, start: vi.fn(), show: vi.fn(), status: vi.fn(() => null) }
+    // The server has said it knows Code Mode; the setting itself can be off.
+    beforeEach(() => setCodeModeEnabled("local", false))
+
+    it("hands the composer to the terminal for a session started in Code Mode", () => {
+      const unregister = registerCodeModeRunner("local", runner)
+      showSession({ sessionId: "code-mode-1", cwd: "/project" })
+      rememberCodeModeSession("code-mode-1")
+      render(<ChatInput agentKind="claude" />)
+
+      expect(screen.queryByRole("combobox", { name: "Message" })).toBeNull()
+      fireEvent.click(screen.getByRole("button", { name: "Continue in terminal" }))
+      expect(runner.start).toHaveBeenCalledWith({ kind: "claude", sessionId: "code-mode-1", resume: true, cwd: "/project" })
+      unregister()
+    })
+
+    it("offers the terminal panel when the agent refuses to continue a Code Mode session here", () => {
+      const unregister = registerCodeModeRunner("local", runner)
+      showSession({ sessionId: "elsewhere-1", cwd: "/project" })
+      mocks.turnError = agentCodeModeOnlyMessage("claude", "CLAUDE_CODE_EXPERIMENTAL_CODE_MODE=1 claude --resume elsewhere-1", "Failed to resume session")
+      render(<ChatInput agentKind="claude" />)
+
+      // The composer stays, so whatever was typed is not lost.
+      expect(message()).toBeInTheDocument()
+      fireEvent.click(screen.getByRole("button", { name: "Continue in terminal" }))
+      expect(runner.start).toHaveBeenCalledWith({ kind: "claude", sessionId: "elsewhere-1", resume: true, cwd: "/project" })
+      unregister()
+    })
   })
 })

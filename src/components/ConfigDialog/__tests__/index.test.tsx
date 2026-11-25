@@ -17,6 +17,7 @@ const SAVED_CONFIG = {
   terminalApp: "",
   editorApp: "cursor",
   useBuiltInEditor: false,
+  codeMode: false,
 }
 
 const ACCOUNTS_REPORT = {
@@ -122,6 +123,36 @@ describe("ConfigDialog editor routing", () => {
     await waitFor(() => expect(editorInput()).toBeDisabled())
     expect(screen.getByRole("checkbox", { name: /Open files in Cogpit/ })).toBeChecked()
     // Nothing changed yet, so there is nothing to save.
+    expect(screen.getByRole("button", { name: "Save" })).toBeDisabled()
+  })
+})
+
+describe("ConfigDialog Code Mode", () => {
+  beforeEach(() => {
+    mocks.authFetch.mockReset()
+  })
+
+  it("saves starting new sessions in Code Mode, and shows it saved", async () => {
+    const user = userEvent.setup()
+    mockConfig()
+    const { onSaved } = renderDialog()
+
+    const checkbox = await screen.findByRole("checkbox", { name: /Start Claude Code sessions in Code Mode/ })
+    await waitFor(() => expect(editorInput()).toHaveValue("cursor"))
+    expect(checkbox).not.toBeChecked()
+    await user.click(checkbox)
+    await user.click(screen.getByRole("button", { name: "Save" }))
+
+    await waitFor(() => expect(onSaved).toHaveBeenCalledWith(SAVED_CONFIG.claudeDir))
+    const save = mocks.authFetch.mock.calls.find((call) => call[0] === "/api/config" && call[1]?.method === "POST")
+    expect(JSON.parse(save?.[1]?.body as string)).toMatchObject({ codeMode: true })
+  })
+
+  it("restores the saved choice when reopened", async () => {
+    mockConfig({ codeMode: true })
+    renderDialog()
+
+    await waitFor(() => expect(screen.getByRole("checkbox", { name: /Start Claude Code sessions in Code Mode/ })).toBeChecked())
     expect(screen.getByRole("button", { name: "Save" })).toBeDisabled()
   })
 })

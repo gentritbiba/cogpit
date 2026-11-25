@@ -8,10 +8,11 @@ export interface ClientSettings {
   terminalApp?: string
   editorApp?: string
   useBuiltInEditor?: unknown
+  codeMode?: unknown
   agentExecutable?: unknown
 }
 
-type StoredSettings = Pick<AppConfig, "networkAccess" | "terminalApp" | "editorApp" | "useBuiltInEditor" | "agentExecutable">
+type StoredSettings = Pick<AppConfig, "networkAccess" | "terminalApp" | "editorApp" | "useBuiltInEditor" | "codeMode" | "agentExecutable">
 
 /** A client's settings as the config stores them: flags as booleans, blanks and the automatic executable left out. */
 export function storedSettings(settings: ClientSettings): StoredSettings {
@@ -20,6 +21,7 @@ export function storedSettings(settings: ClientSettings): StoredSettings {
     terminalApp: settings.terminalApp || undefined,
     editorApp: settings.editorApp || undefined,
     useBuiltInEditor: !!settings.useBuiltInEditor,
+    codeMode: settings.codeMode === true || undefined,
     agentExecutable: parseExecutableChoice(settings.agentExecutable),
   }
 }

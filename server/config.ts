@@ -90,6 +90,8 @@ export interface AppConfig {
   editorApp?: string
   /** Route "open in editor" affordances to Cogpit's own file workspace. */
   useBuiltInEditor?: boolean
+  /** Start new sessions in the terminal panel, in Code Mode, for an agent that has it. */
+  codeMode?: boolean
   /** Which binary the configured-home agent is spawned from; absent means auto. */
   agentExecutable?: ExecutableChoice
   /** Absolute folder the folder browser starts in; see getProjectsRoot. File-only, like `edition`. */
@@ -355,6 +357,7 @@ export async function loadConfig(): Promise<AppConfig | null> {
         terminalApp: parsed.terminalApp || undefined,
         editorApp: parsed.editorApp || undefined,
         useBuiltInEditor: !!parsed.useBuiltInEditor,
+        codeMode: parsed.codeMode === true || undefined,
         agentExecutable: parseExecutableChoice(parsed.agentExecutable),
         projectsRoot: absolutePathOrUndefined(parsed.projectsRoot, "projectsRoot in the config file"),
       }

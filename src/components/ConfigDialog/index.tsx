@@ -1,5 +1,5 @@
 import { lazy, Suspense, useState, useCallback, useEffect } from "react"
-import { FolderOpen, CheckCircle, XCircle, Loader2, TerminalSquare, Code2, PanelsTopLeft } from "lucide-react"
+import { FolderOpen, CheckCircle, XCircle, Loader2, TerminalSquare, Code2, PanelsTopLeft, SquareTerminal } from "lucide-react"
 import {
   Dialog,
   DialogContent,
@@ -24,6 +24,7 @@ import {
   InputGroupInput,
 } from "@/components/ui/input-group"
 import { useConfigValidation } from "@/hooks/useConfigValidation"
+import { useCurrentUser } from "@/hooks/useCurrentUser"
 import { useReportFeature } from "@/hooks/useReportFeature"
 import { authFetch } from "@/lib/auth"
 import { useCan } from "@/hooks/useCapability"
@@ -53,6 +54,11 @@ const EXECUTABLE_CHOICE_KINDS = allDescriptors()
 const ACCOUNT_SWITCHING_KINDS = allDescriptors()
   .filter((descriptor) => descriptor.capabilities.accountSwitching)
   .map((descriptor) => descriptor.kind)
+
+const CODE_MODE_DESCRIPTORS = allDescriptors().filter((descriptor) => descriptor.cli.codeMode !== null)
+/** Agents whose sessions can start in Code Mode, as one list of names. */
+const CODE_MODE_AGENTS = new Intl.ListFormat("en", { type: "disjunction" }).format(CODE_MODE_DESCRIPTORS.map((descriptor) => descriptor.displayName))
+const CODE_MODE_REQUIREMENTS = CODE_MODE_DESCRIPTORS.map((descriptor) => descriptor.cli.codeMode?.requirement).join(" ")
 
 function sameChoice(a: ExecutableChoice, b: ExecutableChoice): boolean {
   return a.source === b.source && (a.source !== "custom" || a.path === b.path)
@@ -104,6 +110,8 @@ export function ConfigDialog({ open, currentPath, onClose, onSaved }: ConfigDial
   const remoteDevice = useIsRemoteDevice()
   // An account without configWrite gets a read-only view (the server refuses writes anyway).
   const canWriteConfig = can("configWrite")
+  // A server that controls who owns each session refuses terminal-started ones.
+  const enforcesSessionAccess = useCurrentUser().enforcesSessionAccess !== false
   const [pluginsOpen, setPluginsOpen] = useState(false)
   const runtimePlugins = useRuntimePlugins(open && pluginsOpen && canWriteConfig)
 
@@ -123,6 +131,9 @@ export function ConfigDialog({ open, currentPath, onClose, onSaved }: ConfigDial
   // Route "open in editor" to Cogpit's own file workspace instead
   const [useBuiltInEditor, setUseBuiltInEditor] = useState(false)
   const [initialUseBuiltInEditor, setInitialUseBuiltInEditor] = useState(false)
+
+  const [codeMode, setCodeMode] = useState(false)
+  const [initialCodeMode, setInitialCodeMode] = useState(false)
 
   const [agentExecutable, setAgentExecutable] = useState<ExecutableChoice>(DEFAULT_EXECUTABLE_CHOICE)
   const [executableReportVersion, setExecutableReportVersion] = useState(0)
@@ -158,6 +169,9 @@ export function ConfigDialog({ open, currentPath, onClose, onSaved }: ConfigDial
           const builtIn = data?.useBuiltInEditor === true
           setUseBuiltInEditor(builtIn)
           setInitialUseBuiltInEditor(builtIn)
+          const startsInCodeMode = data?.codeMode === true
+          setCodeMode(startsInCodeMode)
+          setInitialCodeMode(startsInCodeMode)
           const executable = parseExecutableChoice(data?.agentExecutable) ?? DEFAULT_EXECUTABLE_CHOICE
           setAgentExecutable(executable)
           setInitialAgentExecutable(executable)
@@ -195,6 +209,7 @@ export function ConfigDialog({ open, currentPath, onClose, onSaved }: ConfigDial
       terminalApp: terminalApp.trim() || undefined,
       editorApp: editorApp.trim() || undefined,
       useBuiltInEditor,
+      codeMode,
       agentExecutable,
     })
     if (result.success && result.claudeDir) {
@@ -202,7 +217,7 @@ export function ConfigDialog({ open, currentPath, onClose, onSaved }: ConfigDial
       onSaved(result.claudeDir)
     }
     setSaving(false)
-  }, [path, networkAccess, networkPassword, terminalApp, editorApp, useBuiltInEditor, agentExecutable, save, onSaved, remoteDevice, initialNetworkAccess])
+  }, [path, networkAccess, networkPassword, terminalApp, editorApp, useBuiltInEditor, codeMode, agentExecutable, save, onSaved, remoteDevice, initialNetworkAccess])
 
   function computeCanSave(): boolean {
     // Block save while path is being validated or is invalid
@@ -215,7 +230,8 @@ export function ConfigDialog({ open, currentPath, onClose, onSaved }: ConfigDial
     const editorChanged = editorApp !== initialEditorApp
       || useBuiltInEditor !== initialUseBuiltInEditor
     const executableChanged = !sameChoice(agentExecutable, initialAgentExecutable)
-    if (!pathChanged && !networkChanged && !terminalChanged && !editorChanged && !executableChanged) return false
+    const codeModeChanged = codeMode !== initialCodeMode
+    if (!pathChanged && !networkChanged && !terminalChanged && !editorChanged && !executableChanged && !codeModeChanged) return false
     if (agentExecutable.source === "custom" && !agentExecutable.path?.trim()) return false
 
     // Validate password requirements when network is enabled
@@ -325,6 +341,26 @@ export function ConfigDialog({ open, currentPath, onClose, onSaved }: ConfigDial
               disabled={!canWriteConfig || useBuiltInEditor}
             />
           </Field>
+
+          {CODE_MODE_AGENTS && !enforcesSessionAccess && <Field orientation="horizontal">
+            <Checkbox
+              id="start-in-code-mode"
+              checked={codeMode}
+              onCheckedChange={(checked) => setCodeMode(checked === true)}
+              disabled={!canWriteConfig}
+            />
+            <FieldContent>
+              <FieldLabel htmlFor="start-in-code-mode">
+                <SquareTerminal data-icon="inline-start" className="size-4 text-muted-foreground" />
+                Start {CODE_MODE_AGENTS} sessions in Code Mode
+              </FieldLabel>
+              <FieldDescription>
+                Code Mode is experimental and only runs in the terminal, so new sessions open in the
+                terminal panel. You type and answer prompts there while the chat follows along.
+                {` ${CODE_MODE_REQUIREMENTS}`}
+              </FieldDescription>
+            </FieldContent>
+          </Field>}
 
           {EXECUTABLE_CHOICE_KINDS.map((kind) => (
             <ExecutableSection

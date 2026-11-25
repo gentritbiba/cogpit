@@ -146,11 +146,18 @@ export interface AuthFetchInit extends RequestInit {
   background?: boolean
 }
 
+/** The rejection of a request the server answered with "sign in first". */
+export class AuthRequiredError extends Error {
+  constructor() {
+    super("Authentication required")
+  }
+}
+
 /** Scrub legacy tokens, announce the login requirement, and fail the call. */
 function failAuthRequired(): Promise<never> {
   clearToken()
   window.dispatchEvent(new Event("cogpit-auth-required"))
-  return Promise.reject(new Error("Authentication required"))
+  return Promise.reject(new AuthRequiredError())
 }
 
 /**
