@@ -7,9 +7,9 @@
 /** A release past this share of the width moves on, however slow. */
 export const COMMIT_DISTANCE = 0.3
 /** A flick faster than this (px/ms) moves on even when short... */
-export const FLICK_VELOCITY = 0.4
-/** ...as long as it travelled at least this far (px), so a twitch does not. */
-export const FLICK_MIN_DISTANCE = 24
+export const FLICK_VELOCITY = 0.6
+/** ...as long as it travelled at least this share of the width, so a light brush does not. */
+export const FLICK_MIN_SHARE = 0.08
 
 /**
  * How far content moves when pulled `distance` past the last machine: it
@@ -41,7 +41,7 @@ export function releaseDirection(
   if (direction === 1 ? !can.next : !can.previous) return 0
   const reach = Math.max(Math.abs(offset), Math.sign(projected) === Math.sign(offset) ? Math.abs(projected) : 0)
   const far = reach >= width * COMMIT_DISTANCE
-  const flicked = Math.abs(offset) >= FLICK_MIN_DISTANCE
+  const flicked = Math.abs(offset) >= width * FLICK_MIN_SHARE
     && Math.abs(velocity) >= FLICK_VELOCITY
     && Math.sign(velocity) === Math.sign(offset)
   // A throw back toward the start cancels even a long pull.
@@ -49,68 +49,49 @@ export function releaseDirection(
   return (far && !thrownBack) || flicked ? direction : 0
 }
 
-/** Angular frequency of the settling spring: a full-width move rests in about a third of a second, without overshoot. */
-const OMEGA = 26
-const REST_DISTANCE = 1
-const REST_VELOCITY = 0.02
-
-export interface SpringState {
-  /** Distance from the target, px. */
-  position: number
-  /** px/ms. */
-  velocity: number
-}
+/**
+ * Angular frequency of the settling spring (rad/s). Critically damped, it
+ * covers nine tenths of any distance in about a tenth of a second and never
+ * overshoots; the rest is a short glide into place.
+ */
+const OMEGA = 34
+/** Close enough to call it at rest (px), and slow enough (px/ms). */
+const REST_DISTANCE = 0.5
+const REST_VELOCITY = 0.05
+const MAX_DURATION_MS = 600
+/** One keyframe per this many ms: finer than any display refreshes. */
+const FRAME_MS = 8
 
 /**
- * Advance a critically damped spring pulling `state.position` to 0 by `dtMs`.
- * Critical damping arrives as fast as possible without bouncing past the edge,
- * the way a page settles into place.
+ * Where a critically damped spring released `distance` px from its target,
+ * moving at `velocity` px/ms, is after `ms`, and how fast it moves then.
  */
-export function stepSpring(state: SpringState, dtMs: number): SpringState & { done: boolean } {
-  const t = dtMs / 1000
-  const x0 = state.position
-  const v0 = state.velocity * 1000
+export function springAt(distance: number, velocity: number, ms: number): { distance: number; velocity: number } {
+  const t = Math.max(0, ms) / 1000
+  const v0 = velocity * 1000
   const decay = Math.exp(-OMEGA * t)
-  const position = (x0 + (v0 + OMEGA * x0) * t) * decay
-  const velocity = (v0 - OMEGA * (v0 + OMEGA * x0) * t) * decay
-  const done = Math.abs(position) < REST_DISTANCE && Math.abs(velocity / 1000) < REST_VELOCITY
-  return { position: done ? 0 : position, velocity: done ? 0 : velocity / 1000, done }
+  return {
+    distance: (distance + (v0 + OMEGA * distance) * t) * decay,
+    velocity: (v0 - OMEGA * (v0 + OMEGA * distance) * t) * decay / 1000,
+  }
 }
 
 /**
- * Run a spring from `from` to `to` on animation frames, reporting each
- * position. Resolves when it rests; `cancel` stops it where it is.
+ * The spring from `distance` px off its target to rest, sampled every
+ * FRAME_MS for keyframes the compositor can play without the main thread:
+ * `distances[0]` is the start, the last is 0, and `duration` spans them.
  */
-export function animateSpring(
-  from: number,
-  to: number,
-  initialVelocity: number,
-  onFrame: (value: number) => void,
-): { done: Promise<void>; cancel: () => void } {
-  let frame = 0
-  let cancelled = false
-  let resolve!: () => void
-  const done = new Promise<void>((settle) => { resolve = settle })
-  let state: SpringState = { position: from - to, velocity: initialVelocity }
-  let last: number | null = null
-  const tick = (now: number) => {
-    if (cancelled) return
-    // Frame times only; the first step is one frame long. A long gap (a hidden
-    // tab) would teleport, so it steps as one frame too.
-    const next = stepSpring(state, Math.min(Math.max(now - (last ?? now - 16), 0), 64))
-    last = now
-    state = next
-    onFrame(to + next.position)
-    if (next.done) resolve()
-    else frame = requestAnimationFrame(tick)
+export function springFrames(distance: number, velocity: number): { duration: number; distances: number[] } {
+  if (Math.abs(distance) < REST_DISTANCE && Math.abs(velocity) < REST_VELOCITY) return { duration: 0, distances: [0] }
+  const distances = [distance]
+  let ms = 0
+  for (;;) {
+    ms += FRAME_MS
+    const state = springAt(distance, velocity, ms)
+    const resting = Math.abs(state.distance) < REST_DISTANCE && Math.abs(state.velocity) < REST_VELOCITY
+    if (resting || ms >= MAX_DURATION_MS) break
+    distances.push(state.distance)
   }
-  frame = requestAnimationFrame(tick)
-  return {
-    done,
-    cancel: () => {
-      cancelled = true
-      cancelAnimationFrame(frame)
-      resolve()
-    },
-  }
+  distances.push(0)
+  return { duration: (distances.length - 1) * FRAME_MS, distances }
 }

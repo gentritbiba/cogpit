@@ -148,7 +148,7 @@ let switchTransition: ((id: string) => void) | null = null
 
 /**
  * Let DeviceRoot carry explicit switches with a transition. The handler calls
- * {@link commitDeviceSwitch} once the target is on screen.
+ * {@link commitDeviceSwitch} once the target's slide is under way.
  */
 export function setDeviceSwitchTransition(handler: ((id: string) => void) | null): void {
   switchTransition = handler

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { COMMIT_DISTANCE, FLICK_MIN_DISTANCE, FLICK_VELOCITY, releaseDirection, rubberBand, stepSpring } from "../motion"
+import { COMMIT_DISTANCE, FLICK_MIN_SHARE, FLICK_VELOCITY, releaseDirection, rubberBand, springAt, springFrames } from "../motion"
 
 const WIDTH = 1000
 const both = { previous: true, next: true }
@@ -14,9 +14,10 @@ describe("releaseDirection", () => {
     expect(releaseDirection(-WIDTH * COMMIT_DISTANCE + 1, 0, WIDTH, both)).toBe(0)
   })
 
-  it("moves on for a short flick, but not for a twitch", () => {
-    expect(releaseDirection(-FLICK_MIN_DISTANCE, -FLICK_VELOCITY, WIDTH, both)).toBe(1)
-    expect(releaseDirection(-FLICK_MIN_DISTANCE + 1, -FLICK_VELOCITY * 3, WIDTH, both)).toBe(0)
+  it("moves on for a short flick, but not for a light brush, however quick", () => {
+    expect(releaseDirection(-WIDTH * FLICK_MIN_SHARE, -FLICK_VELOCITY, WIDTH, both)).toBe(1)
+    expect(releaseDirection(-WIDTH * FLICK_MIN_SHARE + 1, -FLICK_VELOCITY * 3, WIDTH, both)).toBe(0)
+    expect(releaseDirection(-WIDTH * FLICK_MIN_SHARE * 2, -FLICK_VELOCITY + 0.05, WIDTH, both)).toBe(0)
   })
 
   it("lands where a swipe that slowed before the fingers lifted was headed", () => {
@@ -46,29 +47,34 @@ describe("rubberBand", () => {
   })
 })
 
-describe("stepSpring", () => {
-  it("brings a full-width move to rest in about a third of a second without overshooting", () => {
-    let state = { position: -WIDTH, velocity: 0 }
-    let elapsed = 0
-    let crossed = false
-    for (; elapsed < 1000; elapsed += 8) {
-      const next = stepSpring(state, 8)
-      if (next.position > 0) crossed = true
-      state = next
-      if (next.done) break
-    }
-    expect(crossed).toBe(false)
-    expect(state.position).toBe(0)
-    expect(elapsed).toBeLessThan(450)
+describe("the settling spring", () => {
+  /** How far off the target the spring is after `ms`, from its keyframes. */
+  const at = (frames: { duration: number; distances: number[] }, ms: number) =>
+    frames.distances[Math.min(frames.distances.length - 1, Math.round(ms / (frames.duration / (frames.distances.length - 1))))]
+
+  it("covers most of a full width in a tenth of a second and rests within a third, without overshooting", () => {
+    const frames = springFrames(-WIDTH, 0)
+    expect(frames.duration).toBeLessThan(340)
+    expect(Math.abs(at(frames, 112))).toBeLessThan(WIDTH * 0.12)
+    expect(frames.distances.every((distance) => distance <= 0)).toBe(true)
+    expect(frames.distances.at(-1)).toBe(0)
+  })
+
+  it("brings a slight pull back almost at once", () => {
+    const frames = springFrames(80, 0)
+    expect(Math.abs(at(frames, 104))).toBeLessThan(12)
+    expect(frames.duration).toBeLessThan(260)
   })
 
   it("carries a throw's velocity", () => {
-    const thrown = stepSpring({ position: -400, velocity: 2 }, 16)
-    const still = stepSpring({ position: -400, velocity: 0 }, 16)
-    expect(thrown.position).toBeGreaterThan(still.position)
+    expect(springAt(-400, 2, 16).distance).toBeGreaterThan(springAt(-400, 0, 16).distance)
+  })
+
+  it("has nothing to play when it is already at rest", () => {
+    expect(springFrames(0, 0)).toEqual({ duration: 0, distances: [0] })
   })
 
   it("never moves backwards in time", () => {
-    expect(stepSpring({ position: -100, velocity: 0 }, 0).position).toBe(-100)
+    expect(springAt(-100, 0, -5).distance).toBe(-100)
   })
 })
